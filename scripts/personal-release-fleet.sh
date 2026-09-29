@@ -36,6 +36,23 @@ if [[ -n "$(git rev-list fork/main..HEAD 2>/dev/null)" ]]; then
   exit 1
 fi
 
+# Ship the newest munim-computer-use. MT Code bundles the pinned release at
+# build time, so a computer-use release only reaches users through here: pin
+# its latest release if it is newer, verify every asset, and commit + push
+# before anything builds (Blade builds from fork/main). T3_FLEET_SKIP_CU_BUMP=1
+# ships the current pin as it is.
+if [[ "${T3_FLEET_SKIP_CU_BUMP:-}" != "1" ]]; then
+  node scripts/bump-munim-computer-use.ts
+  if [[ -n "$(git status --porcelain native/munim-computer-use.json)" ]]; then
+    CU_VERSION=$(node -p "require('./native/munim-computer-use.json').version")
+    vp test run scripts/lib/munim-computer-use.test.ts scripts/lib/munim-computer-use-bump.test.ts
+    git add native/munim-computer-use.json
+    git commit -q -m "Desktop control: munim-computer-use $CU_VERSION"
+    git push -q fork main
+    stamp "pinned munim-computer-use $CU_VERSION"
+  fi
+fi
+
 # The publish resolves the next free version itself; a version inherited from
 # the running app would republish an existing tag.
 unset T3CODE_DESKTOP_VERSION
