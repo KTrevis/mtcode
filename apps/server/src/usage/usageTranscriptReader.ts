@@ -6,9 +6,7 @@
  * The direct `node:fs` streaming is deliberate: a cold 30-day window is ~1.4 GB
  * across ~1,500 files, and buffer-level streaming is roughly an order of
  * magnitude cheaper than materialising each file. The equivalent Effect stream
- * pipeline is idiomatic but not fast enough to sit behind a page load. The
- * byte-oriented line reader also lets us discard pathological records before
- * constructing a string that could cross V8's maximum length.
+ * pipeline is idiomatic but not fast enough to sit behind a page load.
  *
  * Transcripts are append-only, so a parse also reports the byte position it
  * stopped at. A later scan of the same file resumes from that position and
@@ -19,13 +17,21 @@
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeStringDecoder from "node:string_decoder";
+
+import type { UsageProviderKind } from "@t3tools/contracts";
+
+import { createTranscriptJsonReader } from "../project/AgentSessionJson.ts";
 
 import {
   initialCodexScanState,
   mightCarryUsage,
   parseClaudeLine,
+  parseClaudeRecord,
   parseCodexLine,
+  parseCodexRecord,
   parseGrokLine,
+  parseGrokRecord,
   type CodexScanState,
   type TranscriptProviderKind,
   type UsageRecord,
@@ -36,20 +42,6 @@ export interface TranscriptFile {
   readonly size: number;
   readonly mtimeMs: number;
 }
-
-export interface TranscriptReadOptions {
-  /** Maximum UTF-8 bytes retained for one JSONL record before it is skipped. */
-  readonly maxLineBytes?: number;
-}
-
-/**
- * Well above observed valid provider records while remaining safely below
- * V8's maximum string length. Usage-bearing records are ordinarily tiny; the
- * largest transcript lines are tool outputs and embedded media. A line that
- * crosses this limit is drained through its newline and skipped, so one
- * pathological record cannot terminate the process mid-scan.
- */
-const DEFAULT_MAX_LINE_BYTES = 64 * 1024 * 1024;
 
 /**
  * Where a parse stopped, with enough state to continue from there.
@@ -89,8 +81,61 @@ export interface TranscriptParseResult {
 
 /** 64 bytes of JSONL tail is ample to distinguish a replaced file. */
 export const GUARD_LENGTH = 64;
+// Native parsing is faster for common 1–4 MiB context/tool records. Above
+// 8 MiB, project usage without allocating the whole record. This switches
+// readers; it never discards a record because of its size.
+const STREAMING_THRESHOLD_BYTES = 8 * 1024 * 1024;
 const NEWLINE = 0x0a;
 const CARRIAGE_RETURN = 0x0d;
+
+type SelectedFields = { readonly [key: string]: true | SelectedFields };
+
+// Keep the fields consumed by usageTranscripts, including reducer state and
+// dedupe/cost metadata. A selected subtree (usage) keeps future token fields.
+const USAGE_FIELDS: Record<"claude" | "codex" | "grok", SelectedFields> = {
+  claude: {
+    type: true,
+    timestamp: true,
+    requestId: true,
+    sessionId: true,
+    costUSD: true,
+    message: { id: true, model: true, usage: true },
+  },
+  codex: {
+    type: true,
+    timestamp: true,
+    payload: {
+      type: true,
+      id: true,
+      session_id: true,
+      model: true,
+      forked_from_id: true,
+      source: { subagent: { thread_spawn: { parent_thread_id: true } } },
+      info: { last_token_usage: true },
+    },
+  },
+  grok: {
+    timestamp: true,
+    params: {
+      sessionId: true,
+      _meta: { agentTimestampMs: true },
+      update: { sessionUpdate: true, prompt_id: true, usage: true },
+    },
+  },
+};
+
+function selectUsageFields(provider: UsageProviderKind) {
+  const fields = USAGE_FIELDS[provider === "codex" || provider === "grok" ? provider : "claude"];
+  return (path: ReadonlyArray<string | number | null>): boolean => {
+    let selected: true | SelectedFields = fields;
+    for (const key of path) {
+      if (selected === true) return true;
+      if (typeof key !== "string" || !Object.hasOwn(selected, key)) return false;
+      selected = selected[key]!;
+    }
+    return true;
+  };
+}
 
 function fnv1a(buffer: Buffer): number {
   let hash = 0x811c9dc5;
@@ -205,9 +250,9 @@ export async function readTranscriptRecords(
   filePath: string,
   provider: TranscriptProviderKind,
   resumeFrom?: TranscriptParsePosition,
-  options: TranscriptReadOptions = {},
+  options?: { readonly streamingThresholdBytes?: number },
 ): Promise<TranscriptParseResult | null> {
-  const maxLineBytes = options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
+  const streamingThresholdBytes = options?.streamingThresholdBytes ?? STREAMING_THRESHOLD_BYTES;
   let handle: NodeFSP.FileHandle;
   try {
     handle = await NodeFSP.open(filePath, "r");
@@ -261,62 +306,87 @@ export async function readTranscriptRecords(
     };
 
     const records: UsageRecord[] = [];
-    // Buffer-level line splitting rather than `readline`, because resuming
-    // needs byte-exact offsets and decoded strings cannot provide them.
-    // Segments of a line are collected rather than concatenated as they
-    // arrive, so a single huge line costs one copy instead of one per chunk.
-    // A line that grows past `maxLineBytes` is discarded segment by segment
-    // (its bytes still advance the resume offset) so the string for it is
-    // never built: `readline` would concatenate it whole and cross V8's limit
-    // before any `try/catch` could run.
+    // Byte offsets remain independent of UTF-8 decoding. Only complete lines
+    // commit the resume point; an unfinished tail is replayed on the next scan.
     let resumeOffset = start;
-    let chunkStartOffset = start;
+    let scanOffset = start;
     let pendingChunks: Buffer[] = [];
     let pendingBytes = 0;
-    let discarding = false;
+    let streaming: ReturnType<typeof createTranscriptJsonReader> | undefined;
+    let decoder: NodeStringDecoder.StringDecoder | undefined;
+    const selectPath = selectUsageFields(provider);
+
+    const append = (segment: Buffer) => {
+      if (!streaming && pendingBytes + segment.length <= streamingThresholdBytes) {
+        if (segment.length > 0) pendingChunks.push(segment);
+        pendingBytes += segment.length;
+        return;
+      }
+      if (!streaming) {
+        // Usage has no import-history budget: retain all selected usage fields,
+        // regardless of the size of the surrounding unselected tool content.
+        streaming = createTranscriptJsonReader(() => {}, selectPath, { maxDepth: Infinity });
+        decoder = new NodeStringDecoder.StringDecoder("utf8");
+        for (const pending of pendingChunks) streaming.write(decoder.write(pending));
+        pendingChunks = [];
+        pendingBytes = 0;
+      }
+      streaming.write(decoder!.write(segment));
+    };
+    const finish = (state: CodexScanState, out: UsageRecord[]) => {
+      if (streaming) {
+        streaming.write(decoder!.end());
+        const projected = streaming.finish();
+        if (provider === "grok") {
+          out.push(...parseGrokRecord(projected));
+        } else {
+          const record =
+            provider === "codex"
+              ? parseCodexRecord(projected, state)
+              : parseClaudeRecord(projected);
+          if (record !== null) out.push(record);
+        }
+      } else if (pendingBytes > 0) {
+        const line =
+          pendingChunks.length === 1
+            ? pendingChunks[0]!
+            : Buffer.concat(pendingChunks, pendingBytes);
+        parseLine(toLineString(line), state, out);
+      }
+      pendingChunks = [];
+      pendingBytes = 0;
+      streaming = undefined;
+      decoder = undefined;
+    };
     const stream = handle.createReadStream({
       start,
       autoClose: false,
+      highWaterMark: 256 * 1024,
     }) as AsyncIterable<Buffer>;
     for await (const chunk of stream) {
-      let cursor = 0;
-      for (;;) {
-        const newlineIndex = chunk.indexOf(NEWLINE, cursor);
-        const segmentEnd = newlineIndex === -1 ? chunk.length : newlineIndex;
-        const segmentLength = segmentEnd - cursor;
-        if (!discarding && segmentLength > 0) {
-          if (pendingBytes + segmentLength <= maxLineBytes) {
-            pendingChunks.push(chunk.subarray(cursor, segmentEnd));
-            pendingBytes += segmentLength;
-          } else {
-            pendingChunks = [];
-            pendingBytes = 0;
-            discarding = true;
-          }
+      let lineStart = 0;
+      while (lineStart < chunk.length) {
+        const newlineIndex = chunk.indexOf(NEWLINE, lineStart);
+        if (newlineIndex === -1) {
+          append(chunk.subarray(lineStart));
+          break;
         }
-        if (newlineIndex === -1) break;
-        if (!discarding && pendingBytes > 0) {
-          const lineBuffer =
-            pendingChunks.length === 1 ? pendingChunks[0]! : Buffer.concat(pendingChunks);
-          parseLine(toLineString(lineBuffer), codexState, records);
+        // Most lines fit in the current chunk. Avoid buffering/streaming
+        // machinery on this hot path.
+        if (!streaming && pendingBytes === 0) {
+          parseLine(toLineString(chunk.subarray(lineStart, newlineIndex)), codexState, records);
+        } else {
+          append(chunk.subarray(lineStart, newlineIndex));
+          finish(codexState, records);
         }
-        pendingChunks = [];
-        pendingBytes = 0;
-        discarding = false;
-        cursor = newlineIndex + 1;
-        resumeOffset = chunkStartOffset + cursor;
+        lineStart = newlineIndex + 1;
+        resumeOffset = scanOffset + lineStart;
       }
-      chunkStartOffset += chunk.length;
+      scanOffset += chunk.length;
     }
 
-    // A trailing segment without its newline is parsed for this result but not
-    // consumed: a writer may still be appending to it, and counting a half
-    // record now and its full form later would double count.
     const tailRecords: UsageRecord[] = [];
-    if (!discarding && pendingBytes > 0) {
-      const pending = pendingChunks.length === 1 ? pendingChunks[0]! : Buffer.concat(pendingChunks);
-      parseLine(toLineString(pending), { ...codexState }, tailRecords);
-    }
+    finish({ ...codexState }, tailRecords);
 
     const guardLength = Math.min(GUARD_LENGTH, resumeOffset);
     let guardHash = 0;

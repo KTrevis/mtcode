@@ -820,6 +820,8 @@ export const make = Effect.gen(function* () {
             cursorUntilMs,
           ),
         );
+    // No saved login means there is no account source to report, not a setup error.
+    if (account.missing && account.error === null) return scanned;
     if (account.accountKey !== null && account.error === null && !account.missing) {
       // The same account includes CLI and desktop history from every machine.
       // A stable remote fingerprint prevents connected environments counting it twice.
@@ -1099,7 +1101,9 @@ export const make = Effect.gen(function* () {
         }
       }
     }
-    if (!hasCursorAccountUsage)
+    // A switched-off Cursor driver has nothing to report, which is not a
+    // coverage gap worth a warning.
+    if (cursorEnabled && !hasCursorAccountUsage)
       sources.push(toCursorUsageSource(cursorExport, cursorSessionIds.size));
 
     const pruned = pruneScanCache(fileCache, retentionCutoffMs);

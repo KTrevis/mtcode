@@ -1,6 +1,7 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
+import { cursorKeychainAccessEnvironments } from "@t3tools/client-runtime/state/usage";
 import {
   enumerateDays,
   enumerateHourStarts,
@@ -9,6 +10,7 @@ import {
   formatHourShort,
   formatPercent,
   formatTokens,
+  formatUsageContractMismatch,
   formatUsageCost,
   formatUsd,
   ALL_USAGE_WINDOW_DAYS,
@@ -106,15 +108,16 @@ export function UsageRouteScreen() {
   const isFocused = useIsFocused();
   const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && tab === "limits");
   // An environment only contributes to the totals once it has answered and is
-  // not excluded as stale, so "nothing to show" is distinguishable from
-  // "still scanning".
+  // not excluded by a usage contract mismatch, so "nothing to show" is
+  // distinguishable from "still scanning".
   const usableEnvironmentCount = selectedEnvironments.filter(
     (environment) =>
-      environment.summary !== null && !merged.staleEnvironments.includes(environment.environmentId),
+      environment.summary !== null &&
+      !merged.contractMismatches.some(
+        (mismatch) => mismatch.environmentId === environment.environmentId,
+      ),
   ).length;
-  const cursorAccessEnvironments = selectedEnvironments.filter(
-    (environment) => environment.needsCursorKeychainAccess,
-  );
+  const cursorAccessEnvironments = cursorKeychainAccessEnvironments(selectedEnvironments);
   const refreshAfterCursorEnable = () => {
     void refresh();
     void limits.refreshAfterEnable();
@@ -792,7 +795,12 @@ function usageEnvironmentStatus(environment: EnvironmentUsageStatus): string {
     environment.summary &&
     !isCompatibleUsageContractVersion(environment.summary.contractVersion, USAGE_CONTRACT_VERSION)
   ) {
-    return "Older server · excluded from usage totals";
+    return formatUsageContractMismatch(environment.label, {
+      direction:
+        environment.summary.contractVersion < USAGE_CONTRACT_VERSION
+          ? "serverBehind"
+          : "clientBehind",
+    });
   }
   if (!environment.isConnected)
     return environment.summary ? "Disconnected · showing saved usage" : "Waiting for connection…";
@@ -824,9 +832,13 @@ function UsageCoverageNotice(props: {
         environment.phase === "error"),
   );
   const failed = props.environments.filter((environment) => environment.error !== null);
-  const stale = props.environments.filter((environment) =>
-    props.merged.staleEnvironments.includes(environment.environmentId),
+  const mismatchByEnvironment = new Map(
+    props.merged.contractMismatches.map((mismatch) => [mismatch.environmentId, mismatch]),
   );
+  const incompatible = props.environments.flatMap((environment) => {
+    const mismatch = mismatchByEnvironment.get(environment.environmentId);
+    return mismatch === undefined ? [] : [{ environment, mismatch }];
+  });
   const duplicateSources = props.merged.duplicateSources;
   const uncovered = props.environments.flatMap((environment) => {
     if (environment.summary === null) return [];
@@ -842,7 +854,7 @@ function UsageCoverageNotice(props: {
     settling.length === 0 &&
     unavailable.length === 0 &&
     failed.length === 0 &&
-    stale.length === 0 &&
+    incompatible.length === 0 &&
     duplicateSources.length === 0 &&
     uncovered.length === 0 &&
     !props.isPartial &&
@@ -885,9 +897,9 @@ function UsageCoverageNotice(props: {
           {environment.label} could not report usage.
         </Text>
       ))}
-      {stale.map((environment) => (
+      {incompatible.map(({ environment, mismatch }) => (
         <Text key={environment.environmentId} className="text-sm text-foreground-muted">
-          {environment.label} runs an older server version and is excluded from totals.
+          {formatUsageContractMismatch(environment.label, mismatch)}
         </Text>
       ))}
       {uncovered.map((entry) => (

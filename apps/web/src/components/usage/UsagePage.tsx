@@ -11,10 +11,14 @@ import {
   CircleAlertIcon,
   ChevronDownIcon,
   CircleDashedIcon,
+  InfoIcon,
   SlidersHorizontalIcon,
 } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
+import {
+  cursorKeychainAccessEnvironments,
+  refreshUsageLimits,
+} from "@t3tools/client-runtime/state/usage";
 
 import {
   isCursorCoverageGap,
@@ -22,6 +26,7 @@ import {
   isModelCostUnknown,
   type DailyTotals,
   type HourlyTotals,
+  type MergedUsage,
 } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
@@ -43,6 +48,7 @@ import {
   formatHourShort,
   formatPercent,
   formatTokens,
+  formatUsageContractMismatch,
   formatUsageCost,
   formatUsd,
   ALL_USAGE_WINDOW_DAYS,
@@ -64,6 +70,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -168,9 +175,7 @@ export function UsagePage() {
       };
     }, [fixture, selectedEnvironmentIds, showingLimits, usage]);
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  const cursorAccessEnvironments = selectedEnvironments.filter(
-    (environment) => environment.needsCursorKeychainAccess,
-  );
+  const cursorAccessEnvironments = cursorKeychainAccessEnvironments(selectedEnvironments);
   const sourceMessages = [
     ...new Set(
       selectedEnvironments.flatMap(
@@ -359,7 +364,7 @@ export function UsagePage() {
             showUsageStatus={!showingLimits}
             isPartial={isPartial}
             duplicateSources={merged.duplicateSources}
-            staleEnvironments={merged.staleEnvironments}
+            contractMismatches={merged.contractMismatches}
             pricingStatus={merged.pricingStatus}
           />
         </WorkspaceBreadcrumbItem>
@@ -529,15 +534,32 @@ export function UsagePage() {
                           : formatTokens(merged.totalTokens)}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {metric !== "cost"
-                          ? `${formatCount(merged.sessions)} sessions`
-                          : costUnavailable
-                            ? `${formatCount(merged.sessions)} sessions · costs omitted`
-                            : merged.costQuality.unpricedShare > 0
-                              ? `${formatCount(merged.sessions)} sessions · API estimate excludes ${formatPercent(
-                                  merged.costQuality.unpricedShare,
-                                )} unpriced records`
-                              : `${formatCount(merged.sessions)} sessions · API estimate`}
+                        {formatCount(merged.sessions)} sessions
+                        {metric === "cost" && costUnavailable && " · costs omitted"}
+                        {metric === "cost" && !costUnavailable && (
+                          <>
+                            {" · API estimate"}
+                            {merged.costQuality.unpricedShare > 0 && (
+                              <>
+                                {" "}
+                                <Popover>
+                                  <PopoverTrigger
+                                    openOnHover
+                                    render={<InlineButton tone="muted" />}
+                                    aria-label="Unpriced usage details"
+                                  >
+                                    <InfoIcon className="size-3" aria-hidden />
+                                  </PopoverTrigger>
+                                  <PopoverPopup side="top" tooltipStyle>
+                                    API estimate excludes{" "}
+                                    {formatPercent(merged.costQuality.unpricedShare)} unpriced
+                                    records.
+                                  </PopoverPopup>
+                                </Popover>
+                              </>
+                            )}
+                          </>
+                        )}
                       </span>
                     </div>
 
@@ -957,13 +979,13 @@ function Metric({ label, value }: { readonly label: string; readonly value: stri
 function UsageCoverageNotice({
   environments,
   duplicateSources,
-  staleEnvironments,
+  contractMismatches,
   pricingStatus,
   isPartial,
 }: {
   readonly environments: readonly EnvironmentUsageStatus[];
   readonly duplicateSources: readonly string[];
-  readonly staleEnvironments: readonly string[];
+  readonly contractMismatches: MergedUsage["contractMismatches"];
   readonly pricingStatus: UsagePricingStatus;
   readonly isPartial: boolean;
 }) {
@@ -978,9 +1000,13 @@ function UsageCoverageNotice({
         environment.phase === "error"),
   );
   const failed = environments.filter((environment) => environment.error !== null);
-  const stale = environments.filter((environment) =>
-    staleEnvironments.includes(environment.environmentId),
+  const mismatchByEnvironment = new Map(
+    contractMismatches.map((mismatch) => [mismatch.environmentId, mismatch]),
   );
+  const incompatible = environments.flatMap((environment) => {
+    const mismatch = mismatchByEnvironment.get(environment.environmentId);
+    return mismatch === undefined ? [] : [{ environment, mismatch }];
+  });
   const uncovered = environments.flatMap((environment) => {
     if (environment.summary === null) return [];
     return environment.summary.sources.filter(isCursorCoverageGap).map((source) => ({
@@ -995,7 +1021,7 @@ function UsageCoverageNotice({
     settling.length === 0 &&
     unavailable.length === 0 &&
     failed.length === 0 &&
-    stale.length === 0 &&
+    incompatible.length === 0 &&
     duplicateSources.length === 0 &&
     uncovered.length === 0 &&
     !isPartial &&
@@ -1032,9 +1058,9 @@ function UsageCoverageNotice({
       {failed.map((environment) => (
         <span key={environment.environmentId}>{environment.label} could not report usage.</span>
       ))}
-      {stale.map((environment) => (
+      {incompatible.map(({ environment, mismatch }) => (
         <span key={environment.environmentId}>
-          {environment.label} runs an older server version and is excluded from totals.
+          {formatUsageContractMismatch(environment.label, mismatch)}
         </span>
       ))}
       {uncovered.map((entry) => (
@@ -1058,7 +1084,7 @@ function UsageEnvironmentFilter({
   showUsageStatus,
   isPartial,
   duplicateSources,
-  staleEnvironments,
+  contractMismatches,
   pricingStatus,
 }: {
   readonly environments: readonly EnvironmentUsageStatus[];
@@ -1068,7 +1094,7 @@ function UsageEnvironmentFilter({
   readonly showUsageStatus: boolean;
   readonly isPartial: boolean;
   readonly duplicateSources: readonly string[];
-  readonly staleEnvironments: readonly string[];
+  readonly contractMismatches: MergedUsage["contractMismatches"];
   readonly pricingStatus: UsagePricingStatus;
 }) {
   const [modelPricesOpen, setModelPricesOpen] = useState(false);
@@ -1084,7 +1110,7 @@ function UsageEnvironmentFilter({
   ).length;
   const hasIssue =
     selectedEnvironments.some((environment) => environment.error !== null) ||
-    staleEnvironments.length > 0;
+    contractMismatches.length > 0;
 
   return (
     <>
@@ -1184,7 +1210,7 @@ function UsageEnvironmentFilter({
             <UsageCoverageNotice
               environments={selectedEnvironments}
               duplicateSources={duplicateSources}
-              staleEnvironments={staleEnvironments}
+              contractMismatches={contractMismatches}
               pricingStatus={pricingStatus}
               isPartial={isPartial}
             />

@@ -277,7 +277,9 @@ describe("readTranscriptRecords bounded lines", () => {
       [sessionMeta, turnContext, oversizedToolResult, tokenCount].join("\n") + "\n",
     );
 
-    const parsed = await readTranscriptRecords(path, "codex", undefined, { maxLineBytes: 512 });
+    const parsed = await readTranscriptRecords(path, "codex", undefined, {
+      streamingThresholdBytes: 512,
+    });
 
     assert.isNotNull(parsed);
     assert.strictEqual(parsed.records.length, 1);

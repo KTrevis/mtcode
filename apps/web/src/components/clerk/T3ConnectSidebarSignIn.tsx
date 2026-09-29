@@ -1,5 +1,5 @@
 import { UserButton, useAuth } from "@clerk/react";
-import { ExternalLinkIcon, LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
+import { ExternalLinkIcon, LogInIcon } from "lucide-react";
 
 import {
   canEmbedClerkProviderInThisClient,
@@ -8,8 +8,7 @@ import {
 import { providerHasRelay, type ConnectProviderPublicConfig } from "../../cloud/connectProviders";
 import { hasClerkPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
-import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
-import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
+import { T3_CONNECT_ACCOUNT_PAGES } from "./T3ConnectAccountPages";
 import { useT3ConnectAuthPrompt } from "./useT3ConnectAuthPrompt";
 
 export function T3ConnectSidebarSignIn() {
@@ -43,24 +42,18 @@ function ConfiguredConnectSidebarAvatar() {
           },
         }}
       >
-        {showRelayProfile ? (
-          <UserButton.UserProfilePage
-            label="Mobile clients"
-            labelIcon={<SmartphoneIcon className="size-4" />}
-            url="mobile-clients"
-          >
-            <MobileClientsUserProfilePage />
-          </UserButton.UserProfilePage>
-        ) : null}
-        {showRelayProfile ? (
-          <UserButton.UserProfilePage
-            label={embedded?.label ?? "Connect"}
-            labelIcon={<ServerIcon className="size-4" />}
-            url="t3-connect"
-          >
-            <T3ConnectUserProfilePage />
-          </UserButton.UserProfilePage>
-        ) : null}
+        {showRelayProfile
+          ? T3_CONNECT_ACCOUNT_PAGES.map((page) => (
+              <UserButton.UserProfilePage
+                key={page.url}
+                label={page.url === "t3-connect" ? (embedded?.label ?? "Connect") : page.label}
+                labelIcon={page.icon}
+                url={page.url}
+              >
+                {page.content}
+              </UserButton.UserProfilePage>
+            ))
+          : null}
       </UserButton>
     </div>
   );

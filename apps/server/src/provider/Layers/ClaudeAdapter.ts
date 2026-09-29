@@ -500,6 +500,8 @@ interface ClaudeTaskAgentState {
  * lifetime; oldest entries evict first.
  */
 const PENDING_TASK_MODEL_CAP = 64;
+/** How long Stop waits for Claude to abort a turn before killing the process. */
+const CLAUDE_INTERRUPT_GRACE = "3 seconds";
 
 /**
  * Buffers a subagent snapshot's authoritative model under its
@@ -577,6 +579,8 @@ interface ClaudeSessionContext {
   lastThreadStartedId: string | undefined;
   /** Limits already announced for the running turn, keyed `window:resetsAt`. */
   announcedUsageLimits: { turnId: string; keys: Set<string> } | undefined;
+  /** Resolved by completeTurn while Stop waits for Claude to abort the turn. */
+  interruptedTurnSettled: Deferred.Deferred<void> | undefined;
   stopped: boolean;
   /**
    * Set only from sendTurn's interactionMode plan/default branches.
@@ -586,7 +590,8 @@ interface ClaudeSessionContext {
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
-  readonly interrupt: () => Promise<void>;
+  /** SDK Query.interrupt — present on real queries; optional for test doubles. */
+  readonly interrupt?: () => Promise<unknown>;
   /** SDK Query.stopTask — present on real queries; optional for test doubles. */
   readonly stopTask?: (taskId: string) => Promise<void>;
   readonly setModel: (model?: string) => Promise<void>;
@@ -3309,6 +3314,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     const updatedAt = yield* nowIso;
     context.turnState = undefined;
+    if (context.interruptedTurnSettled) {
+      yield* Deferred.succeed(context.interruptedTurnSettled, undefined);
+    }
     context.session = {
       ...context.session,
       status: "ready",
@@ -5958,6 +5966,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         replacingQuery: false,
         lastThreadStartedId: undefined,
         announcedUsageLimits: undefined,
+        interruptedTurnSettled: undefined,
         stopped: false,
         inPlanMode: false,
       };
@@ -6295,24 +6304,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           { concurrency: 8, discard: true },
         ).pipe(Effect.timeoutOption("10 seconds"), Effect.ignore);
       }
-      // Bounded for the same reason as the tasks above, and this is the one
-      // that actually strands a thread: a wedged CLI never answers the
-      // interrupt control request, so an unbounded await left the session
-      // pinned at "running" forever. Every later Stop press then queued
-      // behind a promise that would never settle, the client's outbox stayed
-      // blocked on the busy session, and the thread could not even be
-      // archived. Stop has to mean something, so a runtime that will not
-      // acknowledge gets torn down instead — the same path its own process
-      // exit would have taken, which completes the turn and frees the thread.
-      const acknowledged = yield* Effect.tryPromise({
-        try: () => context.query.interrupt(),
-        catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
-      }).pipe(Effect.timeoutOption("10 seconds"));
-      if (Option.isNone(acknowledged)) {
-        yield* Effect.logWarning("claude.turn.interrupt.timeout", {
-          threadId,
-        });
-      }
+      // Bounded like the tasks above: a wedged CLI never answers the
+      // interrupt control request, and an unbounded await left the session
+      // pinned at "running" forever. settleInterruptedTurn gives Claude a
+      // short grace to abort the turn itself, then the close below tears the
+      // runtime down regardless.
+      yield* settleInterruptedTurn(context);
       // interrupt() can acknowledge while resumed background tasks keep the
       // CLI alive. Stop is a hard session boundary for Claude, so close the
       // query and let the SDK escalate to SIGKILL when graceful exit fails.
@@ -6352,6 +6349,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     },
   );
+
+  // Lets Claude abort the running turn through its own path before Stop kills
+  // the process, so the prompt reaches the transcript. Killing a first turn
+  // before Claude writes it leaves a resume cursor for a session Claude never
+  // saved, and every later message fails with "No conversation found".
+  const settleInterruptedTurn = Effect.fn("settleInterruptedTurn")(function* (
+    context: ClaudeSessionContext,
+  ) {
+    const interrupt = context.query.interrupt?.bind(context.query);
+    if (context.stopped || !context.turnState || !interrupt) return;
+    const settled = yield* Deferred.make<void>();
+    context.interruptedTurnSettled = settled;
+    yield* Effect.tryPromise(interrupt).pipe(
+      Effect.ignore,
+      Effect.andThen(Deferred.await(settled)),
+      Effect.timeoutOption(CLAUDE_INTERRUPT_GRACE),
+    );
+    context.interruptedTurnSettled = undefined;
+  });
 
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
     function* (threadId) {
