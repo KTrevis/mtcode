@@ -166,10 +166,18 @@ swap_install() {
   local source_app="$1"
 
   rm -rf "$APP_STAGING" "$APP_BACKUP"
-  cp -R "$source_app" "$APP_STAGING"
+  ditto "$source_app" "$APP_STAGING"
 
   SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
-  if [[ -n "$SIGN_IDENTITY" ]]; then
+  # Release DMGs arrive Developer ID signed, hardened and notarized. Re-signing
+  # them here would drop the notarization ticket, the hardened runtime and the
+  # timestamp, so only unsigned/ad-hoc local builds get signed.
+  local signature_details
+  signature_details="$(codesign -dvv "$APP_STAGING" 2>&1 || true)"
+  if codesign --verify --deep --strict "$APP_STAGING" >/dev/null 2>&1 &&
+    [[ "$signature_details" == *$'\nAuthority=Developer ID Application'* ]]; then
+    echo "Mac keeps its release signature ($(spctl -a -vv "$APP_STAGING" 2>&1 | awk -F= '/^source=/{print $2}'))"
+  elif [[ -n "$SIGN_IDENTITY" ]]; then
     if codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_STAGING" >/dev/null 2>&1; then
       echo "Mac signed: $SIGN_IDENTITY"
     else
