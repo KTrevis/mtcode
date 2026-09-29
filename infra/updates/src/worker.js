@@ -115,29 +115,46 @@ async function serveFeed(request, env, ctx, url) {
 
 function serveAsset(request, env, ctx, url, version) {
   const name = url.pathname.slice(1);
-  ctx.waitUntil(
-    clientId(request, env)
-      .then((client) =>
-        record(env, { kind: "deliver", client, version, platform: platformOf(url.pathname) }),
-      )
-      .catch(() => {}),
-  );
+  // A delivery is the updater's ranged fetch of an archive: the differential
+  // update GitHub's counter cannot see. A full-file request is left to GitHub,
+  // which does count it once the redirect lands, so counting it here too would
+  // report one download twice. Blockmaps are not deliveries at all: the updater
+  // reads the installed version's as well as the new one's, so counting them
+  // logged every update as two, one of them for the version it replaced.
+  if (!name.endsWith(".blockmap") && request.headers.has("range")) {
+    ctx.waitUntil(
+      clientId(request, env)
+        .then((client) =>
+          record(env, { kind: "deliver", client, version, platform: platformOf(url.pathname) }),
+        )
+        .catch(() => {}),
+    );
+  }
   // Redirect rather than stream: the updater already follows GitHub's own
   // redirect to object storage, and a 302 keeps 150 MB of release payload off
   // the Worker while still putting every request through this counter.
   return Response.redirect(githubTagged(version, name), 302);
 }
 
+/**
+ * Deliveries count one per client per day, which also folds in the rows logged
+ * before blockmaps stopped counting (an update then logged its old and new
+ * version). Active installs are the clients that polled on the last complete
+ * UTC day: a polling client checks in every four minutes, so a full day sees
+ * every install that ran, and a window that also took in today counted two.
+ */
 async function stats(env) {
   const [total, monthly, active] = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM events WHERE kind = 'deliver'`),
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM events
-       WHERE kind = 'deliver' AND day >= date('now', '-30 day')`,
+      `SELECT COUNT(*) AS n FROM (SELECT DISTINCT day, client FROM events WHERE kind = 'deliver')`,
+    ),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM (SELECT DISTINCT day, client FROM events
+       WHERE kind = 'deliver' AND day >= date('now', '-30 day'))`,
     ),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT client) AS n FROM events
-       WHERE kind = 'poll' AND day >= date('now', '-1 day')`,
+       WHERE kind = 'poll' AND day = date('now', '-1 day')`,
     ),
   ]);
   return {

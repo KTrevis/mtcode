@@ -23,11 +23,11 @@ blockmap reads.
 The Worker owns no artifacts. GitHub Releases stays the only place a release
 lives.
 
-| Route                                                                  | Behaviour                                                           |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `/latest-mac.yml`, `/latest.yml`, `/latest-linux.yml`, `/nightly*.yml` | Proxied from the newest GitHub release, cached 60s. Records a poll. |
-| `/MT-Code-<version>-<arch>.<ext>` (also `.blockmap`)                   | Records a delivery, then `302`s to that version's GitHub asset.     |
-| `/stats`                                                               | `{ deliveries, deliveriesLast30Days, activeInstalls }`              |
+| Route                                                                  | Behaviour                                                                         |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `/latest-mac.yml`, `/latest.yml`, `/latest-linux.yml`, `/nightly*.yml` | Proxied from the newest GitHub release, cached 60s. Records a poll.               |
+| `/MT-Code-<version>-<arch>.<ext>` (also `.blockmap`)                   | `302`s to that version's GitHub asset; a ranged archive fetch records a delivery. |
+| `/stats`                                                               | `{ deliveries, deliveriesLast30Days, activeInstalls }`                            |
 
 `<arch>.<ext>` covers the macOS `.dmg`/`.zip`, the Windows `.exe`, and Linux,
 where electron-builder spells x64 its own way: `x86_64.AppImage` and `amd64.deb`.
@@ -45,6 +45,16 @@ cannot update.
 D1, one row per `(day, kind, client, version)`. The primary key does the
 de-duplication: a differential update that issues forty range requests is one
 delivery, and a client polling every four minutes is one poll per day.
+
+Only a **ranged** archive request is a delivery: that is the differential update
+GitHub cannot see. A full-file request is left to GitHub's counter, which sees it
+after the redirect, so the two never count the same download. Blockmaps are never
+deliveries — the updater reads the installed version's blockmap as well as the new
+one's, which used to log every update twice (once for the version it replaced).
+
+`/stats` counts deliveries once per client per day, which also folds those older
+double rows together, and reports **active installs as the clients that polled on
+the last complete UTC day**.
 
 `client` is a truncated SHA-256 of a secret salt, the IP and the user agent. No
 address is stored, and the value is meaningless without `CLIENT_SALT`.
@@ -64,11 +74,12 @@ Builds without that variable still publish straight at GitHub, so a plain
 
 ## Migration
 
-A client reads exactly one feed, so the two populations never overlap: installs
-built before the switch keep polling GitHub and are counted there, everything
-built after is counted here. `.github/workflows/download-counts.yml` sums both,
-and drops the `~` from the Active Installs badge once the GitHub-side estimate
-reaches zero.
+Every install built since the switch reads this feed, and older ones moved onto
+it with their next update. Active installs therefore come from here alone: the
+`latest-mac.yml` fetches GitHub still counts are mostly this Worker refilling its
+60 s feed cache, so the GitHub-side estimate `.github/workflows/download-counts.yml`
+used to add counted the same Macs twice and was dropped. Downloads still sum
+both sides: GitHub's full-file counts and this Worker's ranged deliveries.
 
 ## Operating
 

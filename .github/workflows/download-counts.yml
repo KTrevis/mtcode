@@ -1,7 +1,7 @@
 name: Download counts
 
 # Renders the three README badges: total downloads, downloads this month, and
-# roughly how many installs are running.
+# daily active users.
 #
 # GitHub reports one cumulative download counter per release asset and no
 # history, so "downloads this month" cannot be read from the API. This job
@@ -15,15 +15,13 @@ name: Download counts
 # fetches rather than anyone getting the app. That is why shields.io's own
 # github/downloads/:repo/total badge cannot be used here.
 #
-# Read the total as a floor. GitHub counts a download only for a full-file
-# request: a Range request returns 206 and leaves the counter alone (verified
-# against a release asset), and electron-updater fetches the .blockmap and then
-# range-requests the archive whenever a blockmap is published -- which is every
-# release here. So auto-updates to existing installs are invisible to this
-# number, and `gh release upload --clobber` resets an asset's counter when a
-# release is republished (16 installer assets so far). What the badge does
-# report honestly is full downloads: new installs and anything that could not
-# take the differential path.
+# GitHub counts a download only for a full-file request; a Range request
+# returns 206 and leaves the counter alone, and electron-updater range-requests
+# the archive for every differential update. infra/updates (the update feed)
+# counts exactly those ranged deliveries and nothing else, so total = GitHub's
+# full downloads + the Worker's differential updates, with no overlap.
+# `gh release upload --clobber` resets an asset's GitHub counter when a release
+# is republished (16 installer assets so far), so read the total as a floor.
 on:
   schedule:
     # 07:11 UTC, off the hour so it does not queue behind the rush.
@@ -67,11 +65,10 @@ jobs:
                               | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
                               | .download_count] | add // 0' releases.json)
 
-          # infra/updates counts what GitHub cannot see. The two populations do
-          # not overlap: a client reads exactly one feed, so installs that still
-          # point at GitHub are counted there and everything on the Worker feed
-          # is counted here. Summing is correct, including mid-migration. A
-          # Worker that cannot be reached contributes zero rather than failing
+          # infra/updates counts what GitHub cannot see: the Worker records only
+          # ranged (differential) deliveries, and GitHub only full-file ones, so
+          # the two never count the same download and summing them is correct.
+          # A Worker that cannot be reached contributes zero rather than failing
           # the badge.
           curl -fsS --max-time 20 "$UPDATES_ORIGIN/stats" > worker-stats.json \
             || echo '{"deliveries":0,"deliveriesLast30Days":0,"activeInstalls":0}' > worker-stats.json
@@ -131,43 +128,13 @@ jobs:
               message: ($total | tostring), color: "0066CC", labelColor: "gray" }
           ' > downloads-total.json
 
-          # How many copies are actually running. Nothing reports that, but the
-          # updater polls the feed on the newest release every four minutes, so
-          # a release's latest-mac.yml fetches divided by (hours it stayed
-          # newest x 15) is how many installs were running in that window.
-          # Take the median of the last ten releases that stayed newest long
-          # enough to measure -- under about two hours a single stray fetch
-          # invents a whole install. Ordering is by published_at: created_at is
-          # the tagged commit's date, so two releases cut from one commit tie.
-          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          installs=$(jq --arg now "$now" '
-            def at: (.published_at // .created_at) | fromdateiso8601;
-            ([ .[] | select(.tag_name | startswith("munim-v")) ] | sort_by(at)) as $r
-            | ($now | fromdateiso8601) as $nowSec
-            | [ range(0; ($r | length)) as $i
-                | $r[$i] as $rel
-                | (if $i + 1 < ($r | length) then ($r[$i + 1] | at) else $nowSec end) as $end
-                | (($end - ($rel | at)) / 3600) as $hours
-                | select($hours >= 2)
-                | ([ $rel.assets[] | select(.name == "latest-mac.yml") | .download_count ] | first) as $polls
-                | select($polls != null)
-                | $polls / ($hours * 15)
-              ]
-            | .[-10:] | sort
-            | if length == 0 then 0
-              elif (length % 2) == 1 then .[(length / 2) | floor]
-              else ((.[(length / 2) - 1] + .[length / 2]) / 2)
-              end
-            | . * 10 | round / 10
-          ' releases.json)
-          echo "active installs=$installs"
-
-          # Installs on the Worker feed are counted exactly; only the ones
-          # still reading GitHub have to be estimated. Once every client has
-          # updated past the feed switch, the estimate term goes to zero and
-          # this badge is a measurement rather than a mix of the two.
-          combined=$(jq -n --argjson w "$worker_active" --argjson e "$installs" '$w + $e')
-          echo "active installs: worker=$worker_active github-estimate=$installs"
+          # Active users come from the Worker alone: every install reads its
+          # feed, and it counts the clients that polled on the last complete
+          # UTC day. GitHub's latest-mac.yml counter can no longer stand in for
+          # installs -- those fetches are mostly the Worker refilling its feed
+          # cache, so an estimate built on them counted the same Macs twice.
+          combined="$worker_active"
+          echo "active users: worker=$worker_active"
 
           jq -n --argjson combined "$combined" '
             { schemaVersion: 1, label: "Daily Active Users",
