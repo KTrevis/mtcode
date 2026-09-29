@@ -1,10 +1,16 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as NodePath from "node:path";
 
-import { resolveDesktopMcpPath } from "./desktopMcpBinary.ts";
+import {
+  newestStandaloneRelease,
+  packagedDesktopMcpCandidates,
+  resolveDesktopMcpPath,
+} from "./desktopMcpBinary.ts";
 
 describe("desktopMcpBinary", () => {
   it.effect("resolves the override path on macOS", () =>
@@ -107,6 +113,78 @@ describe("desktopMcpBinary", () => {
         }),
       );
       assert.equal(resolved, binaryPath);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it("finds the packaged copy beside the app.asar the macOS server runs from", () => {
+    const candidates = packagedDesktopMcpCandidates({
+      moduleDir: "/Applications/MT Code.app/Contents/Resources/app.asar/apps/server/dist",
+      executableName: "munim-computer-use",
+      path: NodePath.posix,
+    });
+    assert.include(
+      candidates,
+      "/Applications/MT Code.app/Contents/Resources/munim-computer-use/munim-computer-use",
+    );
+  });
+
+  it("finds the packaged copy beside the server.asar the Windows server runs from", () => {
+    const candidates = packagedDesktopMcpCandidates({
+      moduleDir:
+        "C:\\Users\\busin\\AppData\\Local\\Programs\\mtcode\\resources\\server.asar\\apps\\server\\dist",
+      executableName: "munim-computer-use.exe",
+      path: NodePath.win32,
+    });
+    assert.include(
+      candidates,
+      "C:\\Users\\busin\\AppData\\Local\\Programs\\mtcode\\resources\\munim-computer-use\\munim-computer-use.exe",
+    );
+  });
+
+  it("adds no archive candidate for a server outside any asar (checkout, SSH runtime)", () => {
+    const candidates = packagedDesktopMcpCandidates({
+      moduleDir: "/home/me/.t3/runtime/versions/0.0.96/apps/server/dist",
+      executableName: "munim-computer-use",
+      path: NodePath.posix,
+    });
+    assert.deepEqual(candidates, [
+      "/home/me/.t3/runtime/versions/0.0.96/apps/server/dist/munim-computer-use/munim-computer-use",
+      "/home/me/.t3/runtime/versions/0.0.96/apps/server/munim-computer-use/munim-computer-use",
+    ]);
+  });
+
+  it("picks the newest standalone release that supports remote control", () => {
+    assert.equal(
+      newestStandaloneRelease(["0.4.0", "0.4.10", "0.4.4", ".0.4.5-download-x", "0.5.0-rc.1"]),
+      "0.4.10",
+    );
+    assert.equal(newestStandaloneRelease(["0.3.0", "0.4.0"]), undefined);
+    assert.equal(newestStandaloneRelease([]), undefined);
+  });
+
+  it.effect("falls back to the standalone npx launcher's cache (SSH hosts)", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const home = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "munim-computer-use-home-",
+      });
+      const cache = `${home}/.cache/munim-computer-use`;
+      for (const version of ["0.4.0", "0.4.4"]) {
+        yield* fileSystem.makeDirectory(`${cache}/${version}`, { recursive: true });
+        const binaryPath = `${cache}/${version}/munim-computer-use`;
+        yield* fileSystem.writeFileString(binaryPath, "binary");
+        yield* fileSystem.chmod(binaryPath, 0o755);
+      }
+
+      const resolved = yield* resolveDesktopMcpPath().pipe(
+        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.provideService(HostProcessEnvironment, {
+          HOME: home,
+          MUNIM_COMPUTER_USE_CHECKOUT: `${home}/no-checkout`,
+          MTCODE_COMPUTER_USE_CACHE: `${home}/no-fetched-release`,
+        }),
+      );
+      assert.equal(resolved, `${cache}/0.4.4/munim-computer-use`);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

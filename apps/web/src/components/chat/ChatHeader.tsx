@@ -114,14 +114,21 @@ const HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM = 48;
  * computer the thread already runs on, the screen it would show is the one the
  * user is looking at, so the button (and its `computerView.toggle` shortcut)
  * stay hidden there even though the capability is advertised.
+ *
+ * "Another machine" is decided by where the thread's environment runs relative
+ * to this client, the same answer the Open picker uses (`useRemoteOpenState`):
+ * `local-exec` covers the desktop app's own backend, its WSL sibling, and a
+ * browser served from loopback. Everything else is another computer: SSH
+ * hosts, paired backends, T3 Connect, and the primary environment itself when
+ * this is a browser pointed at a remote server. Comparing against the primary
+ * environment id alone got that last case backwards.
  */
 export function shouldShowComputerView(input: {
   readonly capabilityAdvertised: boolean;
-  readonly activeThreadEnvironmentId: EnvironmentId;
-  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly threadMachine: RemoteOpenMode;
 }): boolean {
   if (!input.capabilityAdvertised) return false;
-  return input.activeThreadEnvironmentId !== input.primaryEnvironmentId;
+  return input.threadMachine !== "local-exec";
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -229,12 +236,11 @@ export const ChatHeader = memo(function ChatHeader({
   // Gated on the environment's descriptor: the capability is only advertised
   // when the server ships the computerView RPCs and the machine has the
   // desktop-control binary to serve them. Viewing the machine you are sitting
-  // at is not remote desktop, so the local environment never offers it.
+  // at is not remote desktop, so an environment on this machine never offers it.
   const supportsComputerView = shouldShowComputerView({
     capabilityAdvertised:
       threadEnvironmentPresentation?.serverConfig?.environment.capabilities.computerView === true,
-    activeThreadEnvironmentId,
-    primaryEnvironmentId,
+    threadMachine: remoteOpenState.mode,
   });
   const [computerViewOpen, setComputerViewOpen] = useState(false);
   useEffect(() => {

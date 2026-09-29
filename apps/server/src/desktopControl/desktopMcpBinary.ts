@@ -25,9 +25,12 @@ import * as Path from "effect/Path";
  * Order: `MTCODE_DESKTOP_MCP_PATH` (then the deprecated `T3CODE_DESKTOP_MCP_PATH`),
  * the copy packaged into the app's Resources, a local munim-computer-use
  * checkout's build (`$MUNIM_COMPUTER_USE_CHECKOUT`, default `~/computer-use`),
- * and finally the release the desktop build fetched into the cache for the
- * version pinned in `native/munim-computer-use.json`. Resolves to undefined
- * when none exists — callers treat that as "do not offer the tools".
+ * the release the desktop build fetched into the cache for the version pinned
+ * in `native/munim-computer-use.json`, and finally the newest release the
+ * standalone `npx munim-computer-use` launcher cached (how an SSH host, which
+ * runs a bare server with no app bundle, gets one). Resolves to undefined
+ * when none exists — callers treat that as "do not offer the tools", which
+ * also hides Computer View for the machine.
  */
 export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcpPath")(
   function* () {
@@ -43,11 +46,11 @@ export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcp
 
     const override = desktopMcpPathOverride(environment);
 
-    const packaged = [
-      // Packaged: staged into app Resources beside the server bundle.
-      path.resolve(import.meta.dirname, MUNIM_COMPUTER_USE_RESOURCE_DIR, executableName),
-      path.resolve(import.meta.dirname, "..", MUNIM_COMPUTER_USE_RESOURCE_DIR, executableName),
-    ];
+    const packaged = packagedDesktopMcpCandidates({
+      moduleDir: import.meta.dirname,
+      executableName,
+      path,
+    });
 
     const home = environment.HOME ?? environment.USERPROFILE;
     const checkout =
@@ -59,11 +62,20 @@ export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcp
 
     const cached = yield* fetchedReleaseBinary({ platform, environment, home, path, fileSystem });
 
+    const standalone = yield* standaloneReleaseBinary({
+      platform,
+      environment,
+      home,
+      path,
+      fileSystem,
+    });
+
     const candidates = [
       ...(override ? [override] : []),
       ...packaged,
       ...checkoutBuilds,
       ...(cached ? [cached] : []),
+      ...(standalone ? [standalone] : []),
     ];
 
     for (const candidate of candidates) {
@@ -72,6 +84,126 @@ export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcp
       }
     }
     return undefined;
+  },
+);
+
+/**
+ * Where a packaged app keeps the binary, given the directory of the server
+ * module doing the lookup.
+ *
+ * The desktop build stages it at `<resources>/munim-computer-use`, while the
+ * server bundle runs from inside an archive in that same directory:
+ * `Resources/app.asar/apps/server/dist` on macOS and Linux,
+ * `resources\server.asar\apps\server\dist` on Windows. So the copy sits
+ * beside the archive, not beside the module. Looking only next to the module
+ * missed it on every installed app: the server never advertised Computer View
+ * or the agent desktop tools unless a `~/computer-use` checkout happened to be
+ * built on that machine (true on the Mac that builds MT Code, false on the
+ * Windows laptop).
+ */
+export function packagedDesktopMcpCandidates(input: {
+  readonly moduleDir: string;
+  readonly executableName: string;
+  readonly path: Pick<Path.Path, "resolve" | "dirname" | "basename">;
+}): ReadonlyArray<string> {
+  const { moduleDir, executableName, path } = input;
+  const candidates = [
+    path.resolve(moduleDir, MUNIM_COMPUTER_USE_RESOURCE_DIR, executableName),
+    path.resolve(moduleDir, "..", MUNIM_COMPUTER_USE_RESOURCE_DIR, executableName),
+  ];
+  // Walk up to the archive the server bundle is packed in (app.asar,
+  // server.asar, or their `.asar.unpacked` twins) and look in its directory.
+  let current = path.resolve(moduleDir);
+  for (;;) {
+    const name = path.basename(current).toLowerCase();
+    if (name.endsWith(".asar") || name.endsWith(".asar.unpacked")) {
+      candidates.push(
+        path.resolve(path.dirname(current), MUNIM_COMPUTER_USE_RESOURCE_DIR, executableName),
+      );
+      break;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return candidates;
+}
+
+/** Remote control (moving the real cursor) arrived in munim-computer-use 0.4.1. */
+const MIN_STANDALONE_RELEASE: readonly [number, number, number] = [0, 4, 1];
+
+function parseReleaseVersion(name: string): readonly [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(name);
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareReleaseVersions(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): number {
+  return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+}
+
+/**
+ * The newest release directory the standalone launcher cached that is recent
+ * enough to drive Computer View. Anything else in the cache (staging dirs,
+ * pre-release names, older versions) is ignored.
+ */
+export function newestStandaloneRelease(names: ReadonlyArray<string>): string | undefined {
+  let best: { readonly name: string; readonly version: readonly [number, number, number] } | null =
+    null;
+  for (const name of names) {
+    const version = parseReleaseVersion(name);
+    if (!version || compareReleaseVersions(version, MIN_STANDALONE_RELEASE) < 0) continue;
+    if (best === null || compareReleaseVersions(version, best.version) > 0) {
+      best = { name, version };
+    }
+  }
+  return best?.name;
+}
+
+function standaloneCacheBase(
+  platform: MunimComputerUsePlatform,
+  environment: Readonly<Record<string, string | undefined>>,
+  home: string | undefined,
+  path: Path.Path,
+): string | undefined {
+  const explicit = environment.COMPUTER_USE_CACHE_DIR?.trim();
+  if (explicit) return explicit;
+  if (platform === "win32") {
+    const root = environment.LOCALAPPDATA?.trim() || home;
+    return root ? path.join(root, "munim-computer-use") : undefined;
+  }
+  const xdg = environment.XDG_CACHE_HOME?.trim();
+  const root = xdg || (home ? path.join(home, ".cache") : undefined);
+  return root ? path.join(root, "munim-computer-use") : undefined;
+}
+
+/**
+ * The binary `npx munim-computer-use` downloaded, if any. Mirrors the
+ * launcher's cache: `$COMPUTER_USE_CACHE_DIR`, else
+ * `%LOCALAPPDATA%\munim-computer-use` on Windows and
+ * `${XDG_CACHE_HOME:-~/.cache}/munim-computer-use` elsewhere, one directory per
+ * version.
+ */
+const standaloneReleaseBinary = Effect.fn("desktopControl.standaloneReleaseBinary")(
+  function* (input: {
+    readonly platform: MunimComputerUsePlatform;
+    readonly environment: Readonly<Record<string, string | undefined>>;
+    readonly home: string | undefined;
+    readonly path: Path.Path;
+    readonly fileSystem: FileSystem.FileSystem;
+  }) {
+    const { environment, path } = input;
+    const base = standaloneCacheBase(input.platform, environment, input.home, path);
+    if (base === undefined) return undefined;
+    const names = yield* input.fileSystem
+      .readDirectory(base)
+      .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+    const version = newestStandaloneRelease(names);
+    if (version === undefined) return undefined;
+    return path.join(base, version, munimComputerUseExecutableName(input.platform));
   },
 );
 

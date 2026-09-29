@@ -98,6 +98,13 @@ require apps/server/src/provider/Layers/GrokAdapter.ts "resolveDesktopMcp" "desk
 # --- Computer-use thread view (9c23b7fa6, eb1bdd5e2) ---
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
 require apps/web/src/components/chat/ChatHeader.tsx "ComputerViewDialog" "computer view mounted in chat header"
+# The monitor button shows whenever the thread's machine is not the client's
+# (SSH hosts, paired backends, a browser on a remote server), not merely when
+# the environment id differs from the primary. And an installed app must find
+# the binary it ships: the server runs from inside app.asar / server.asar, so
+# the packaged copy sits beside that archive (2026-09-29, Dell had no button).
+require apps/web/src/components/chat/ChatHeader.tsx "threadMachine: remoteOpenState.mode" "computer view gated on the thread's machine vs this client's"
+require apps/server/src/desktopControl/desktopMcpBinary.ts "packagedDesktopMcpCandidates({" "server finds munim-computer-use beside the asar it runs from"
 
 # --- Sidebar linked-PR badge (upstream #4755/#8160 wiring, restored 2026-09-02) ---
 # Rows read the linked PR from the host and hold merged/closed state in the
