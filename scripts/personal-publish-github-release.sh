@@ -5,6 +5,8 @@
 # updater feed points at this fork. Then uploads assets for munimtech.com.
 #
 # Mac: Developer ID sign when available. Windows: unsigned in v1.
+# Linux x64 (AppImage + .deb): unsigned, built in the Windows build host's
+# WSL2 Ubuntu by personal-linux-build.sh. T3_MUNIM_SKIP_LINUX=1 skips it.
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -75,6 +77,58 @@ else
   echo "-- building Munim Windows x64 on $WIN_HOST (in parallel with the Mac build; log $WIN_JOB_LOG) --"
   build_windows >"$WIN_JOB_LOG" 2>&1 &
   WIN_PID=$!
+fi
+
+# --- Linux x64 in the build host's WSL2 Ubuntu, overlapping the other two ---
+# personal-linux-build.sh runs inside the distro and builds on the Linux
+# filesystem; it and its toolchain setup travel over scp like the Windows .ps1.
+# The ssh shell on the Windows hosts is Git Bash, which rewrites any absolute
+# /mnt/... argument, so the build starts in C:/Users/<user>/dev and every path
+# it is given is relative to that. The Dell (dell-ts, Ubuntu too) can stand in.
+LINUX_HOST="${T3_MUNIM_LINUX_HOST:-$WIN_HOST}"
+LINUX_WIN_USER="${T3_MUNIM_LINUX_WIN_USER:-$WIN_USER}"
+LINUX_DISTRO="${T3_MUNIM_LINUX_DISTRO:-Ubuntu}"
+LINUX_OUT_DIR="mtcode-linux-release"
+# Hard ceiling for the whole remote build: wsl.exe can wedge over ssh, and a
+# hung Linux job must fail the release instead of stalling it forever.
+LINUX_TIMEOUT_SECONDS="${T3_MUNIM_LINUX_TIMEOUT_SECONDS:-5400}"
+LINUX_JOB_LOG="$LOG_DIR/publish-munim-linux-$$.log"
+LINUX_PID=""
+LINUX_ASSET_NAMES=(
+  "MT-Code-${T3CODE_DESKTOP_VERSION}-x86_64.AppImage"
+  "MT-Code-${T3CODE_DESKTOP_VERSION}-amd64.deb"
+  "latest-linux.yml"
+)
+build_linux() {
+  scp -o BatchMode=yes "$REPO/scripts/personal-linux-build.sh" "$REPO/scripts/personal-linux-build-host-setup.sh" "$LINUX_HOST:dev/"
+  perl -e 'alarm shift; exec @ARGV' "$LINUX_TIMEOUT_SECONDS" \
+    ssh -n -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$LINUX_HOST" \
+    wsl.exe -d "$LINUX_DISTRO" --cd "C:/Users/$LINUX_WIN_USER/dev" -- \
+    bash personal-linux-build.sh \
+    --version "$T3CODE_DESKTOP_VERSION" \
+    --ref "$LINUX_REF" \
+    --out "$LINUX_OUT_DIR" \
+    --update-repository "$RELEASE_REPO" \
+    --update-url "$UPDATE_URL"
+}
+if [[ "${T3_MUNIM_SKIP_LINUX:-}" == "1" ]]; then
+  echo "-- skipping Linux build (T3_MUNIM_SKIP_LINUX=1) --"
+else
+  # The Linux host clones from GitHub, so it can only build a pushed commit.
+  # Check now rather than after the Mac build: the fleet release already
+  # refuses unpushed commits, and a manual publish should push first too.
+  LINUX_REF=$(git rev-parse HEAD)
+  LINUX_ON_MAIN=$(gh api "repos/$RELEASE_REPO/compare/main...$LINUX_REF" --jq .status 2>/dev/null || true)
+  if [[ "$LINUX_ON_MAIN" != "identical" && "$LINUX_ON_MAIN" != "behind" ]]; then
+    echo "HEAD $LINUX_REF is not on $RELEASE_REPO main (${LINUX_ON_MAIN:-unknown}): push it, or set T3_MUNIM_SKIP_LINUX=1" >&2
+    exit 1
+  fi
+  for name in "${LINUX_ASSET_NAMES[@]}"; do
+    rm -f "$REPO/release/$name"
+  done
+  echo "-- building Munim Linux x64 on $LINUX_HOST WSL $LINUX_DISTRO at ${LINUX_REF:0:10} (in parallel; log $LINUX_JOB_LOG) --"
+  build_linux >"$LINUX_JOB_LOG" 2>&1 &
+  LINUX_PID=$!
 fi
 
 # --- Mac arm64 ---
@@ -158,12 +212,33 @@ for name in "${WIN_EXE_NAME}.blockmap" latest.yml; do
 done
 fi
 
+# --- Collect the Linux build ---
+# Unlike a skipped one, a failed Linux build fails the release: set
+# T3_MUNIM_SKIP_LINUX=1 to publish without it.
+if [[ -n "$LINUX_PID" ]]; then
+LINUX_STATUS=0
+wait "$LINUX_PID" || LINUX_STATUS=$?
+echo "-- Linux build output ($LINUX_HOST WSL $LINUX_DISTRO) --"
+cat "$LINUX_JOB_LOG"
+rm -f "$LINUX_JOB_LOG"
+if [[ "$LINUX_STATUS" -ne 0 ]]; then
+  echo "Linux build on $LINUX_HOST failed (exit $LINUX_STATUS); T3_MUNIM_SKIP_LINUX=1 publishes without it" >&2
+  exit "$LINUX_STATUS"
+fi
+# Named explicitly, like the Windows files, so no stale artifact rides along.
+for name in "${LINUX_ASSET_NAMES[@]}"; do
+  scp -o BatchMode=yes "$LINUX_HOST:dev/$LINUX_OUT_DIR/$name" "$REPO/release/$name"
+done
+fi
+
 ASSETS=("$MAC_DMG")
 [[ -n "$MAC_ZIP" && -f "$MAC_ZIP" ]] && ASSETS+=("$MAC_ZIP")
 [[ -f "${MAC_DMG}.blockmap" ]] && ASSETS+=("${MAC_DMG}.blockmap")
 [[ -n "$MAC_ZIP" && -f "${MAC_ZIP}.blockmap" ]] && ASSETS+=("${MAC_ZIP}.blockmap")
 [[ -n "$WIN_LOCAL" && -f "$WIN_LOCAL" ]] && ASSETS+=("$WIN_LOCAL")
 [[ -n "$WIN_LOCAL" && -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
+# The AppImage and .deb; latest-linux.yml goes through add_manifest below.
+[[ -n "$LINUX_PID" ]] && ASSETS+=("$REPO/release/${LINUX_ASSET_NAMES[0]}" "$REPO/release/${LINUX_ASSET_NAMES[1]}")
 
 # A manifest naming another build is worse than no manifest: the updater
 # believes whatever version it reads. Ship only manifests describing this build.
@@ -172,6 +247,7 @@ ASSETS=("$MAC_DMG")
 BASE_VERSION="${T3CODE_DESKTOP_VERSION%%-nightly.*}"
 MAC_FEED_OK=0
 WIN_FEED_OK=0
+LINUX_FEED_OK=0
 add_manifest() {
   local yml="$1" found
   [[ -f "$yml" ]] || return 0
@@ -183,10 +259,12 @@ add_manifest() {
   ASSETS+=("$yml")
   case "$(basename "$yml")" in
     *-mac.yml) MAC_FEED_OK=1 ;;
+    *-linux.yml) LINUX_FEED_OK=1 ;;
     *) WIN_FEED_OK=1 ;;
   esac
 }
 [[ -n "$MAC_YML" ]] && add_manifest "$MAC_YML"
+[[ -n "$LINUX_PID" ]] && add_manifest "$REPO/release/latest-linux.yml"
 for y in "$REPO"/release/latest.yml "$REPO"/release/nightly.yml "$REPO"/release/*Munim*.yml "$REPO"/release/*MT-Code*.yml; do
   add_manifest "$y"
 done
@@ -200,6 +278,10 @@ if [[ "$MAC_FEED_OK" != "1" ]]; then
 fi
 if [[ -n "$WIN_LOCAL" && "$WIN_FEED_OK" != "1" ]]; then
   echo "no Windows update feed (latest.yml) for $T3CODE_DESKTOP_VERSION: check the scp back from $WIN_HOST" >&2
+  exit 1
+fi
+if [[ -n "$LINUX_PID" && "$LINUX_FEED_OK" != "1" ]]; then
+  echo "no Linux update feed (latest-linux.yml) for $T3CODE_DESKTOP_VERSION: check the scp back from $LINUX_HOST" >&2
   exit 1
 fi
 

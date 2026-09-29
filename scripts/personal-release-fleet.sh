@@ -2,7 +2,8 @@
 # One command: publish MT Code and install it on the Mac, Blade and Dell.
 #
 # Order is chosen for wall-clock time, not simplicity:
-#   1. publish builds Windows on Blade and the Mac DMG at the same time
+#   1. publish builds Windows on Blade, Linux in Blade's WSL Ubuntu, and the
+#      Mac DMG at the same time (Linux is published, not installed anywhere)
 #   2. Blade and Dell install the exe the publish just built (no second rebuild)
 #   3. the Mac installs last, because installing quits the app — and when this
 #      runs from an agent shell inside MT Code, that quit would kill the run,
@@ -59,7 +60,7 @@ trap restore_refresh EXIT
 # Never build on top of a stale bundle from an interrupted run.
 rm -rf "$REPO/apps/web/dist" "$REPO/node_modules/.vite" "$REPO/.turbo"
 
-stamp "publishing (Mac + Windows in parallel)"
+stamp "publishing (Mac + Windows + Linux in parallel)"
 PUBLISH_LOG="$LOG_DIR/publish-munim-$(date +%Y%m%d).log"
 if ! env -u T3CODE_DESKTOP_VERSION bash "$REPO/scripts/personal-publish-github-release.sh"; then
   echo "publish failed — see $PUBLISH_LOG" >&2
