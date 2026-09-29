@@ -180,10 +180,15 @@ require apps/web/src/components/sidebar/SidebarChrome.tsx 'h-3 w-auto shrink-0 t
 # --- Plugin marketplace (2026-09-16, a3455de80b / 06fffa29e3) ---
 # Codex plugins are read through the app-server with lenient decoders; the
 # CLI-only path silently dropped every Codex plugin once codex 0.154 emitted
-# path-less remote records. The palette action and harness tabs are fork-only UI.
+# path-less remote records. The palette action is fork-only UI. Since
+# 2026-09-29 the page is ChatGPT-style: Plugins / Apps / MCPs / Skills section
+# tabs with counts, the harness demoted to a filter, and a Skills section that
+# lists the environment's standalone skills.
 require apps/server/src/plugins/CodexPluginMarketplace.ts "decodeCodexRuntimeCatalog" "Codex app-server catalog decoding in the plugin marketplace"
 require apps/web/src/components/CommandPalette.tsx 'title: "Browse plugins"' "Browse plugins command-palette action"
-require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx 'aria-label="Harness"' "harness tabs on the plugin marketplace page"
+require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx 'aria-label="Plugin sections"' "Plugins / Apps / MCPs / Skills section tabs on the plugin marketplace page"
+require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx 'aria-label="Harness"' "harness filter on the plugin marketplace page"
+require apps/web/src/components/settings/pluginMarketplace/PluginMarketplaceSkills.tsx "fetchEnvironmentSkillInventory" "standalone skills in the plugin marketplace Skills section"
 
 # --- Usage limits for every driver (2026-09-16, 20308ea78b) ---
 # Cursor and OpenCode publish subscription windows into upstream's Limits

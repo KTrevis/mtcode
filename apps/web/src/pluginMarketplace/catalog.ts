@@ -88,6 +88,17 @@ function compareBrowseOrder(left: MarketplacePlugin, right: MarketplacePlugin): 
   );
 }
 
+/** Installed and not-yet-installed listings, each in browse order. */
+export function splitInstalledListings(plugins: ReadonlyArray<MarketplacePlugin>): {
+  readonly installed: MarketplacePlugin[];
+  readonly available: MarketplacePlugin[];
+} {
+  return {
+    installed: plugins.filter((plugin) => plugin.installed).toSorted(compareBrowseOrder),
+    available: plugins.filter((plugin) => !plugin.installed).toSorted(compareBrowseOrder),
+  };
+}
+
 /**
  * Browse layout: installed plugins first, then featured picks, then categories ordered by size
  * with the catch-all "Other" last. A plugin appears in exactly one section.
@@ -115,6 +126,49 @@ export function groupMarketplaceSections(
         left.category.localeCompare(right.category),
     );
   return { installed, discover, categories };
+}
+
+/**
+ * Whether a listing card can install in one click. Merged listings that span harnesses, external
+ * marketplaces (Cursor, ChatGPT Public), and admin-restricted plugins open their detail page
+ * instead, where each harness copy is managed separately.
+ */
+export function canQuickInstallListing(
+  plugin: Pick<MarketplacePlugin, "installed" | "installPolicy" | "support" | "marketplaceName">,
+): boolean {
+  return (
+    !plugin.installed &&
+    plugin.installPolicy === "AVAILABLE" &&
+    plugin.support.length === 1 &&
+    plugin.marketplaceName !== CHATGPT_PUBLIC_MARKETPLACE_NAME
+  );
+}
+
+function countLabel(count: number, singular: string, plural: string): string | null {
+  return count > 0 ? `${count} ${count === 1 ? singular : plural}` : null;
+}
+
+/**
+ * Short inventory line for a listing card. The browsed component leads (apps on the Apps section,
+ * and so on); remote catalog entries publish no inventory until installed, so this may be empty.
+ */
+export function marketplaceContentsSummary(
+  plugin: Pick<MarketplacePlugin, "contents">,
+  lead: "apps" | "mcps" | "skills" | null = null,
+): string {
+  const apps = countLabel(plugin.contents.appCount, "app", "apps");
+  const mcps = countLabel(plugin.contents.mcpServerCount, "MCP server", "MCP servers");
+  const skills = countLabel(plugin.contents.skillCount, "skill", "skills");
+  const ordered =
+    lead === "apps"
+      ? [apps, mcps, skills]
+      : lead === "mcps"
+        ? [mcps, apps, skills]
+        : [skills, mcps, apps];
+  return ordered
+    .filter((label): label is string => label !== null)
+    .slice(0, 2)
+    .join(" · ");
 }
 
 export function marketplaceListingGroupKey(name: string): string {

@@ -352,6 +352,21 @@ function SkillRow({ skill }: { skill: SkillInventoryInstallation }) {
 }
 
 function SkillDetail({ skill }: { skill: SkillInventoryInstallation }) {
+  return (
+    <div className="mx-3 mt-2 mb-5 space-y-4 rounded-lg border border-border/60 bg-muted/10 p-4 sm:ml-11 sm:mr-4 sm:p-5">
+      <div className="space-y-1">
+        <h4 className="text-sm font-semibold text-foreground">{skill.name}</h4>
+        <p className="max-w-3xl text-[13px] leading-6 text-muted-foreground/85">
+          {skill.description ?? "No description in this skill's frontmatter."}
+        </p>
+      </div>
+      <SkillFileDetail skill={skill} />
+    </div>
+  );
+}
+
+/** Install path and SKILL.md contents of one skill; shared with the Plugins page's Skills section. */
+export function SkillFileDetail({ skill }: { skill: SkillInventoryInstallation }) {
   const content = skillContentForDisplay(skill.content);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "skill path",
@@ -364,14 +379,7 @@ function SkillDetail({ skill }: { skill: SkillInventoryInstallation }) {
   );
 
   return (
-    <div className="mx-3 mt-2 mb-5 space-y-4 rounded-lg border border-border/60 bg-muted/10 p-4 sm:ml-11 sm:mr-4 sm:p-5">
-      <div className="space-y-1">
-        <h4 className="text-sm font-semibold text-foreground">{skill.name}</h4>
-        <p className="max-w-3xl text-[13px] leading-6 text-muted-foreground/85">
-          {skill.description ?? "No description in this skill's frontmatter."}
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <div className="space-y-1.5">
         <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/60">
           Installed at

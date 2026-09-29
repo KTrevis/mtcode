@@ -1,8 +1,12 @@
 import type { PluginMarketplacePlugin } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mergeMarketplaceListings } from "./catalog";
-import { filterMarketplacePlugins } from "./filter";
+import {
+  canQuickInstallListing,
+  marketplaceContentsSummary,
+  mergeMarketplaceListings,
+} from "./catalog";
+import { filterMarketplacePlugins, marketplaceSectionCounts, skillMatchesHarness } from "./filter";
 
 function plugin(
   id: string,
@@ -84,7 +88,8 @@ const PLUGINS = [
 
 const DEFAULT_FILTERS = {
   query: "",
-  kind: "all",
+  section: "plugins",
+  status: "all",
   harness: "all",
   category: "all",
 } as const;
@@ -103,30 +108,37 @@ describe("filterMarketplacePlugins", () => {
     ).toEqual(["computer-use"]);
   });
 
-  it("filters MCP, skill, and app bundles from manifest counts", () => {
+  it("narrows the Apps, MCPs, and Skills sections to bundles that ship that component", () => {
     expect(
-      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, kind: "mcp" }).map(
+      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, section: "mcps" }).map(
         (entry) => entry.packageName,
       ),
     ).toEqual(["github", "computer-use"]);
     expect(
-      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, kind: "skill" }).map(
+      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, section: "skills" }).map(
         (entry) => entry.packageName,
       ),
     ).toEqual(["github", "computer-use", "design-tools"]);
     expect(
-      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, kind: "app" }).map(
+      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, section: "apps" }).map(
         (entry) => entry.packageName,
       ),
     ).toEqual(["computer-use"]);
   });
 
-  it("filters installed packages as a first-class marketplace view", () => {
+  it("filters by install status within a section", () => {
     expect(
-      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, kind: "installed" }).map(
+      filterMarketplacePlugins(PLUGINS, { ...DEFAULT_FILTERS, status: "installed" }).map(
         (entry) => entry.packageName,
       ),
     ).toEqual(["computer-use"]);
+    expect(
+      filterMarketplacePlugins(PLUGINS, {
+        ...DEFAULT_FILTERS,
+        section: "mcps",
+        status: "available",
+      }).map((entry) => entry.packageName),
+    ).toEqual(["github"]);
   });
 
   it("combines harness and category filters", () => {
@@ -164,5 +176,72 @@ describe("mergeMarketplaceListings", () => {
     expect(figma[0]?.support.map((entry) => entry.harness)).toEqual(["codex", "claude"]);
     expect(figma[0]?.contents.mcpServerCount).toBe(1);
     expect(figma[0]?.contents.skillCount).toBe(1);
+  });
+});
+
+describe("marketplaceSectionCounts", () => {
+  const installed = [
+    plugin("cloudflare", { category: "Dev", summary: "", mcp: 5, skills: 13, installed: true }),
+    plugin("security", { category: "Dev", summary: "", mcp: 1, apps: 3, installed: true }),
+    plugin("writer", {
+      category: "Docs",
+      summary: "",
+      skills: 2,
+      harness: "claude",
+      installed: true,
+    }),
+    plugin("unused", { category: "Dev", summary: "", mcp: 9, skills: 9, apps: 9 }),
+  ];
+
+  it("counts installed plugins and the apps, MCP servers, and skills they ship", () => {
+    expect(marketplaceSectionCounts(installed, "all", 4)).toEqual({
+      plugins: 3,
+      apps: 3,
+      mcps: 6,
+      skills: 19,
+    });
+  });
+
+  it("follows the harness filter and waits for the skill inventory", () => {
+    expect(marketplaceSectionCounts(installed, "claude", null)).toEqual({
+      plugins: 1,
+      apps: 0,
+      mcps: 0,
+      skills: null,
+    });
+  });
+});
+
+describe("listing card helpers", () => {
+  it("offers one-click install only for single-harness plugins this app can install", () => {
+    const available = plugin("github", { category: "Dev", summary: "" });
+    expect(canQuickInstallListing(available)).toBe(true);
+    expect(canQuickInstallListing({ ...available, installed: true })).toBe(false);
+    expect(canQuickInstallListing({ ...available, installPolicy: "EXTERNAL" })).toBe(false);
+    expect(canQuickInstallListing({ ...available, marketplaceName: "ChatGPT Public" })).toBe(false);
+    const [merged] = mergeMarketplaceListings([
+      { ...available, name: "Figma" },
+      { ...plugin("figma", { category: "Dev", summary: "", harness: "claude" }), name: "Figma" },
+    ]);
+    expect(merged && canQuickInstallListing(merged)).toBe(false);
+  });
+
+  it("leads the contents line with the browsed component", () => {
+    const bundle = plugin("security", {
+      category: "Dev",
+      summary: "",
+      mcp: 1,
+      apps: 3,
+      skills: 12,
+    });
+    expect(marketplaceContentsSummary(bundle)).toBe("12 skills · 1 MCP server");
+    expect(marketplaceContentsSummary(bundle, "apps")).toBe("3 apps · 1 MCP server");
+    expect(marketplaceContentsSummary(plugin("remote", { category: "Dev", summary: "" }))).toBe("");
+  });
+
+  it("matches skill driver kinds to marketplace harnesses", () => {
+    expect(skillMatchesHarness("claudeAgent", "claude")).toBe(true);
+    expect(skillMatchesHarness("codex", "claude")).toBe(false);
+    expect(skillMatchesHarness("opencode", "all")).toBe(true);
   });
 });

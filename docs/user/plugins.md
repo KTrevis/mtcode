@@ -10,12 +10,22 @@ Cursor's public marketplace and local Cursor plugin cache. When this environment
 ChatGPT through Codex, search also queries ChatGPT's public plugin index, so listings that only
 appear there — such as TickTick — show up in results.
 
-Switch between **All**, **Codex**, **Claude Code**, and **Cursor** at the top of the page to browse
-one harness at a time, and use the filter button to narrow by MCP server, skill, app, or category.
-Installed plugins are listed first, followed by featured picks and then each category. Each listing
-names the marketplace it comes from, such as **Codex official** or **Bundled**, and plugin artwork
-and metadata come from the package or its published marketplace listing. Equivalent category names
-from different marketplaces are combined into one category.
+The page has four sections. **Plugins** lists every marketplace bundle: installed plugins first,
+then featured picks and each category. **Apps** and **MCPs** narrow the catalog to plugins that
+bring an app connector or MCP servers. **Skills** lists the standalone skills installed on this
+environment, then the plugins that bundle skills; open a skill to read its `SKILL.md`, or use
+**Settings → Skills** to see the skills on every connected computer. Each section's count is what
+you have installed: plugins, and the apps, MCP servers, and skills they ship. Remote Codex plugins
+publish their contents only once installed, so an uninstalled one may not appear under Apps or MCPs
+yet.
+
+Use the harness menu beside the search box to show only Codex, Claude Code, or Cursor, and the
+filter button to narrow by install status or category. A plugin that only one harness offers can be
+installed straight from its card with the plus button; open any listing to manage each harness
+copy, remove it, or connect its accounts. Each listing names the marketplace it comes from, such as
+**Codex official** or **Bundled**, and plugin artwork and metadata come from the package or its
+published marketplace listing. Equivalent category names from different marketplaces are combined
+into one category.
 
 Each harness loads independently. If one takes a while to sync its marketplaces, the page shows the
 others right away with a notice that the slow harness is still syncing, and fills it in
