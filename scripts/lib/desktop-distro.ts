@@ -20,6 +20,8 @@ export interface DesktopDistroIdentity {
   readonly protocolName: string;
   readonly linuxExecutableName: string;
   readonly linuxStartupWmClass: string;
+  /** .deb control-file Maintainer. */
+  readonly linuxMaintainer: string;
   readonly nsisShortcutName: string;
   readonly nsisInstallDirectoryName: string;
 }
@@ -37,6 +39,7 @@ const OFFICIAL: DesktopDistroIdentity = {
   protocolName: "T3 Code",
   linuxExecutableName: "t3code",
   linuxStartupWmClass: "t3code",
+  linuxMaintainer: "T3 Tools <hello@t3.codes>",
   nsisShortcutName: "T3 Code",
   nsisInstallDirectoryName: "t3code",
 };
@@ -54,6 +57,7 @@ const MUNIM: DesktopDistroIdentity = {
   protocolName: "MT Code",
   linuxExecutableName: "mtcode",
   linuxStartupWmClass: "mtcode",
+  linuxMaintainer: "Munim Technologies <support@munimtech.com>",
   nsisShortcutName: "MT Code",
   nsisInstallDirectoryName: "mtcode",
 };
