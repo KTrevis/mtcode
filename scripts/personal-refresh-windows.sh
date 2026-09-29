@@ -68,7 +68,9 @@ installed_version() {
 verify_installed() {
   local host="$1" got
   got=$(installed_version "$host")
-  if [[ "${got%.0}" != "$T3CODE_DESKTOP_VERSION" ]]; then
+  # Windows reports four parts (0.1.0.0); stripping ".0" blindly would turn a
+  # three-part 0.1.0 into 0.1, so compare both spellings exactly.
+  if [[ "$got" != "$T3CODE_DESKTOP_VERSION" && "$got" != "$T3CODE_DESKTOP_VERSION.0" ]]; then
     echo "$host reports MT Code ${got:-<none>} after the install, expected $T3CODE_DESKTOP_VERSION" >&2
     return 1
   fi

@@ -50,6 +50,17 @@ personal_mt_resolve_version() {
     candidate=$(personal_mt_max_version "$candidate" "$published")
   fi
 
+  # A deliberate jump, e.g. 0.0.99 -> 0.1.0: T3_MT_RELEASE_VERSION=0.1.0 on the
+  # release run. It can only move forward; once published, later runs count on
+  # from it (0.1.1, 0.1.2, ...) with no override needed.
+  if [[ -n "${T3_MT_RELEASE_VERSION:-}" ]]; then
+    if [[ ! "$T3_MT_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "T3_MT_RELEASE_VERSION must look like 0.1.0, got '$T3_MT_RELEASE_VERSION'" >&2
+      return 1
+    fi
+    candidate=$(personal_mt_max_version "$candidate" "$T3_MT_RELEASE_VERSION")
+  fi
+
   # Publishing needs the NEXT free number instead of the current one. Reusing a
   # published tag is destructive: the publish script takes its "release exists"
   # branch and 'gh release upload --clobber' swaps only the platform being
@@ -66,7 +77,7 @@ personal_mt_resolve_version() {
 
 personal_mt_export_desktop_version() {
   if [[ -z "${T3CODE_DESKTOP_VERSION:-}" ]]; then
-    T3CODE_DESKTOP_VERSION="$(personal_mt_resolve_version)"
+    T3CODE_DESKTOP_VERSION="$(personal_mt_resolve_version)" || return 1
   fi
   T3CODE_DESKTOP_VERSION="$(personal_mt_strip_nightly_prerelease "$T3CODE_DESKTOP_VERSION")"
   export T3CODE_DESKTOP_VERSION
