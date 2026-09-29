@@ -67,6 +67,7 @@ export class ElectronUpdater extends Context.Service<
     readonly setAllowDowngrade: (value: boolean) => Effect.Effect<void>;
     readonly setFullChangelog: (value: boolean) => Effect.Effect<void>;
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
+    readonly setRequestHeaders: (headers: Readonly<Record<string, string>>) => Effect.Effect<void>;
     readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
     readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
     readonly quitAndInstall: (options: {
@@ -121,6 +122,11 @@ export const make = ElectronUpdater.of({
   setDisableDifferentialDownload: (value) =>
     Effect.suspend(() => {
       autoUpdater.disableDifferentialDownload = value;
+      return Effect.void;
+    }),
+  setRequestHeaders: (headers) =>
+    Effect.suspend(() => {
+      autoUpdater.requestHeaders = { ...headers };
       return Effect.void;
     }),
   checkForUpdates: Effect.suspend(() => {

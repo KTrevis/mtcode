@@ -9,3 +9,15 @@ raw provider events, or child-agent output. Child-agent token use is excluded fr
 
 To disable collection, set `T3CODE_TELEMETRY_ENABLED=false` in the server's environment before
 starting it. This stops product events from being recorded or sent.
+
+## MT Code update check
+
+The desktop app checks `updates.mtcode.munimtech.com` for a new version every few minutes. That
+check is also how MT Code counts downloads and daily active users.
+
+To count people rather than devices, each check carries a short code for every Claude or ChatGPT
+account the app finds signed in on that machine. The code is a one-way hash of the provider's
+opaque account ID and the date, made on your machine. No email, name, token, or GitHub account
+leaves it, and the code cannot be turned back into the account. Devices on the same account send
+the same code, so they count as one user. The code changes every day, so no day can be linked to
+another. The update server keeps each code for two days, then deletes it.

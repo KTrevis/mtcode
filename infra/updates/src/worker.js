@@ -103,14 +103,32 @@ async function serveFeed(request, env, ctx, url) {
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
 
+  const codes = activeUserCodes(request);
+  const platform = platformOf(url.pathname);
   ctx.waitUntil(
     clientId(request, env)
-      .then((client) =>
-        record(env, { kind: "poll", client, version: "", platform: platformOf(url.pathname) }),
-      )
+      .then(async (client) => {
+        await record(env, { kind: "poll", client, version: "", platform });
+        for (const code of codes) {
+          await record(env, { kind: "person", client, version: code, platform });
+        }
+      })
       .catch(() => {}),
   );
   return response;
+}
+
+/**
+ * The app's anonymous active-user codes (apps/desktop/src/updates/activeUser.ts):
+ * one-way hashes of an opaque Claude or ChatGPT account id and the UTC date,
+ * the same on every device signed into that account and different every day.
+ * Anything that is not such a hash is ignored.
+ */
+function activeUserCodes(request) {
+  const header = request.headers.get("x-mtcode-active-user") ?? "";
+  return [...new Set(header.split(",").map((code) => code.trim().toLowerCase()))]
+    .filter((code) => /^[0-9a-f]{32}$/.test(code))
+    .slice(0, 4);
 }
 
 function serveAsset(request, env, ctx, url, version) {
@@ -139,12 +157,17 @@ function serveAsset(request, env, ctx, url, version) {
 /**
  * Deliveries count one per client per day, which also folds in the rows logged
  * before blockmaps stopped counting (an update then logged its old and new
- * version). Active installs are the clients that polled on the last complete
- * UTC day: a polling client checks in every four minutes, so a full day sees
- * every install that ran, and a window that also took in today counted two.
+ * version).
+ *
+ * Active users are counted over the last complete UTC day, as people: installs
+ * that sent the same active-user code (one person's devices on one account)
+ * are joined, and an install that sent none counts as one user on its own. A
+ * polling client checks in every four minutes, so a full day sees every
+ * install that ran. The codes are only needed for that one day, so they are
+ * deleted after two.
  */
 async function stats(env) {
-  const [total, monthly, active] = await env.DB.batch([
+  const [total, monthly, installs, links] = await env.DB.batch([
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM (SELECT DISTINCT day, client FROM events WHERE kind = 'deliver')`,
     ),
@@ -153,15 +176,44 @@ async function stats(env) {
        WHERE kind = 'deliver' AND day >= date('now', '-30 day'))`,
     ),
     env.DB.prepare(
-      `SELECT COUNT(DISTINCT client) AS n FROM events
-       WHERE kind = 'poll' AND day = date('now', '-1 day')`,
+      `SELECT DISTINCT client FROM events WHERE kind = 'poll' AND day = date('now', '-1 day')`,
+    ),
+    env.DB.prepare(
+      `SELECT client, version AS code FROM events
+       WHERE kind = 'person' AND day = date('now', '-1 day')`,
     ),
   ]);
+  await env.DB.prepare(`DELETE FROM events WHERE kind = 'person' AND day < date('now', '-2 day')`)
+    .run()
+    .catch(() => {});
+  const clients = installs.results.map((row) => row.client);
   return {
     deliveries: total.results[0]?.n ?? 0,
     deliveriesLast30Days: monthly.results[0]?.n ?? 0,
-    activeInstalls: active.results[0]?.n ?? 0,
+    activeInstalls: clients.length,
+    activeUsers: countPeople(clients, links.results),
   };
+}
+
+/** Installs joined by any shared code, counted as connected groups. */
+function countPeople(clients, links) {
+  const parent = new Map();
+  const find = (node) => {
+    let root = node;
+    while (parent.get(root) !== root) root = parent.get(root);
+    parent.set(node, root);
+    return root;
+  };
+  const add = (node) => {
+    if (!parent.has(node)) parent.set(node, node);
+  };
+  for (const client of clients) add(`install:${client}`);
+  for (const { client, code } of links) {
+    if (!parent.has(`install:${client}`)) continue;
+    add(`code:${code}`);
+    parent.set(find(`install:${client}`), find(`code:${code}`));
+  }
+  return new Set(clients.map((client) => find(`install:${client}`))).size;
 }
 
 export default {

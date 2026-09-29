@@ -59,6 +59,15 @@ the last complete UTC day**.
 `client` is a truncated SHA-256 of a secret salt, the IP and the user agent. No
 address is stored, and the value is meaningless without `CLIENT_SALT`.
 
+**Active users are people, not installs.** Every update check carries an
+`x-mtcode-active-user` header: one code per Claude or ChatGPT account the desktop
+finds signed in (`apps/desktop/src/updates/activeUser.ts`), each a one-way SHA-256
+of the provider's opaque account id and the UTC date, made on the device. Devices
+on one account send the same code that day, so `/stats` joins installs that share
+a code and reports `activeUsers` next to `activeInstalls`. The codes rotate daily,
+so nobody can be followed across days, and rows older than two days are deleted.
+No email, name, token, or GitHub id is ever sent.
+
 ## How the app finds it
 
 `T3CODE_DESKTOP_UPDATE_URL` makes `resolveGitHubPublishConfig` emit a `generic`

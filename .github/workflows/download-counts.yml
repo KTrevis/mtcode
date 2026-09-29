@@ -73,7 +73,9 @@ jobs:
           curl -fsS --max-time 20 "$UPDATES_ORIGIN/stats" > worker-stats.json \
             || echo '{"deliveries":0,"deliveriesLast30Days":0,"activeInstalls":0}' > worker-stats.json
           worker_deliveries=$(jq '.deliveries // 0' worker-stats.json)
-          worker_active=$(jq '.activeInstalls // 0' worker-stats.json)
+          # People, not installs: the Worker joins installs that sent the same
+          # anonymous active-user code, so one person's three laptops are one.
+          worker_active=$(jq '.activeUsers // .activeInstalls // 0' worker-stats.json)
 
           total=$((github_total + worker_deliveries))
           today=$(date -u +%Y-%m-%d)
@@ -129,7 +131,7 @@ jobs:
           ' > downloads-total.json
 
           # Active users come from the Worker alone: every install reads its
-          # feed, and it counts the clients that polled on the last complete
+          # feed, and it counts the people that polled on the last complete
           # UTC day. GitHub's latest-mac.yml counter can no longer stand in for
           # installs -- those fetches are mostly the Worker refilling its feed
           # cache, so an estimate built on them counted the same Macs twice.

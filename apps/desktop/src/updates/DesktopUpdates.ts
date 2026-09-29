@@ -32,6 +32,7 @@ import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import { activeUserHeaders } from "./activeUser.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
@@ -432,6 +433,16 @@ export const make = Effect.gen(function* () {
       const checkedAt = yield* currentIsoTimestamp;
       yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
       yield* logUpdaterInfo("checking for updates", { reason });
+      // Today's anonymous active-user codes ride along so the update feed can
+      // count people rather than installs; see activeUser.ts for what is sent.
+      const headers = yield* Effect.sync(() =>
+        activeUserHeaders({
+          homeDirectory: environment.homeDirectory,
+          env: process.env,
+          day: checkedAt.slice(0, 10),
+        }),
+      );
+      yield* electronUpdater.setRequestHeaders(headers);
 
       return yield* electronUpdater.checkForUpdates.pipe(
         Effect.as(true),
