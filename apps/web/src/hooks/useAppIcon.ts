@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { usePrimarySettings } from "./useSettings";
 import { useSidebarStageBackdropVariant } from "../components/SidebarStageBackdrop";
-import { isLocalSky, SKY_OPTIONS } from "../artwork/skyArtwork";
+import { isLocalSky, SKY_OPTIONS, skyIconKey } from "../artwork/skyArtwork";
 import {
   BLUEPRINT_ICON_BACKGROUND,
   renderArtworkAppIcon,
@@ -30,7 +30,12 @@ export function useAppIcon(): void {
     true,
     selection === "match-artwork" ? undefined : artworkMode ? selection : "none",
   );
-  const sky = artwork?.kind === "custom" ? artwork.sky : undefined;
+  const sky = artwork?.kind === "sky" ? artwork.conditions : undefined;
+  // The icon only moves when its coarser rounding of the sky does, so the sky
+  // is held until then and the repaint does not re-run on every tick.
+  const skyKey = sky ? skyIconKey(sky) : null;
+  const [iconSky, setIconSky] = useState({ key: skyKey, sky });
+  if (iconSky.key !== skyKey) setIconSky({ key: skyKey, sky });
   // The Nightly scene is the shipped tile itself, so it wears the shipped icon.
   // It is also where a local sky lands before it has a location or a forecast,
   // and redrawing it from the raw layers loses the tile's glass and shape.
@@ -47,11 +52,12 @@ export function useAppIcon(): void {
     if (setIcon === undefined) return;
     let cancelled = false;
     if (artworkMode) {
-      if (background === null) {
+      const current = iconSky.sky;
+      if (current === undefined && background === null) {
         void setIcon({ id: "default" }).catch(() => undefined);
       } else {
         // A sky recolours the shipped tile; anything else is cropped artwork.
-        void (sky ? renderSkyAppIcon(sky.phase, sky.weather) : renderArtworkAppIcon(background))
+        void (current ? renderSkyAppIcon(current) : renderArtworkAppIcon(background!))
           .then((image) => {
             if (!cancelled) return setIcon({ id: "artwork", image });
           })
@@ -65,5 +71,5 @@ export function useAppIcon(): void {
     }
     const own = custom.find((icon) => icon.id === selection);
     void setIcon(own ? { id: own.id, image: own.image } : { id: selection }).catch(() => undefined);
-  }, [custom, selection, artworkMode, background, sky]);
+  }, [custom, selection, artworkMode, background, iconSky]);
 }

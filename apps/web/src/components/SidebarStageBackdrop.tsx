@@ -5,30 +5,40 @@ import { APP_HAS_UPDATE_TRACKS, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 import { usePrimarySettings } from "../hooks/useSettings";
+import { isLocalSky, SKY_OPTIONS } from "../artwork/skyArtwork";
 import {
-  isLocalSky,
-  SKY_OPTIONS,
-  skyArtworkImage,
+  presetConditions,
+  skyKey,
+  skyPhaseOf,
+  skyWeatherOf,
+  withoutWeather,
+  type SkyConditions,
   type SkyPhase,
   type SkyWeather,
-} from "../artwork/skyArtwork";
+} from "../artwork/skyConditions";
+import { skySceneMarkup } from "../artwork/skyScene";
 import { useLocalSky } from "../artwork/localSky";
 
 export type SidebarStageBackdropVariant =
   | { readonly kind: "nightly" }
   | { readonly kind: "dev" }
-  | {
-      readonly kind: "custom";
-      readonly image: string;
-      readonly name: string;
-      // Set when the image is one of the generated skies, so the app icon can
-      // draw the square composition instead of cropping the header band.
-      readonly sky?: { readonly phase: SkyPhase; readonly weather: SkyWeather };
-    };
+  | { readonly kind: "custom"; readonly image: string; readonly name: string }
+  // A drawn sky, from a preset or the live weather; the app icon repaints to match.
+  | { readonly kind: "sky"; readonly conditions: SkyConditions; readonly name: string };
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
 export const NIGHTLY_BACKDROP: SidebarStageBackdropVariant = { kind: "nightly" };
 export const DEV_BACKDROP: SidebarStageBackdropVariant = { kind: "dev" };
+
+/** A preset sky. Night · Cloudy is the Night sky scene itself, so it draws that. */
+function presetBackdrop(
+  phase: SkyPhase,
+  weather: SkyWeather,
+  name: string,
+): SidebarStageBackdropVariant {
+  if (phase === "night" && weather === "cloudy") return NIGHTLY_BACKDROP;
+  return { kind: "sky", conditions: presetConditions(phase, weather), name };
+}
 
 /**
  * Resolve the artwork to draw from the account's choice.
@@ -52,13 +62,7 @@ export function resolveSidebarArtwork(input: {
   if (selection === "none") return null;
   if (isLocalSky(selection)) return NIGHTLY_BACKDROP;
   const sky = SKY_OPTIONS.find((option) => option.value === selection);
-  if (sky)
-    return {
-      kind: "custom",
-      image: skyArtworkImage(sky.phase, sky.weather),
-      name: sky.label,
-      sky: { phase: sky.phase, weather: sky.weather },
-    };
+  if (sky) return presetBackdrop(sky.phase, sky.weather, sky.label);
   if (selection === "night") return NIGHTLY_BACKDROP;
   if (selection === "day") return DEV_BACKDROP;
   if (selection.length > 0 && selection !== "auto") {
@@ -117,14 +121,17 @@ export function useSidebarStageBackdropVariant(
     custom: settings.customSidebarArtworks,
   }));
   const localSky = useLocalSky(isLocalSky(artwork.selection));
-  if (isLocalSky(artwork.selection) && localSky.ready && localSky.location) {
-    const weather = artwork.selection === "local-weather" ? localSky.weather : "clear";
-    return {
-      kind: "custom",
-      image: skyArtworkImage(localSky.phase, weather),
-      name: `Local ${localSky.phase} · ${weather}`,
-      sky: { phase: localSky.phase, weather },
-    };
+  if (isLocalSky(artwork.selection) && localSky.location && localSky.conditions) {
+    // Day and night need only the location; weather waits for its forecast.
+    const withWeather = artwork.selection === "local-weather";
+    if (!withWeather || localSky.ready) {
+      const conditions = withWeather ? localSky.conditions : withoutWeather(localSky.conditions);
+      return {
+        kind: "sky",
+        conditions,
+        name: `Local sky · ${skyPhaseOf(conditions)} · ${skyWeatherOf(conditions)}`,
+      };
+    }
   }
   // An explicit pick is the user telling us what to draw, so it outranks the
   // environment-identification mode and the palette heuristic that upstream
@@ -153,12 +160,57 @@ export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdro
 
 export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {
   if (variant.kind === "custom") return <CustomArt variant={variant} />;
+  if (variant.kind === "sky") return <SkyArt variant={variant} />;
   return variant.kind === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
 }
 
 export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
   if (variant.kind === "custom") return <CustomArt variant={variant} />;
+  if (variant.kind === "sky") return <SkyArt variant={variant} compact />;
   return variant.kind === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
+}
+
+// Sidebar, send button and icon picker often show the same sky at once.
+const skyMarkupCache = new Map<string, string>();
+function skyMarkup(conditions: SkyConditions): string {
+  const key = skyKey(conditions);
+  let markup = skyMarkupCache.get(key);
+  if (markup === undefined) {
+    markup = skySceneMarkup(conditions);
+    if (skyMarkupCache.size >= 8) skyMarkupCache.delete(skyMarkupCache.keys().next().value!);
+    skyMarkupCache.set(key, markup);
+  }
+  return markup;
+}
+
+/**
+ * A drawn sky, framed like the Night sky scene: 96 units tall at the header's
+ * height and extended sideways, so a wider sidebar shows more sky rather than
+ * a bigger one.
+ */
+function SkyArt({
+  variant,
+  compact = false,
+}: {
+  variant: Extract<SidebarStageBackdropVariant, { kind: "sky" }>;
+  compact?: boolean;
+}) {
+  const idPrefix = useId().replaceAll(":", "");
+  return (
+    <svg
+      data-stage-art="sky"
+      role="img"
+      aria-label={variant.name}
+      className="h-full w-full"
+      fill="none"
+      preserveAspectRatio="xMinYMin slice"
+      viewBox={compact ? "96 0 8192 96" : STAGE_BACKDROP_VIEW_BOX}
+      xmlns="http://www.w3.org/2000/svg"
+      dangerouslySetInnerHTML={{
+        __html: skyMarkup(variant.conditions).replaceAll("__ID__", `${idPrefix}-sky-`),
+      }}
+    />
+  );
 }
 
 /**

@@ -1,25 +1,32 @@
 import { useSyncExternalStore } from "react";
-import { phaseFromSun, weatherFromCode, type SkyPhase, type SkyWeather } from "./skyArtwork";
+import {
+  conditionsAt,
+  skyKey,
+  skyPhaseOf,
+  skyWeatherOf,
+  type SkyConditions,
+  type SkyForecast,
+  type SkyPhase,
+  type SkyWeather,
+} from "./skyConditions";
 
 export type SkyLocation = { latitude: number; longitude: number; name: string };
-type Forecast = {
-  sunrises: number[];
-  sunsets: number[];
-  isDay: boolean;
-  code: number;
-  fetchedAt: number;
-};
+type Forecast = SkyForecast & { fetchedAt: number };
 type Snapshot = {
   location: SkyLocation | null;
+  /** The sky right now: the sun and moon from the location, the rest from the forecast. */
+  conditions: SkyConditions | null;
   phase: SkyPhase;
   weather: SkyWeather;
   status: string;
+  /** A forecast has arrived, so `conditions` carries real weather. */
   ready: boolean;
 };
 const storageKey = "mt-code.sky-location.v1";
 const listeners = new Set<() => void>();
 let snapshot: Snapshot = {
   location: null,
+  conditions: null,
   phase: "night",
   weather: "clear",
   status: "Choose a location to enable the local sky.",
@@ -81,24 +88,47 @@ export function setSkyLocation(location: SkyLocation | null) {
   }
   emit({
     location: approximate,
+    conditions: null,
     ready: false,
     status: approximate ? "Updating local sky…" : "Choose a location to enable the local sky.",
   });
   if (listeners.size) void tick();
 }
 
-function updatePhase() {
-  if (!forecast) return;
+/**
+ * Recomputes the sky every tick: the sun and moon move between weather
+ * refreshes, so only the clouds wait for the network. Listeners only hear
+ * about it when the sky would draw differently.
+ */
+function updateSky() {
+  const location = snapshot.location;
+  if (!location) return;
+  const conditions = conditionsAt(Date.now(), location, forecast);
+  const ready = forecast !== null;
+  if (
+    snapshot.conditions &&
+    ready === snapshot.ready &&
+    skyKey(conditions) === skyKey(snapshot.conditions)
+  )
+    return;
   emit({
-    phase: phaseFromSun(Date.now(), forecast.sunrises, forecast.sunsets, forecast.isDay),
-    weather: weatherFromCode(forecast.code),
-    ready: true,
+    conditions,
+    phase: skyPhaseOf(conditions),
+    weather: skyWeatherOf(conditions),
+    ready,
   });
 }
 
+/** Open-Meteo omits a layer when its model has none; the code still says how grey it is. */
+const coverFromCode = (code: number) => (code <= 0 ? 0 : code === 1 ? 20 : code === 2 ? 50 : 95);
+const percent = (value: unknown, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.min(100, Math.max(0, value))
+    : fallback;
+
 async function tick() {
   if (typeof document !== "undefined" && document.hidden) return;
-  updatePhase();
+  updateSky();
   const location = snapshot.location;
   if (
     !location ||
@@ -115,11 +145,9 @@ async function tick() {
     const params = new URLSearchParams({
       latitude: String(location.latitude),
       longitude: String(location.longitude),
-      current: "is_day,weather_code",
-      daily: "sunrise,sunset",
-      timezone: "auto",
+      current:
+        "weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_speed_10m,visibility",
       timeformat: "unixtime",
-      forecast_days: "3",
     });
     const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
       signal: controller.signal,
@@ -127,33 +155,27 @@ async function tick() {
       referrerPolicy: "no-referrer",
     });
     if (!response.ok) throw new Error("Weather unavailable");
-    const data = (await response.json()) as {
-      current?: { is_day?: number; weather_code?: number };
-      daily?: { sunrise?: unknown[]; sunset?: unknown[] };
-    };
-    const rises = data.daily?.sunrise;
-    const sets = data.daily?.sunset;
-    if (
-      !Array.isArray(rises) ||
-      !Array.isArray(sets) ||
-      rises.length === 0 ||
-      rises.length !== sets.length ||
-      !rises.every((v) => v === null || (typeof v === "number" && Number.isFinite(v))) ||
-      !sets.every((v) => v === null || (typeof v === "number" && Number.isFinite(v))) ||
-      ![0, 1].includes(data.current?.is_day ?? -1) ||
-      typeof data.current?.weather_code !== "number" ||
-      !Number.isFinite(data.current.weather_code)
-    )
+    const data = (await response.json()) as { current?: Record<string, unknown> };
+    const current = data.current;
+    const code = current?.weather_code;
+    if (typeof code !== "number" || !Number.isFinite(code))
       throw new Error("Invalid weather response");
     if (request !== controller) return;
+    const total = percent(current!.cloud_cover, coverFromCode(code));
     forecast = {
-      sunrises: rises.map((v) => (typeof v === "number" ? v : 0)),
-      sunsets: sets.map((v) => (typeof v === "number" ? v : 0)),
-      isDay: data.current!.is_day === 1,
-      code: data.current.weather_code,
+      code,
+      cloudCover: total,
+      cloudLow: percent(current!.cloud_cover_low, 0),
+      cloudMid: percent(current!.cloud_cover_mid, 0),
+      cloudHigh: percent(current!.cloud_cover_high, 0),
+      wind: percent(current!.wind_speed_10m, 8),
+      visibility:
+        typeof current!.visibility === "number" && Number.isFinite(current!.visibility)
+          ? current!.visibility
+          : null,
       fetchedAt: Date.now(),
     };
-    updatePhase();
+    updateSky();
     emit({ status: "Local sky is up to date." });
   } catch {
     if (request === controller) {
@@ -182,6 +204,7 @@ const onStorage = (event: StorageEvent) => {
   const location = readLocation();
   emit({
     location,
+    conditions: null,
     ready: false,
     status: location ? "Updating local sky…" : "Choose a location to enable the local sky.",
   });

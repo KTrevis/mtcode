@@ -10,6 +10,7 @@ import {
   StageBackdropArt,
   StageBackdropButtonArt,
 } from "./SidebarStageBackdrop";
+import { presetConditions } from "../artwork/skyConditions";
 
 describe("SidebarStageBackdrop", () => {
   it("resolves stage artwork only when enabled", () => {
@@ -26,7 +27,11 @@ describe("SidebarStageBackdrop", () => {
     expect(resolveEnvironmentIdentificationPillLabel("Alpha")).toBeNull();
   });
 
-  it.each([NIGHTLY_BACKDROP, DEV_BACKDROP] as const)(
+  it.each([
+    NIGHTLY_BACKDROP,
+    DEV_BACKDROP,
+    { kind: "sky", conditions: presetConditions("dusk", "storm"), name: "Dusk · Storm" },
+  ] as const)(
     "uses unique SVG definition ids when $kind artwork is rendered more than once",
     (variant) => {
       const markup = renderToStaticMarkup(
@@ -86,6 +91,15 @@ describe("resolveSidebarArtwork", () => {
       DEV_BACKDROP,
     );
     expect(resolveSidebarArtwork({ selection: "none", stageLabel: "Nightly", custom })).toBeNull();
+  });
+
+  it("draws Night · Cloudy with the Night sky scene, and other presets as drawn skies", () => {
+    expect(
+      resolveSidebarArtwork({ selection: "sky-night-cloudy", stageLabel: "", custom }),
+    ).toEqual(NIGHTLY_BACKDROP);
+    expect(
+      resolveSidebarArtwork({ selection: "sky-night-clear", stageLabel: "", custom }),
+    ).toMatchObject({ kind: "sky", name: "Night · Clear" });
   });
 
   it("renders the account's own artwork, and nothing once it is deleted", () => {

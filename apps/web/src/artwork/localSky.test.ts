@@ -18,10 +18,14 @@ let saved: Map<string, string>;
 const response = (code = 0) => ({
   ok: true,
   json: async () => ({
-    current: { is_day: 1, weather_code: code },
-    daily: {
-      sunrise: [Date.parse("2026-09-20T06:00Z") / 1000],
-      sunset: [Date.parse("2026-09-20T18:00Z") / 1000],
+    current: {
+      weather_code: code,
+      cloud_cover: code >= 3 ? 95 : 0,
+      cloud_cover_low: code >= 3 ? 90 : 0,
+      cloud_cover_mid: 0,
+      cloud_cover_high: 0,
+      wind_speed_10m: 10,
+      visibility: 20_000,
     },
   }),
 });
@@ -36,7 +40,8 @@ async function start(enabled = true) {
 beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-09-20T12:00Z"));
+  // Early afternoon at the test location, so the sun is well up.
+  vi.setSystemTime(new Date("2026-09-20T18:00Z"));
   saved = new Map();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => saved.get(key) ?? null,
@@ -56,18 +61,24 @@ afterEach(() => {
 });
 
 describe("local sky lifecycle", () => {
-  it("supports polar daylight when sunrise and sunset are absent", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        current: { is_day: 1, weather_code: 0 },
-        daily: { sunrise: [null], sunset: [null] },
-      }),
-    });
+  it("draws the sun's sky from the location before any forecast arrives", async () => {
+    fetchMock.mockReturnValue(new Promise(() => {}));
     const store = await start();
     store.setSkyLocation(location);
     await vi.advanceTimersByTimeAsync(0);
-    expect(hook.read!()).toMatchObject({ ready: true, phase: "day" });
+    expect(hook.read!()).toMatchObject({ ready: false, phase: "day" });
+    expect((hook.read!() as { conditions: { sun: number } }).conditions.sun).toBeGreaterThan(30);
+  });
+  it("carries the forecast's cloud layers into the sky", async () => {
+    fetchMock.mockResolvedValue(response(3));
+    const store = await start();
+    store.setSkyLocation(location);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hook.read!()).toMatchObject({
+      ready: true,
+      weather: "cloudy",
+      conditions: { low: 0.9, precipitation: "none" },
+    });
   });
   it("makes no network request until a location is selected, then sends only rounded coordinates", async () => {
     const store = await start();
@@ -131,7 +142,7 @@ describe("local sky lifecycle", () => {
     expect(saved.size).toBe(0);
   });
   it("rejects malformed weather rather than showing a false sunny sky", async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ current: { weather_code: 0 } }) });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ current: { cloud_cover: 20 } }) });
     const store = await start();
     store.setSkyLocation(location);
     await vi.advanceTimersByTimeAsync(0);

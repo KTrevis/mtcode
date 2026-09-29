@@ -5,9 +5,9 @@ import {
   skyHidesStars,
   TILE_STARS,
   skyIconLookup,
+  skyIconConditions,
   skyIconOverlayImage,
-  type SkyPhase,
-  type SkyWeather,
+  type SkyConditions,
 } from "./skyArtwork";
 import blueprint from "../../../../assets/dev/app-icon.icon/Assets/background.svg?raw";
 
@@ -202,8 +202,9 @@ function rampLookup(colors: readonly string[]): Uint8ClampedArray {
  * and given its weather. Every tone maps through the scene palette, so the
  * artwork, its gloss and the mark all stay exactly as they ship.
  */
-export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Promise<string> {
-  const overlaySource = skyIconOverlayImage(phase, weather);
+export async function renderSkyAppIcon(sky: SkyConditions): Promise<string> {
+  const conditions = skyIconConditions(sky);
+  const overlaySource = skyIconOverlayImage(conditions);
   const [tile, overlay] = await Promise.all([
     loadImage(munimIcon),
     overlaySource === "" ? Promise.resolve(null) : loadImage(overlaySource),
@@ -214,7 +215,7 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas unavailable");
   context.drawImage(tile, 0, 0, 1024, 1024);
-  const colors = skyIconLookup(phase, weather);
+  const colors = skyIconLookup(conditions);
   if (colors === null) {
     if (overlay) context.drawImage(overlay, 0, 0, 1024, 1024);
     return canvas.toDataURL("image/png");
@@ -227,7 +228,7 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const table = rampLookup(colors);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
-  const hidden = skyHidesStars(phase, weather) ? starLevels(origin) : null;
+  const hidden = skyHidesStars(conditions) ? starLevels(origin) : null;
   for (let pixel = 0; pixel < frame.data.length; pixel += 4) {
     if (frame.data[pixel + 3] === 0) continue;
     const red = frame.data[pixel]!;
