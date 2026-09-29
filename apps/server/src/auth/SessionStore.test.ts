@@ -100,6 +100,7 @@ const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessions.AuthSessi
   revokeAllExcept: () => Effect.fail(repositoryFailure),
   setLastConnectedAt: () => Effect.void,
   setClientConnection: () => Effect.void,
+  extendExpiry: () => Effect.void,
 });
 
 const failingSessionLookupCredentialLayer = Layer.effect(
@@ -437,6 +438,71 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
           error.expiresAt.epochMilliseconds,
         );
       }
+    }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+  );
+
+  it.effect("slides a paired bearer session past its token expiry while it is in use", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({
+        method: "bearer-access-token",
+        subject: "paired-client",
+      });
+
+      yield* TestClock.adjust(Duration.days(20));
+      const slid = yield* sessions.verify(issued.token);
+      expect(slid.expiresAt?.epochMilliseconds ?? 0).toBeGreaterThan(
+        issued.expiresAt.epochMilliseconds,
+      );
+
+      yield* TestClock.adjust(Duration.days(20));
+      const pastTokenExpiry = yield* sessions.verify(issued.token);
+      expect(pastTokenExpiry.sessionId).toBe(issued.sessionId);
+
+      const websocket = yield* sessions.issueWebSocketToken(issued.sessionId);
+      const verifiedSocket = yield* sessions.verifyWebSocketToken(websocket.token);
+      expect(verifiedSocket.sessionId).toBe(issued.sessionId);
+      const listed = yield* sessions.listActive();
+      expect(listed.map((session) => session.sessionId)).toContain(issued.sessionId);
+    }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+  );
+
+  it.effect("expires a paired bearer session left idle for a full lifetime", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({
+        method: "bearer-access-token",
+        subject: "idle-paired-client",
+      });
+
+      yield* TestClock.adjust(Duration.days(20));
+      const slid = yield* sessions.verify(issued.token);
+      yield* TestClock.adjust(Duration.days(31));
+
+      const error = yield* Effect.flip(sessions.verify(issued.token));
+      expect(error._tag).toBe("SessionTokenExpiredError");
+      if (error._tag === "SessionTokenExpiredError") {
+        expect(error.expiresAt.epochMilliseconds).toBe(slid.expiresAt?.epochMilliseconds);
+      }
+    }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+  );
+
+  it.effect("never slides a bearer session issued with a shorter explicit lifetime", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({
+        method: "bearer-access-token",
+        subject: "short-lived-token",
+        ttl: Duration.hours(2),
+      });
+
+      yield* TestClock.adjust(Duration.hours(1));
+      const verified = yield* sessions.verify(issued.token);
+      expect(verified.expiresAt?.epochMilliseconds).toBe(issued.expiresAt.epochMilliseconds);
+
+      yield* TestClock.adjust(Duration.hours(2));
+      const error = yield* Effect.flip(sessions.verify(issued.token));
+      expect(error._tag).toBe("SessionTokenExpiredError");
     }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
   );
 
