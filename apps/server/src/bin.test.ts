@@ -515,6 +515,16 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer))),
   );
 
+  it.effect("routes subcommands on the exported cli instead of treating them as a cwd", () =>
+    Effect.gen(function* () {
+      const service = yield* captureStdout(runCli(["service", "--help"]));
+      assert.include(service.output, `Manage the ${resolveAppDisplayName()} background service.`);
+
+      const trace = yield* captureStdout(runCli(["trace", "--help"]));
+      assert.include(trace.output, "Inspect the local server trace file.");
+    }),
+  );
+
   it.effect("exposes service lifecycle commands without T3 Connect configuration", () =>
     Effect.gen(function* () {
       const { output } = yield* captureStdout(runCli(["service", "--help"], noConnectCli));

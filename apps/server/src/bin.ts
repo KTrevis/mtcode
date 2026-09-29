@@ -135,13 +135,14 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       servicePreflightCommand,
       sshHelperCommand,
       themeCommand,
+      traceCommand,
       triageCommand,
       piSupervisorCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
   );
 
-export const cli = makeCli().pipe(Command.withSubcommands([traceCommand]));
+export const cli = makeCli();
 
 if (
   isEntrypoint({
