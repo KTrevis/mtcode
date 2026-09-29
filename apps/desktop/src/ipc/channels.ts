@@ -140,3 +140,6 @@ export const OPEN_TERMINAL_CHANNEL = "desktop:open-terminal";
 
 export const REQUEST_TERMINAL_PERMISSION_CHANNEL = "desktop:request-terminal-permission";
 export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
+
+export const RECEIVE_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:receive-provider-auth-callback";
+export const CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:cancel-provider-auth-callback";
