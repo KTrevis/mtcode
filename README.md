@@ -57,10 +57,9 @@ MT Code is a free, open-source desktop app for running and controlling coding ag
 - **macOS** (Apple Silicon): `MT-Code-<version>-arm64.dmg`
 - **Windows** (x64): `MT-Code-<version>-x64.exe`
 
-macOS builds are signed with a Developer ID but not yet notarized; Windows builds are unsigned:
+macOS builds are signed with a Developer ID and notarized by Apple, so they open without a Gatekeeper warning. Windows builds are unsigned: if SmartScreen warns, choose **More info → Run anyway**.
 
-- macOS: if Gatekeeper warns, right-click the app → **Open** (first launch only).
-- Windows: if SmartScreen warns, choose **More info → Run anyway**.
+There is no Linux build yet; see the comparison below.
 
 The app auto-updates from this repository, so you get new MT Code features and fixes as they ship.
 
@@ -83,21 +82,11 @@ Your existing subscriptions are used directly — MT Code sells nothing and adds
 
 Same cost model as T3 Code: the app and its server run on your computer, and model tokens come from Claude / Codex / Cursor / Grok / OpenCode. Munim hosts nothing on your behalf — pairing and Computer Use reach your machine directly. There is no Munim-hosted web app, no model proxy, no Workers AI classifier, and no PlanetScale relay unless you explicitly opt into that paid stack.
 
-#### Debian, Ubuntu (`.deb`)
-
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
-
-```bash
-sudo apt install ./T3-Code-*.deb
-```
-
-#### Arch Linux (AUR)
-
 ## MT Code vs T3 Code
 
 Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code started as a fork. Upstream is merged only when you ask an agent to do it — nothing pulls `pingdotgg/t3code` automatically. Some rows started as unmerged upstream PRs that MT Code ships today; others were built here.
 
-This table lists only the differences, roughly in the order of how much they change the app. Once T3 Code ships a feature MT Code had first, MT Code adopts T3 Code's implementation and the row leaves the table — drag-to-reorder, PDF attachments, cookie import, tool-activity grouping, composer drawers, preview viewport, file-chip reveal, macOS editor discovery, pull request stacks, Cursor / Grok / OpenCode Go limits, full-text sidebar search, Forgejo hosting, thread notifications, and one-tap Continue all went that way. Nothing T3 Code ships is missing here.
+This table lists only the differences, roughly in the order of how much they change the app. Once T3 Code ships a feature MT Code had first, MT Code adopts T3 Code's implementation and the row leaves the table — drag-to-reorder, PDF attachments, cookie import, tool-activity grouping, composer drawers, preview viewport, file-chip reveal, macOS editor discovery, pull request stacks, Cursor / Grok / OpenCode Go limits, full-text sidebar search, Forgejo hosting, thread notifications, one-tap Continue, and the per-thread auto-settle switch all went that way. Apart from the rows T3 Code wins at the bottom, nothing T3 Code ships is missing here.
 
 | Feature                                                                                                                                                                                                      | MT Code |                 T3 Code                 |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :-----: | :-------------------------------------: |
@@ -105,7 +94,7 @@ This table lists only the differences, roughly in the order of how much they cha
 | **Computer View** — a live remote desktop of the machine a thread runs on, from the chat header; moving over it moves that machine's real cursor, and typing goes where it is focused                        |   ✅    |                   ❌                    |
 | **Agent-chosen computers** — `computer_list` / `computer_send` start a task on another connected machine (this Mac, SSH, T3 Connect, or a paired backend) without changing **Run on**                        |   ✅    |                   ❌                    |
 | **Computer History** — opt-in activity timeline (not screenshots) that agents can reference                                                                                                                  |   ✅    |                   ❌                    |
-| **Realtime voice** — persistent OpenAI Realtime panel so you can talk with the agent, not only dictate                                                                                                       |   ✅    |                   ❌                    |
+| **Realtime voice** — a call panel where you speak to the selected agent and it answers out loud; runs through your ChatGPT account (GPT-Live via Codex) or an OpenAI API key                                 |   ✅    |                   ❌                    |
 | **Voice dictation** — Codex-style mic in the composer (OpenAI or Groq)                                                                                                                                       |   ✅    |                   ❌                    |
 | **Goals** — `/goal` keeps a thread working until the objective is met                                                                                                                                        |   ✅    |                   ❌                    |
 | **Provider handoff** — continue a thread with another provider or account from the model picker; native history when possible, otherwise a bounded handoff of recent work                                    |   ✅    |                   ❌                    |
@@ -130,7 +119,7 @@ This table lists only the differences, roughly in the order of how much they cha
 | **LaTeX math** in chat                                                                                                                                                                                       |   ✅    |                   ❌                    |
 | **Find in chat and terminal** (Cmd/Ctrl+F), Mermaid diagrams, editable queued messages                                                                                                                       |   ✅    |                   ❌                    |
 | **Read state synced across clients** — Done indicators clear on every machine                                                                                                                                |   ✅    |                   ❌                    |
-| **Per-thread auto-settle switch**, pinned threads exempt from settling, and an option to settle only threads without a PR                                                                                    |   ✅    |                   ❌                    |
+| **Pinned threads exempt from settling**, and an option to settle only threads without a PR                                                                                                                   |   ✅    |                   ❌                    |
 | **Recent-threads switcher** — Ctrl+Tab in the desktop app (browsers reserve Ctrl+Tab; rebind in Settings → Keybindings)                                                                                      |   ✅    |                   ❌                    |
 | **Sort threads by last user message**                                                                                                                                                                        |   ✅    |                   ❌                    |
 | **Custom thread title instructions**, and drag to reorder or hide provider models                                                                                                                            |   ✅    |                   ❌                    |
@@ -143,6 +132,7 @@ This table lists only the differences, roughly in the order of how much they cha
 | **`t3 .` opens a folder** in the desktop app or a running server                                                                                                                                             |   ✅    |                   ❌                    |
 | **Desktop extras** — thread deep links (`mtcode://`), external terminal apps, login-shell env allowlist, Windows tray with persist-on-close                                                                  |   ✅    |                   ❌                    |
 | **Installs alongside T3 Code** — own bundle ID (`com.munim.mtcode`) and data directory (`~/.mt`)                                                                                                             |   ✅    |                   ❌                    |
+| **Linux builds** — T3 Code ships an AppImage and a self-updating `.deb`; MT Code releases are macOS and Windows only for now                                                                                 |   ❌    |                   ✅                    |
 | **Hosted web app** — MT Code's own was retired; use T3 Connect or your own tunnel instead                                                                                                                    |   ❌    | ✅ [app.t3.codes](https://app.t3.codes) |
 
 Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, remote access from the [web](https://app.t3.codes) and [mobile apps](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), Connect tunnels — works here too.
