@@ -18,10 +18,15 @@ const REPO = "munimtechnologies/mtcode";
 const TAG_PREFIX = "munim-v";
 const FEED_CACHE_SECONDS = 60;
 
-/** latest-mac.yml, latest.yml, nightly.yml, nightly-mac.yml */
-const FEED_RE = /^\/(latest|nightly)(-mac)?\.yml$/;
-/** MT-Code-0.0.84-arm64.dmg, ...-x64.exe.blockmap, and friends */
-const ASSET_RE = /^\/MT-Code-(.+?)-(?:arm64|x64)\.(?:dmg|zip|exe)(?:\.blockmap)?$/;
+/** latest.yml, latest-mac.yml, latest-linux.yml, latest-linux-arm64.yml, and nightly twins */
+const FEED_RE = /^\/(latest|nightly)(-mac|-linux(?:-arm64)?)?\.yml$/;
+/**
+ * MT-Code-0.0.84-arm64.dmg, ...-x64.exe.blockmap, and friends. Linux names
+ * carry the packager's own arch spelling: electron-builder writes
+ * MT-Code-<version>-x86_64.AppImage and MT-Code-<version>-amd64.deb for x64.
+ */
+const ASSET_RE =
+  /^\/MT-Code-(.+?)-(?:arm64|x64|x86_64|amd64)\.(?:dmg|zip|exe|AppImage|deb)(?:\.blockmap)?$/;
 
 const githubLatest = (name) => `https://github.com/${REPO}/releases/latest/download/${name}`;
 const githubTagged = (version, name) =>
@@ -46,6 +51,13 @@ async function clientId(request, env) {
 function platformOf(pathname) {
   if (pathname.endsWith("-mac.yml") || pathname.endsWith(".dmg") || pathname.endsWith(".zip")) {
     return "mac";
+  }
+  if (
+    /-linux(?:-arm64)?\.yml$/.test(pathname) ||
+    pathname.endsWith(".AppImage") ||
+    pathname.endsWith(".deb")
+  ) {
+    return "linux";
   }
   if (pathname.endsWith(".yml") || pathname.endsWith(".exe")) return "win";
   return "";
@@ -159,7 +171,13 @@ export default {
         return Response.json({
           service: "mtcode-updates",
           repo: REPO,
-          routes: ["/latest-mac.yml", "/latest.yml", "/MT-Code-<version>-<arch>.<ext>", "/stats"],
+          routes: [
+            "/latest-mac.yml",
+            "/latest.yml",
+            "/latest-linux.yml",
+            "/MT-Code-<version>-<arch>.<ext>",
+            "/stats",
+          ],
         });
       }
 

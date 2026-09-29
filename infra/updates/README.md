@@ -23,11 +23,14 @@ blockmap reads.
 The Worker owns no artifacts. GitHub Releases stays the only place a release
 lives.
 
-| Route                                                | Behaviour                                                           |
-| ---------------------------------------------------- | ------------------------------------------------------------------- |
-| `/latest-mac.yml`, `/latest.yml`, `/nightly*.yml`    | Proxied from the newest GitHub release, cached 60s. Records a poll. |
-| `/MT-Code-<version>-<arch>.<ext>` (also `.blockmap`) | Records a delivery, then `302`s to that version's GitHub asset.     |
-| `/stats`                                             | `{ deliveries, deliveriesLast30Days, activeInstalls }`              |
+| Route                                                                  | Behaviour                                                           |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `/latest-mac.yml`, `/latest.yml`, `/latest-linux.yml`, `/nightly*.yml` | Proxied from the newest GitHub release, cached 60s. Records a poll. |
+| `/MT-Code-<version>-<arch>.<ext>` (also `.blockmap`)                   | Records a delivery, then `302`s to that version's GitHub asset.     |
+| `/stats`                                                               | `{ deliveries, deliveriesLast30Days, activeInstalls }`              |
+
+`<arch>.<ext>` covers the macOS `.dmg`/`.zip`, the Windows `.exe`, and Linux,
+where electron-builder spells x64 its own way: `x86_64.AppImage` and `amd64.deb`.
 
 Redirecting rather than streaming keeps ~150 MB of release payload off the
 Worker while still putting every request through the counter — the updater
@@ -50,7 +53,8 @@ address is stored, and the value is meaningless without `CLIENT_SALT`.
 
 `T3CODE_DESKTOP_UPDATE_URL` makes `resolveGitHubPublishConfig` emit a `generic`
 publish provider instead of `github`; `scripts/personal-publish-github-release.sh`
-sets it, and passes it to the Windows build host. `useMultipleRangeRequest` must
+sets it, and passes it to the Windows build host and to the Linux build in its WSL
+Ubuntu (`scripts/personal-linux-build.sh`). `useMultipleRangeRequest` must
 stay `false`: the bytes come from GitHub's release storage, which answers a
 multi-range request with **501**, and the generic provider enables multi-range by
 default.
