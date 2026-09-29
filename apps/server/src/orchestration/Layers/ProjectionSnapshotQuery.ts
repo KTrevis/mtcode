@@ -692,7 +692,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           EXISTS (
             SELECT 1
             FROM projection_thread_turn_queue AS queued_turn
-            WHERE queued_turn.thread_id = projection_threads.thread_id
+            WHERE queued_turn.thread_id = threads.thread_id
               AND queued_turn.status = 'queued'
           ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
