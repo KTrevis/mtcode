@@ -421,6 +421,10 @@ export class SessionStore extends Context.Service<
 
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
+// Paired clients hold a default-lifetime bearer token and have no way to
+// refresh it, so the session slides: each use pushes its expiry back to a full
+// TTL, written at most once per interval. An idle client still expires.
+const SESSION_SLIDE_INTERVAL = Duration.days(1);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -805,7 +809,9 @@ export const make = Effect.gen(function* () {
           expirationClaim: claims.exp,
         });
       }
-      if (claims.exp <= observedAt.epochMilliseconds) {
+      // A bearer session's row is the authority on expiry, because sliding
+      // moves it past the exp claim baked into the token.
+      if (claims.method !== "bearer-access-token" && claims.exp <= observedAt.epochMilliseconds) {
         return yield* new SessionTokenExpiredError({
           sessionId: claims.sid,
           expiresAt: expiresAt.value,
@@ -829,13 +835,49 @@ export const make = Effect.gen(function* () {
           revokedAt: row.value.revokedAt,
         });
       }
+      if (claims.method !== "bearer-access-token") {
+        return {
+          sessionId: claims.sid,
+          token,
+          method: claims.method,
+          client: toClientMetadata(row.value.client),
+          expiresAt: expiresAt.value,
+          subject: claims.sub,
+          scopes: claims.scopes,
+          ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
+        } satisfies VerifiedSession;
+      }
+
+      if (row.value.expiresAt.epochMilliseconds <= observedAt.epochMilliseconds) {
+        return yield* new SessionTokenExpiredError({
+          sessionId: claims.sid,
+          expiresAt: row.value.expiresAt,
+          observedAt,
+        });
+      }
+      const sessionTtlMillis = Duration.toMillis(DEFAULT_SESSION_TTL);
+      const slides = claims.exp - claims.iat >= sessionTtlMillis;
+      const recentlySlid =
+        row.value.expiresAt.epochMilliseconds - observedAt.epochMilliseconds >
+        sessionTtlMillis - Duration.toMillis(SESSION_SLIDE_INTERVAL);
+      let sessionExpiresAt = row.value.expiresAt;
+      if (slides && !recentlySlid) {
+        sessionExpiresAt = DateTime.add(observedAt, { milliseconds: sessionTtlMillis });
+        yield* authSessions
+          .extendExpiry({ sessionId: claims.sid, expiresAt: sessionExpiresAt })
+          .pipe(
+            Effect.mapError(
+              (cause) => new SessionCredentialVerificationError({ sessionId: claims.sid, cause }),
+            ),
+          );
+      }
 
       return {
         sessionId: claims.sid,
         token,
         method: claims.method,
         client: toClientMetadata(row.value.client),
-        expiresAt: expiresAt.value,
+        expiresAt: sessionExpiresAt,
         subject: claims.sub,
         scopes: claims.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
