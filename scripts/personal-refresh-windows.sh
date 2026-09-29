@@ -3,6 +3,8 @@
 # Called after a Mac personal install so the fleet stays on the same fork commit.
 #
 # Requires: SSH hosts `blade` and `dell` (Dell may fall back via Blade LAN).
+#   T3_BLADE_SSH_HOST / T3_DELL_SSH_HOST override them (e.g. blade-ts over Tailscale
+#   when the Cloudflare tunnel is down)
 # Optional env:
 #   T3CODE_DESKTOP_VERSION  single MT Code version (resolved from upstream base if unset)
 #   T3_PERSONAL_REPO       default $HOME/dev/t3code
@@ -15,6 +17,8 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
+BLADE="${T3_BLADE_SSH_HOST:-blade}"
+DELL="${T3_DELL_SSH_HOST:-dell}"
 
 # shellcheck source=lib/personal-mt-version.sh
 source "$REPO/scripts/lib/personal-mt-version.sh"
@@ -23,10 +27,10 @@ echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
 # --- Blade (build + install) ---
 echo "-- refreshing Blade --"
-scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" blade:dev/personal-refresh-win.ps1
+scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" "$BLADE":dev/personal-refresh-win.ps1
 # Beside it: both Windows machines launch through this, so that the app lands in the logged-on
 # user's session rather than in session 0, where it runs with no window on any screen.
-scp -o BatchMode=yes "$REPO/scripts/personal-launch-gui.ps1" blade:dev/personal-launch-gui.ps1
+scp -o BatchMode=yes "$REPO/scripts/personal-launch-gui.ps1" "$BLADE":dev/personal-launch-gui.ps1
 # -File args do NOT reliably survive ssh -> cmd -> PowerShell: on 2026-08-28 the
 # refresh logged "args DesktopVersion= ForceRebuild=" and Blade fell back to
 # resolving the version from its own clone, building 0.0.36 while the release
@@ -49,7 +53,7 @@ else
 -DesktopVersion '$T3CODE_DESKTOP_VERSION' \
 -ForceRebuild '${T3_FORCE_REBUILD:-1}'"
 fi
-ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
+ssh -o BatchMode=yes "$BLADE" powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -EncodedCommand "$(ps_encoded_command "$blade_refresh_cmd")"
 
 # A script that parses but exits early reports nothing and leaves the old build
@@ -70,22 +74,22 @@ verify_installed() {
   fi
   echo "$host is on $T3CODE_DESKTOP_VERSION"
 }
-verify_installed blade
+verify_installed "$BLADE"
 
 # --- Dell (install only from Blade-staged installer via this Mac) ---
 # One machine being off, asleep, or behind a tunnel that is not up must not undo the refresh for
 # the others: reaching Dell used to be the last thing that could kill the run outright.
 refresh_dell() {
   mkdir -p /tmp/t3-personal-installer || return 1
-  scp -o BatchMode=yes -o ConnectTimeout=30 blade:dev/MT-Code-x64.exe \
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$BLADE":dev/MT-Code-x64.exe \
     /tmp/t3-personal-installer/MT-Code-x64.exe || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 /tmp/t3-personal-installer/MT-Code-x64.exe \
-    dell:dev/MT-Code-x64.exe || return 1
+    "$DELL":dev/MT-Code-x64.exe || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
-    dell:dev/personal-refresh-dell.ps1 || return 1
+    "$DELL":dev/personal-refresh-dell.ps1 || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-launch-gui.ps1" \
-    dell:dev/personal-launch-gui.ps1 || return 1
-  ssh -o BatchMode=yes -o ConnectTimeout=30 dell powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    "$DELL":dev/personal-launch-gui.ps1 || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout=30 "$DELL" powershell.exe -NoProfile -ExecutionPolicy Bypass \
     -File C:/Users/busin/dev/personal-refresh-dell.ps1 || return 1
 }
 
@@ -93,22 +97,22 @@ refresh_dell() {
 # down Blade can still reach it.
 refresh_dell_via_blade() {
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell-via-blade.ps1" \
-    blade:dev/personal-refresh-dell-via-blade.ps1 || return 1
+    "$BLADE":dev/personal-refresh-dell-via-blade.ps1 || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
-    blade:dev/personal-refresh-dell.ps1 || return 1
+    "$BLADE":dev/personal-refresh-dell.ps1 || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-launch-gui.ps1" \
-    blade:dev/personal-launch-gui.ps1 || return 1
-  ssh -o BatchMode=yes -o ConnectTimeout=60 blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    "$BLADE":dev/personal-launch-gui.ps1 || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout=60 "$BLADE" powershell.exe -NoProfile -ExecutionPolicy Bypass \
     -File C:/Users/muhha/dev/personal-refresh-dell-via-blade.ps1 || return 1
 }
 
 echo "-- refreshing Dell --"
 if refresh_dell; then
   echo "Dell refreshed"
-  verify_installed dell || true
+  verify_installed "$DELL" || true
 elif refresh_dell_via_blade; then
   echo "Dell refreshed over the LAN from Blade"
-  verify_installed dell || true
+  verify_installed "$DELL" || true
 else
   echo "Dell could not be reached, directly or through Blade — skipped." >&2
 fi
