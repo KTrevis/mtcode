@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Developer ID codesign the .app inside a Munim Mac DMG, then rebuild DMG + ZIP.
-# Notarization requires an App Store Connect API Issuer ID (UUID) — set
-# APPLE_API_ISSUER (+ APPLE_API_KEY / APPLE_API_KEY_ID) to also submit + staple.
+# Developer ID codesign the .app inside a Munim Mac DMG, notarize + staple the
+# app and the DMG, then rebuild DMG + ZIP.
+#
+# Notarization is required: an unnotarized Developer ID build is what makes
+# macOS say "Apple could not verify MT Code is free of malware". Credentials
+# come from APPLE_API_ISSUER + APPLE_API_KEY_ID + APPLE_API_KEY when set, else
+# the notarytool keychain profile T3_NOTARY_PROFILE (default "mtcode-notary",
+# created with `xcrun notarytool store-credentials`). T3_SKIP_NOTARIZE=1 opts
+# out for local test builds only.
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -74,6 +80,47 @@ NODE
 
 codesign --verify --deep --strict "$APP"
 
+NOTARY_ARGS=()
+if [[ -n "${APPLE_API_ISSUER:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_KEY:-}" ]]; then
+  KEY_FILE="$WORK/AuthKey.p8"
+  if [[ -f "${APPLE_API_KEY}" ]]; then
+    KEY_FILE="$APPLE_API_KEY"
+  else
+    printf '%s' "$APPLE_API_KEY" >"$KEY_FILE"
+  fi
+  NOTARY_ARGS=(--key "$KEY_FILE" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+elif [[ "${T3_SKIP_NOTARIZE:-0}" != "1" ]]; then
+  NOTARY_ARGS=(--keychain-profile "${T3_NOTARY_PROFILE:-mtcode-notary}")
+fi
+
+notarize() {
+  local target="$1" out
+  echo "notarizing $(basename "$target")..."
+  out="$(xcrun notarytool submit "$target" "${NOTARY_ARGS[@]}" --wait 2>&1)" || true
+  printf '%s\n' "$out"
+  if ! printf '%s\n' "$out" | grep -q "status: Accepted"; then
+    local id
+    id="$(printf '%s\n' "$out" | awk '/^  id: /{print $2; exit}')"
+    if [[ -n "$id" ]]; then
+      xcrun notarytool log "$id" "${NOTARY_ARGS[@]}" >&2 || true
+    fi
+    echo "notarization failed for $target" >&2
+    exit 1
+  fi
+}
+
+if [[ ${#NOTARY_ARGS[@]} -gt 0 ]]; then
+  # Staple the app itself so the updater ZIP carries its own ticket, then the
+  # DMG built from it.
+  APP_ZIP="$WORK/notarize-app.zip"
+  ditto -c -k --sequesterRsrc --keepParent "$APP" "$APP_ZIP"
+  notarize "$APP_ZIP"
+  xcrun stapler staple "$APP"
+  rm -f "$APP_ZIP"
+else
+  echo "WARNING: T3_SKIP_NOTARIZE=1 -- this build will trip Gatekeeper on other Macs" >&2
+fi
+
 STAGE="$WORK/stage"
 mkdir -p "$STAGE"
 ditto "$WORK/MT Code.app" "$STAGE/MT Code.app"
@@ -87,24 +134,12 @@ codesign --force --sign "$IDENTITY" --timestamp "$SIGNED_DMG"
 SIGNED_ZIP="$WORK/signed.zip"
 ditto -c -k --sequesterRsrc --keepParent "$WORK/MT Code.app" "$SIGNED_ZIP"
 
-# Optional notarization when ASC API issuer is available.
-if [[ -n "${APPLE_API_ISSUER:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_KEY:-}" ]]; then
-  KEY_FILE="$WORK/AuthKey.p8"
-  if [[ -f "${APPLE_API_KEY}" ]]; then
-    KEY_FILE="$APPLE_API_KEY"
-  else
-    printf '%s' "$APPLE_API_KEY" >"$KEY_FILE"
-  fi
-  echo "submitting for notarization..."
-  xcrun notarytool submit "$SIGNED_DMG" \
-    --key "$KEY_FILE" \
-    --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER" \
-    --wait
+if [[ ${#NOTARY_ARGS[@]} -gt 0 ]]; then
+  notarize "$SIGNED_DMG"
   xcrun stapler staple "$SIGNED_DMG"
+  spctl -a -t open --context context:primary-signature -vv "$SIGNED_DMG"
+  spctl -a -t exec -vv "$APP"
   echo "notarized + stapled"
-else
-  echo "skipping notarization (set APPLE_API_ISSUER, APPLE_API_KEY_ID, APPLE_API_KEY to enable)"
 fi
 
 cp "$SIGNED_DMG" "$DMG"
