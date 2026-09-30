@@ -10,9 +10,9 @@
  */
 import {
   COMPUTER_VIEW_DEFAULT_MAX_WIDTH,
-  COMPUTER_VIEW_MIN_INTERVAL_MS,
   ComputerViewError,
   type ComputerViewInput,
+  type ComputerViewQuality,
   type ComputerViewStreamEvent,
   type ComputerViewStreamInput,
 } from "@t3tools/contracts";
@@ -38,6 +38,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildComputerViewFrame,
+  computerViewCaptureArguments,
+  computerViewCaptureIntervalMs,
   computerViewToolCall,
   toolResultImage,
   toolResultIsError,
@@ -267,13 +269,14 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     client: ActiveClient,
     display: ComputerViewDisplayInfo,
     maxWidth: number,
+    quality: ComputerViewQuality | undefined,
   ) {
-    // Request JPEG for bandwidth; the macOS helper only produces PNG and the
-    // frame event carries whichever mime type actually came back.
+    // The frame event carries whichever mime type actually came back: the
+    // macOS helper only produces PNG whatever was asked for.
     const result = yield* callTool(
       client,
       "screenshot",
-      { display: display.index, max_width: maxWidth, format: "jpeg" },
+      computerViewCaptureArguments({ display: display.index, maxWidth, quality }),
       CAPTURE_TIMEOUT,
     ).pipe(
       Effect.mapError(
@@ -329,6 +332,7 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
           selectedDisplay: selected.index,
         };
         const maxWidth = input.maxWidth ?? COMPUTER_VIEW_DEFAULT_MAX_WIDTH;
+        const activeInterval = computerViewCaptureIntervalMs(input.frameRate);
         let lastFrameAt = 0;
         let consecutiveFailures = 0;
         // A still screen encodes to the same bytes every time. Comparing them
@@ -342,14 +346,15 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
           // on the host, and snap back to full speed the moment it does.
           const interval =
             unchangedRuns >= IDLE_CAPTURE_RUNS
-              ? IDLE_CAPTURE_INTERVAL_MS
-              : COMPUTER_VIEW_MIN_INTERVAL_MS;
+              ? Math.max(IDLE_CAPTURE_INTERVAL_MS, activeInterval)
+              : activeInterval;
           const wait = lastFrameAt + interval - now;
           if (wait > 0) yield* Effect.sleep(Duration.millis(wait));
           const event: ComputerViewStreamEvent = yield* captureFrame(
             client,
             selected,
             maxWidth,
+            input.quality,
           ).pipe(
             Effect.map((frame): ComputerViewStreamEvent => {
               consecutiveFailures = 0;

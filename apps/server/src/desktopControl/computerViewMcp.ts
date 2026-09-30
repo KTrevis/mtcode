@@ -3,12 +3,58 @@
  * plus parsing of the MCP tool results those calls return. Effect-free so the
  * translation can be unit tested without spawning the native binary.
  */
-import type { ComputerViewFrameEvent, ComputerViewInput } from "@t3tools/contracts";
+import {
+  COMPUTER_VIEW_MIN_INTERVAL_MS,
+  type ComputerViewFrameEvent,
+  type ComputerViewInput,
+  type ComputerViewQuality,
+} from "@t3tools/contracts";
 import { readImageSize, type ComputerViewDisplayInfo } from "@t3tools/shared/computerView";
 
 export interface DesktopMcpToolCall {
   readonly name: string;
   readonly arguments: Record<string, unknown>;
+}
+
+/** JPEG quality per viewer setting; "lossless" switches the encoding to PNG. */
+const JPEG_QUALITY: Readonly<Record<Exclude<ComputerViewQuality, "lossless">, number>> = {
+  low: 35,
+  standard: 55,
+  high: 85,
+};
+
+/**
+ * `screenshot` arguments for one frame. JPEG keeps a live stream cheap; the
+ * macOS host only produces PNG and ignores both `format` and `quality`, and a
+ * host older than munim-computer-use 0.5.1 ignores `quality`.
+ */
+export function computerViewCaptureArguments(input: {
+  readonly display: number;
+  readonly maxWidth: number;
+  readonly quality?: ComputerViewQuality | undefined;
+}): Record<string, unknown> {
+  const quality = input.quality ?? "standard";
+  if (quality === "lossless") {
+    return { display: input.display, max_width: input.maxWidth, format: "png" };
+  }
+  return {
+    display: input.display,
+    max_width: input.maxWidth,
+    format: "jpeg",
+    quality: JPEG_QUALITY[quality],
+  };
+}
+
+/**
+ * Gap between captures for a requested frame rate. Without one the host keeps
+ * its default cadence; with one it never captures faster than 30 frames a
+ * second, whatever the viewer asks.
+ */
+export function computerViewCaptureIntervalMs(frameRate: number | undefined): number {
+  if (frameRate === undefined || !Number.isFinite(frameRate) || frameRate <= 0) {
+    return COMPUTER_VIEW_MIN_INTERVAL_MS;
+  }
+  return Math.max(Math.round(1000 / 30), Math.round(1000 / frameRate));
 }
 
 /**

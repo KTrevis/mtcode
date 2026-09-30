@@ -15,6 +15,15 @@ export const COMPUTER_VIEW_MAX_WIDTH_LIMIT = 2560;
  * moving one arrives at roughly 8 frames a second.
  */
 export const COMPUTER_VIEW_MIN_INTERVAL_MS = 120;
+/** Frame-rate ceiling a viewer can ask for; the host's capture speed is the real limit. */
+export const COMPUTER_VIEW_MAX_FRAME_RATE = 30;
+
+/**
+ * Picture quality a viewer can ask for. JPEG at rising quality, then lossless
+ * PNG. The macOS host only produces PNG, so it ignores this.
+ */
+export const ComputerViewQuality = Schema.Literals(["low", "standard", "high", "lossless"]);
+export type ComputerViewQuality = typeof ComputerViewQuality.Type;
 
 export const ComputerViewDisplay = Schema.Struct({
   index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -35,6 +44,11 @@ export const ComputerViewStreamInput = Schema.Struct({
       Schema.isLessThanOrEqualTo(COMPUTER_VIEW_MAX_WIDTH_LIMIT),
     ),
   ),
+  /** Most frames a second the viewer wants. Omitted keeps the host default. */
+  frameRate: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: COMPUTER_VIEW_MAX_FRAME_RATE })),
+  ),
+  quality: Schema.optional(ComputerViewQuality),
 });
 export type ComputerViewStreamInput = typeof ComputerViewStreamInput.Type;
 

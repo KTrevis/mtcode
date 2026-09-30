@@ -623,6 +623,7 @@ export const ChatHeader = memo(function ChatHeader({
         <ComputerViewDialog
           environmentId={activeThreadEnvironmentId}
           environmentLabel={threadEnvironmentPresentation?.label ?? "this computer"}
+          remoteOs={threadEnvironmentPresentation?.serverConfig?.environment.platform.os ?? null}
           keybindings={keybindings}
           onClose={() => setComputerViewOpen(false)}
         />

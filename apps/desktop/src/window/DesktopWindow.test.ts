@@ -224,6 +224,29 @@ describe("isTrustedRendererPermissionRequest", () => {
     );
   });
 
+  it("allows fullscreen and keyboard lock from the app renderer origin", () => {
+    for (const permission of ["fullscreen", "keyboardLock", "pointerLock"] as const) {
+      assert.isTrue(
+        DesktopWindow.isTrustedRendererPermissionRequest({
+          applicationUrl: "t3code-dev://app/",
+          requestingUrl: "t3code-dev://app/task/123",
+          permission,
+        }),
+        permission,
+      );
+    }
+  });
+
+  it("rejects fullscreen from untrusted origins", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedRendererPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "https://example.com/",
+        permission: "fullscreen",
+      }),
+    );
+  });
+
   it("rejects geolocation from untrusted origins", () => {
     assert.isFalse(
       DesktopWindow.isTrustedRendererPermissionRequest({
