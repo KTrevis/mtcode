@@ -28,7 +28,9 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
+import { isElectron } from "~/env";
 import { resolveShortcutCommand } from "~/keybindings";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { computerViewEnvironment } from "~/state/computerView";
@@ -142,6 +144,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
           maxWidth: captureWidth,
           frameRate: settings.frameRate,
           quality: settings.quality,
+          cursor: true,
         },
       }),
     [captureWidth, display, environmentId, settings.frameRate, settings.quality],
@@ -472,6 +475,65 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     ];
   }, [frame]);
 
+  const macWindowControlsInset = useMacWindowControlsInset(isFullscreen);
+  const [surfaceBox, setSurfaceBox] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const hasFrame = frame !== null;
+  // Where the picture sits in its container, for drawing the remote pointer
+  // over it while only watching.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    const container = containerRef.current;
+    if (!hasFrame || surface === null || container === null) return;
+    const update = () =>
+      setSurfaceBox({
+        left: surface.offsetLeft,
+        top: surface.offsetTop,
+        width: surface.offsetWidth,
+        height: surface.offsetHeight,
+      });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(surface);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [hasFrame]);
+  const remoteCursor = view?.cursor ?? null;
+  // Like any remote desktop, the pointer over the picture is the remote
+  // machine's own: its arrow, I-beam or resize handle, drawn from the shape the
+  // host reports, since captures leave the pointer out. Hosts that do not
+  // report one (macOS, older helpers) fall back to an ordinary arrow.
+  const surfaceCursor =
+    !controlEnabled || remoteCursor === null || remoteCursor.image === null
+      ? "default"
+      : !remoteCursor.visible
+        ? "none"
+        : `url("data:image/png;base64,${remoteCursor.image}") ${remoteCursor.hotspotX} ${remoteCursor.hotspotY}, default`;
+  const watchedCursor =
+    !controlEnabled &&
+    remoteCursor !== null &&
+    remoteCursor.visible &&
+    remoteCursor.image !== null &&
+    surfaceBox !== null &&
+    frame !== null
+      ? {
+          image: remoteCursor.image,
+          left:
+            surfaceBox.left +
+            ((remoteCursor.x - frame.screenX) / frame.screenWidth) * surfaceBox.width -
+            remoteCursor.hotspotX,
+          top:
+            surfaceBox.top +
+            ((remoteCursor.y - frame.screenY) / frame.screenHeight) * surfaceBox.height -
+            remoteCursor.hotspotY,
+          width: remoteCursor.width,
+          height: remoteCursor.height,
+        }
+      : null;
   const statusMessage = streamError ?? inputError ?? view?.status ?? null;
   const displays = view?.displays ?? [];
   const selectedDisplay = view?.selectedDisplay ?? null;
@@ -497,7 +559,10 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         ))
       : null;
 
-  return (
+  // Portalled to the body: rendered inside the chat header, the viewer shared
+  // a stacking level with the fixed sidebar toggle, which painted over its
+  // title next to the traffic lights.
+  return createPortal(
     <div
       data-computer-view
       role="dialog"
@@ -518,6 +583,11 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
           Linux caption buttons on the right. Its empty space drags the window. */}
       <div
         onPointerLeave={toolbarAutoHides ? () => setToolbarRevealed(false) : undefined}
+        style={
+          macWindowControlsInset
+            ? { paddingLeft: "var(--desktop-window-controls-inset, 90px)" }
+            : undefined
+        }
         className={cn(
           "drag-region flex h-(--workspace-topbar-height) shrink-0 items-center gap-2 pr-(--workspace-controls-right) pl-(--workspace-controls-left) text-sm text-white/80",
           toolbarAutoHides &&
@@ -594,14 +664,12 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
               onContextMenu={(event) => event.preventDefault()}
               style={{
                 imageRendering: settings.smoothScaling ? "auto" : "pixelated",
+                cursor: surfaceCursor,
                 ...(actualSizeWidth === null ? {} : { width: actualSizeWidth }),
               }}
-              // The remote cursor follows this one exactly, so an ordinary
-              // arrow reads as pointing at the remote screen.
               className={cn(
                 "select-none",
                 settings.scaleToFit ? "max-h-full max-w-full object-contain" : "m-auto max-w-none",
-                controlEnabled ? "cursor-default" : "cursor-not-allowed",
               )}
             />
           ) : (
@@ -615,6 +683,20 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
                 <span className="max-w-md text-balance text-center">{streamError}</span>
               )}
             </div>
+          )}
+          {watchedCursor !== null && (
+            <img
+              aria-hidden
+              alt=""
+              src={`data:image/png;base64,${watchedCursor.image}`}
+              className="pointer-events-none absolute"
+              style={{
+                left: watchedCursor.left,
+                top: watchedCursor.top,
+                width: watchedCursor.width,
+                height: watchedCursor.height,
+              }}
+            />
           )}
           {settings.showStats && (
             <ComputerViewStats
@@ -639,9 +721,30 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 });
+
+/**
+ * Whether the macOS traffic lights sit over the viewer's toolbar: on the Mac
+ * desktop app, except in fullscreen, where macOS hides them.
+ */
+function useMacWindowControlsInset(isElementFullscreen: boolean): boolean {
+  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
+  const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
+    const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
+    return isMacosDesktop && typeof getWindowFullscreenState === "function"
+      ? getWindowFullscreenState()
+      : false;
+  });
+  useEffect(() => {
+    const onWindowFullscreenStateChange = window.desktopBridge?.onWindowFullscreenStateChange;
+    if (!isMacosDesktop || typeof onWindowFullscreenStateChange !== "function") return;
+    return onWindowFullscreenStateChange(setIsWindowFullscreen);
+  }, [isMacosDesktop]);
+  return isMacosDesktop && !isWindowFullscreen && !isElementFullscreen;
+}
 
 function ToolbarButton({
   label,

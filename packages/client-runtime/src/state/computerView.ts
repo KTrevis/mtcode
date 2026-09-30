@@ -22,6 +22,23 @@ export interface ComputerViewState {
   readonly frame: ComputerViewFrameEvent | null;
   /** Most recent status message; cleared once frames flow again. */
   readonly status: string | null;
+  /** The remote pointer, with its shape resolved, when the viewer asked for it. */
+  readonly cursor: ComputerViewCursor | null;
+  /** Shapes seen in this stream by id; the host sends each image only once. */
+  readonly cursorImages: Readonly<Record<string, string>>;
+}
+
+export interface ComputerViewCursor {
+  readonly id: string;
+  readonly visible: boolean;
+  readonly x: number;
+  readonly y: number;
+  readonly hotspotX: number;
+  readonly hotspotY: number;
+  readonly width: number;
+  readonly height: number;
+  /** Base64 PNG of the shape, or null when it has not arrived. */
+  readonly image: string | null;
 }
 
 export const EMPTY_COMPUTER_VIEW_STATE: ComputerViewState = {
@@ -29,6 +46,8 @@ export const EMPTY_COMPUTER_VIEW_STATE: ComputerViewState = {
   selectedDisplay: null,
   frame: null,
   status: null,
+  cursor: null,
+  cursorImages: {},
 };
 
 export function applyComputerViewStreamEvent(
@@ -40,15 +59,35 @@ export function applyComputerViewStreamEvent(
       // A resubscribe (reconnect, display switch) re-announces displays; the
       // stale frame is dropped so the viewer never maps clicks against it.
       return {
+        ...EMPTY_COMPUTER_VIEW_STATE,
         displays: event.displays,
         selectedDisplay: event.selectedDisplay,
-        frame: null,
-        status: null,
       };
     case "frame":
       return { ...state, frame: event, status: null };
     case "status":
       return { ...state, status: event.message };
+    case "cursor": {
+      const cursorImages =
+        event.image === undefined || state.cursorImages[event.id] === event.image
+          ? state.cursorImages
+          : { ...state.cursorImages, [event.id]: event.image };
+      return {
+        ...state,
+        cursorImages,
+        cursor: {
+          id: event.id,
+          visible: event.visible,
+          x: event.x,
+          y: event.y,
+          hotspotX: event.hotspotX,
+          hotspotY: event.hotspotY,
+          width: event.width,
+          height: event.height,
+          image: cursorImages[event.id] ?? null,
+        },
+      };
+    }
   }
 }
 

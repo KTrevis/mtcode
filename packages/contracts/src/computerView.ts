@@ -49,6 +49,12 @@ export const ComputerViewStreamInput = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: COMPUTER_VIEW_MAX_FRAME_RATE })),
   ),
   quality: Schema.optional(ComputerViewQuality),
+  /**
+   * Also stream the remote pointer (cursor events). Screen captures leave the
+   * pointer out, so a viewer draws it: as its own cursor while controlling,
+   * or at the reported position while only watching. Older hosts ignore it.
+   */
+  cursor: Schema.optional(Schema.Boolean),
 });
 export type ComputerViewStreamInput = typeof ComputerViewStreamInput.Type;
 
@@ -82,10 +88,31 @@ export const ComputerViewStatusEvent = Schema.Struct({
 });
 export type ComputerViewStatusEvent = typeof ComputerViewStatusEvent.Type;
 
+/**
+ * The remote pointer, sent when it changes shape, visibility or position.
+ * `image` (base64 PNG) comes the first time a shape `id` is seen in a stream;
+ * later events for the same shape omit it. Only sent to viewers that asked.
+ */
+export const ComputerViewCursorEvent = Schema.Struct({
+  type: Schema.Literal("cursor"),
+  id: Schema.String,
+  visible: Schema.Boolean,
+  /** Screen coordinates, the same space as frame screenX/screenY. */
+  x: Schema.Number,
+  y: Schema.Number,
+  hotspotX: Schema.Int,
+  hotspotY: Schema.Int,
+  width: Schema.Int,
+  height: Schema.Int,
+  image: Schema.optionalKey(Schema.String),
+});
+export type ComputerViewCursorEvent = typeof ComputerViewCursorEvent.Type;
+
 export const ComputerViewStreamEvent = Schema.Union([
   ComputerViewReadyEvent,
   ComputerViewFrameEvent,
   ComputerViewStatusEvent,
+  ComputerViewCursorEvent,
 ]);
 export type ComputerViewStreamEvent = typeof ComputerViewStreamEvent.Type;
 

@@ -40,7 +40,10 @@ import {
   buildComputerViewFrame,
   computerViewCaptureArguments,
   computerViewCaptureIntervalMs,
+  computerViewCursorEvent,
   computerViewToolCall,
+  type ComputerViewHostCursor,
+  toolResultCursor,
   toolResultImage,
   toolResultIsError,
   toolResultText,
@@ -115,7 +118,11 @@ function dispatchLine(pending: Map<number, Deferred.Deferred<McpRpcResponse>>, l
 export const make = Effect.gen(function* ComputerViewBrokerMake() {
   const resolveMcp = yield* makeResolveEnabledDesktopMcp();
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const state = yield* SynchronizedRef.make<ActiveClient | null>(null);
+  // Two helper processes: one captures, one takes input. The helper answers
+  // one request at a time, so with a single process every click and pointer
+  // move waited behind whatever capture was in flight (~100 ms on Windows).
+  const captureState = yield* SynchronizedRef.make<ActiveClient | null>(null);
+  const inputState = yield* SynchronizedRef.make<ActiveClient | null>(null);
 
   const writeMessage = (client: ActiveClient, message: Record<string, unknown>) =>
     client.writeMutex.withPermits(1)(
@@ -250,33 +257,36 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     return client;
   });
 
-  const acquireClient = SynchronizedRef.modifyEffect(state, (current) => {
-    if (current !== null) {
-      current.refCount += 1;
-      return Effect.succeed([current, current] as const);
-    }
-    return startClient.pipe(Effect.map((client) => [client, client] as const));
-  });
+  const acquireClient = (state: SynchronizedRef.SynchronizedRef<ActiveClient | null>) =>
+    SynchronizedRef.modifyEffect(state, (current) => {
+      if (current !== null) {
+        current.refCount += 1;
+        return Effect.succeed([current, current] as const);
+      }
+      return startClient.pipe(Effect.map((client) => [client, client] as const));
+    });
 
-  const releaseClient = SynchronizedRef.updateEffect(state, (current) => {
-    if (current === null) return Effect.succeed(null);
-    current.refCount -= 1;
-    if (current.refCount > 0) return Effect.succeed(current);
-    return shutdownClient(current).pipe(Effect.as(null));
-  });
+  const releaseClient = (state: SynchronizedRef.SynchronizedRef<ActiveClient | null>) =>
+    SynchronizedRef.updateEffect(state, (current) => {
+      if (current === null) return Effect.succeed(null);
+      current.refCount -= 1;
+      if (current.refCount > 0) return Effect.succeed(current);
+      return shutdownClient(current).pipe(Effect.as(null));
+    });
 
   const captureFrame = Effect.fn("ComputerViewBroker.captureFrame")(function* (
     client: ActiveClient,
     display: ComputerViewDisplayInfo,
     maxWidth: number,
     quality: ComputerViewQuality | undefined,
+    cursor: boolean,
   ) {
     // The frame event carries whichever mime type actually came back: the
     // macOS helper only produces PNG whatever was asked for.
     const result = yield* callTool(
       client,
       "screenshot",
-      computerViewCaptureArguments({ display: display.index, maxWidth, quality }),
+      computerViewCaptureArguments({ display: display.index, maxWidth, quality, cursor }),
       CAPTURE_TIMEOUT,
     ).pipe(
       Effect.mapError(
@@ -307,13 +317,18 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
         detail: "The captured image could not be decoded.",
       });
     }
-    return frame;
+    return { frame, cursor: cursor ? toolResultCursor(result) : null };
   });
 
   const stream: ComputerViewBroker["Service"]["stream"] = (input) =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const client = yield* Effect.acquireRelease(acquireClient, () => releaseClient);
+        const client = yield* Effect.acquireRelease(acquireClient(captureState), () =>
+          releaseClient(captureState),
+        );
+        // Keep the input process warm for as long as someone is watching, so
+        // the first click does not pay for a process start.
+        yield* Effect.acquireRelease(acquireClient(inputState), () => releaseClient(inputState));
         const listResult = yield* callTool(client, "list_displays", {}, LIST_DISPLAYS_TIMEOUT);
         const displays = parseComputerViewDisplays(toolResultText(listResult));
         const selected = selectComputerViewDisplay(displays, input.display);
@@ -340,7 +355,10 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
         // changed pixels reach the client.
         let lastFrameData: string | null = null;
         let unchangedRuns = 0;
-        const nextEvent = Effect.gen(function* () {
+        const wantsCursor = input.cursor === true;
+        let lastCursor: ComputerViewHostCursor | null = null;
+        const sentCursorImages = new Set<string>();
+        const nextEvents = Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           // Back off while nothing moves so an idle viewer is not a busy loop
           // on the host, and snap back to full speed the moment it does.
@@ -350,43 +368,53 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
               : activeInterval;
           const wait = lastFrameAt + interval - now;
           if (wait > 0) yield* Effect.sleep(Duration.millis(wait));
-          const event: ComputerViewStreamEvent = yield* captureFrame(
+          const captured = yield* captureFrame(
             client,
             selected,
             maxWidth,
             input.quality,
+            wantsCursor,
           ).pipe(
-            Effect.map((frame): ComputerViewStreamEvent => {
+            Effect.map((capture) => {
               consecutiveFailures = 0;
-              return frame;
+              return capture;
             }),
             Effect.catch((error) => {
               consecutiveFailures += 1;
               if (consecutiveFailures >= MAX_CONSECUTIVE_CAPTURE_FAILURES) {
                 return Effect.fail(error);
               }
-              return Effect.succeed<ComputerViewStreamEvent>({
-                type: "status",
-                message: error.detail,
-              });
+              return Effect.succeed(error.detail);
             }),
           );
           lastFrameAt = yield* Clock.currentTimeMillis;
-          if (event.type === "frame") {
-            if (event.data === lastFrameData) {
-              unchangedRuns += 1;
-              return null;
-            }
-            lastFrameData = event.data;
-            unchangedRuns = 0;
+          if (typeof captured === "string") {
+            return [{ type: "status", message: captured } satisfies ComputerViewStreamEvent];
           }
-          return event;
+          const events: ComputerViewStreamEvent[] = [];
+          // Captures leave the pointer out, so a moving pointer over a still
+          // screen is activity too.
+          const cursorEvent =
+            captured.cursor === null
+              ? null
+              : computerViewCursorEvent(captured.cursor, lastCursor, sentCursorImages);
+          if (captured.cursor !== null) lastCursor = captured.cursor;
+          if (cursorEvent !== null) {
+            if (cursorEvent.image !== undefined) sentCursorImages.add(cursorEvent.id);
+            events.push(cursorEvent);
+          }
+          if (captured.frame.data === lastFrameData) {
+            unchangedRuns = cursorEvent === null ? unchangedRuns + 1 : 0;
+          } else {
+            lastFrameData = captured.frame.data;
+            unchangedRuns = 0;
+            events.push(captured.frame);
+          }
+          return events;
         });
         return Stream.concat(
           Stream.make(ready),
-          Stream.fromEffectRepeat(nextEvent).pipe(
-            Stream.filter((event): event is ComputerViewStreamEvent => event !== null),
-          ),
+          Stream.fromEffectRepeat(nextEvents).pipe(Stream.flatMap(Stream.fromIterable)),
         );
       }),
     );
@@ -395,9 +423,11 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     (viewInput) =>
       Effect.scoped(
         Effect.gen(function* () {
-          // Reuses the streaming client when a viewer is open (the common
-          // case); otherwise a one-shot process serves this single call.
-          const client = yield* Effect.acquireRelease(acquireClient, () => releaseClient);
+          // Reuses the input process a viewer keeps open (the common case);
+          // otherwise a one-shot process serves this single call.
+          const client = yield* Effect.acquireRelease(acquireClient(inputState), () =>
+            releaseClient(inputState),
+          );
           const call = computerViewToolCall(viewInput);
           // acquireClient failures (disabled, missing binary) fail before this
           // call and keep their `unavailable` code; transport errors on a live
