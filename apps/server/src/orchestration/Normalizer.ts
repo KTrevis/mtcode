@@ -18,6 +18,7 @@ import {
   PENDING_ATTACHMENT_THREAD_SEGMENT,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPath,
+  toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
@@ -121,13 +122,84 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       } satisfies OrchestrationCommand;
     }
 
-    if (
-      canonicalCommand.type === "project.meta.update" &&
-      canonicalCommand.workspaceRoot !== undefined
-    ) {
+    if (canonicalCommand.type === "project.meta.update") {
+      const workspaceRoot =
+        canonicalCommand.workspaceRoot !== undefined
+          ? yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot)
+          : undefined;
+      const projectAttachmentSegment = toSafeThreadAttachmentSegment(
+        `kanban-${canonicalCommand.projectId}`,
+      );
+      const claimedPaths: string[] = [];
+      const kanbanCards = canonicalCommand.kanbanCards
+        ? yield* Effect.forEach(
+            canonicalCommand.kanbanCards,
+            (card) =>
+              Effect.gen(function* () {
+                const images = yield* Effect.forEach(card.images ?? [], (image) =>
+                  Effect.gen(function* () {
+                    const attachment = image.attachment;
+                    const segment = parseThreadSegmentFromAttachmentId(attachment.id);
+                    if (segment === projectAttachmentSegment) return image;
+                    if (segment !== PENDING_ATTACHMENT_THREAD_SEGMENT) {
+                      return yield* new OrchestrationDispatchCommandError({
+                        message: `Image '${attachment.name}' does not belong to this project.`,
+                      });
+                    }
+                    const claim = planAttachmentClaim({
+                      attachmentsDir: serverConfig.attachmentsDir,
+                      threadId: `kanban-${canonicalCommand.projectId}`,
+                      attachmentId: attachment.id,
+                    });
+                    if (!claim.ok) {
+                      return yield* new OrchestrationDispatchCommandError({
+                        message: `Image '${attachment.name}' cannot be saved: ${claim.reason}.`,
+                      });
+                    }
+                    const info = yield* fileSystem.stat(claim.currentPath).pipe(
+                      Effect.mapError(
+                        () =>
+                          new OrchestrationDispatchCommandError({
+                            message: `Image '${attachment.name}' was not found.`,
+                          }),
+                      ),
+                    );
+                    const claimedImage = {
+                      ...image,
+                      attachment: { ...attachment, id: claim.finalId },
+                    };
+                    if (
+                      Number(info.size) !== attachment.sizeBytes ||
+                      resolveAttachmentPath({
+                        attachmentsDir: serverConfig.attachmentsDir,
+                        attachment: claimedImage.attachment,
+                      }) !== claim.finalPath
+                    ) {
+                      return yield* new OrchestrationDispatchCommandError({
+                        message: `Image '${attachment.name}' does not match its upload.`,
+                      });
+                    }
+                    yield* fileSystem.copyFile(claim.currentPath, claim.finalPath).pipe(
+                      Effect.mapError(
+                        () =>
+                          new OrchestrationDispatchCommandError({
+                            message: `Image '${attachment.name}' could not be saved.`,
+                          }),
+                      ),
+                    );
+                    claimedPaths.push(claim.finalPath);
+                    return claimedImage;
+                  }),
+                );
+                return { ...card, ...(card.images ? { images } : {}) };
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.tapError(() => removeClaimedAttachmentPaths(claimedPaths)))
+        : undefined;
       return {
         ...canonicalCommand,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
+        ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        ...(kanbanCards ? { kanbanCards } : {}),
       } satisfies OrchestrationCommand;
     }
 
@@ -179,6 +251,15 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
               attachmentsDir: serverConfig.attachmentsDir,
               threadId: canonicalCommand.threadId,
               attachmentId: attachment.id,
+              ...(canonicalCommand.type === "thread.turn.start" &&
+              canonicalCommand.bootstrap?.createThread
+                ? {
+                    allowedSourceSegment:
+                      toSafeThreadAttachmentSegment(
+                        `kanban-${canonicalCommand.bootstrap.createThread.projectId}`,
+                      ) ?? undefined,
+                  }
+                : {}),
             });
             if (!claim.ok) {
               return yield* new OrchestrationDispatchCommandError({
@@ -362,13 +443,21 @@ export const cleanupFailedUploadedAttachments = Effect.fn(
       ? command.message.attachments
       : command.type === "thread.user-input.respond"
         ? Object.values(command.attachmentsByQuestionId ?? {}).flat()
-        : [];
+        : command.type === "project.meta.update"
+          ? (command.kanbanCards ?? []).flatMap((card) =>
+              (card.images ?? []).map((image) => image.attachment),
+            )
+          : [];
   const normalizedAttachments =
     normalizedCommand.type === "thread.turn.start"
       ? normalizedCommand.message.attachments
       : normalizedCommand.type === "thread.user-input.respond"
         ? Object.values(normalizedCommand.attachmentsByQuestionId ?? {}).flat()
-        : [];
+        : normalizedCommand.type === "project.meta.update"
+          ? (normalizedCommand.kanbanCards ?? []).flatMap((card) =>
+              (card.images ?? []).map((image) => image.attachment),
+            )
+          : [];
   if (normalizedAttachments.length === 0) return;
 
   const serverConfig = yield* ServerConfig;

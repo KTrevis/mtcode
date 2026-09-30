@@ -448,6 +448,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           }
         }
       }
+      if (
+        command.kanbanCards !== undefined &&
+        new Set(command.kanbanCards.map((card) => card.id)).size !== command.kanbanCards.length
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Kanban card IDs must be unique.",
+        });
+      }
+      if (
+        command.kanbanCards?.some(
+          (card) =>
+            new Set((card.images ?? []).map((image) => image.id)).size !==
+            (card.images?.length ?? 0),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Kanban image IDs must be unique within a card.",
+        });
+      }
+      if (
+        command.kanbanCards !== undefined &&
+        command.kanbanExpectedUpdatedAt !== project.updatedAt
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Kanban changed since it was loaded. Refresh and try again.",
+        });
+      }
       if (command.workspaceRoot !== undefined) {
         yield* requireActiveProjectWorkspaceRootAbsent({
           readModel,
@@ -479,6 +509,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.faviconPath !== undefined ? { faviconPath: command.faviconPath } : {}),
           ...(command.projectIcon !== undefined ? { projectIcon: command.projectIcon } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
+          ...(command.kanbanCards !== undefined ? { kanbanCards: command.kanbanCards } : {}),
           updatedAt: occurredAt,
         },
       };

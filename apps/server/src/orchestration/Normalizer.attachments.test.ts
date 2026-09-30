@@ -9,6 +9,7 @@ import {
   CommandId,
   ApprovalRequestId,
   MessageId,
+  ProjectId,
   type OrchestrationMessageContext,
   ThreadId,
 } from "@t3tools/contracts";
@@ -60,6 +61,106 @@ function turnStartCommand(input: {
 }
 
 describe("normalizeDispatchCommand attachments", () => {
+  it.effect("copies a project Kanban image into its new agent thread", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const attachmentId = `kanban-kanban-project-${attachmentUuid}`;
+      const sourcePath = NodePath.join(config.attachmentsDir, `${attachmentId}.png`);
+      NodeFS.writeFileSync(sourcePath, "pixels");
+      const command = turnStartCommand({ attachments: [{ id: attachmentId, sizeBytes: 6 }] });
+      if (command.type !== "thread.turn.start") throw new Error("Expected a thread turn.");
+      const withBootstrap = {
+        ...command,
+        bootstrap: {
+          createThread: {
+            projectId: ProjectId.make("kanban-project"),
+            title: "Ticket",
+            modelSelection: { instanceId: "codex" as never, model: "test" },
+            runtimeMode: "full-access" as const,
+            interactionMode: "default" as const,
+            branch: null,
+            worktreePath: null,
+            createdAt: command.createdAt,
+          },
+        },
+      };
+      const normalized = yield* normalizeDispatchCommand(withBootstrap);
+      if (normalized.type !== "thread.turn.start") throw new Error("Expected a thread turn.");
+      const deliveredId = normalized.message.attachments[0]!.id;
+      expect(deliveredId).toMatch(/^thread-1-/);
+      expect(
+        NodeFS.readFileSync(NodePath.join(config.attachmentsDir, `${deliveredId}.png`), "utf8"),
+      ).toBe("pixels");
+      expect(NodeFS.readFileSync(sourcePath, "utf8")).toBe("pixels");
+
+      const rejected = yield* normalizeDispatchCommand({
+        ...withBootstrap,
+        bootstrap: {
+          ...withBootstrap.bootstrap,
+          createThread: {
+            ...withBootstrap.bootstrap.createThread,
+            projectId: ProjectId.make("another-project"),
+          },
+        },
+      }).pipe(Effect.flip);
+      expect(rejected.message).toContain("pending upload");
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("claims a Kanban image while keeping its Markdown reference stable", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const pendingId = `pending-${attachmentUuid}`;
+      NodeFS.writeFileSync(NodePath.join(config.attachmentsDir, `${pendingId}.png`), "pixels");
+      const description = "Before\n\n![Screenshot](kanban-image:image-1)\n\nAfter";
+      const command = {
+        type: "project.meta.update",
+        commandId: CommandId.make("kanban-image-command"),
+        projectId: ProjectId.make("kanban-project"),
+        kanbanCards: [
+          {
+            id: "card-1",
+            title: "Inspect screenshot",
+            column: "AI",
+            description,
+            images: [
+              {
+                id: "image-1",
+                attachment: {
+                  type: "image",
+                  id: pendingId,
+                  name: "screenshot.png",
+                  mimeType: "image/png",
+                  sizeBytes: 6,
+                },
+              },
+            ],
+          },
+        ],
+      } as const;
+      const normalized = yield* normalizeDispatchCommand(command);
+      if (normalized.type !== "project.meta.update") throw new Error("Wrong command");
+      const card = normalized.kanbanCards?.[0];
+      const image = card?.images?.[0];
+      expect(card?.description).toBe(description);
+      expect(image?.id).toBe("image-1");
+      expect(image?.attachment.id).toMatch(/^kanban-kanban-project-/);
+      expect(
+        NodeFS.readFileSync(
+          NodePath.join(config.attachmentsDir, `${image?.attachment.id}.png`),
+          "utf8",
+        ),
+      ).toBe("pixels");
+      yield* cleanupFailedUploadedAttachments(command, normalized);
+      expect(
+        NodeFS.existsSync(NodePath.join(config.attachmentsDir, `${image?.attachment.id}.png`)),
+      ).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(config.attachmentsDir, `${pendingId}.png`))).toBe(
+        true,
+      );
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("accepts 100 inline images and rejects 101 before writing files", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

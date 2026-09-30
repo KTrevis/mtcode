@@ -500,6 +500,26 @@ export const ProjectIconOverride = Schema.Union([
 );
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
+export const KanbanImage = Schema.Struct({
+  // Markdown keeps this stable while the pending upload receives a durable attachment ID.
+  id: TrimmedNonEmptyString,
+  attachment: ChatImageAttachment,
+});
+export type KanbanImage = typeof KanbanImage.Type;
+
+export const KanbanCard = Schema.Struct({
+  branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  id: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(4_000))),
+  images: Schema.optional(Schema.Array(KanbanImage).check(Schema.isMaxLength(10))),
+  agentThreadId: Schema.optional(ThreadId),
+  column: Schema.Literals(["TODO", "AI", "Done"]),
+});
+export type KanbanCard = typeof KanbanCard.Type;
+// ponytail: the board lives in project metadata; use a separate projection if larger boards are needed.
+const KanbanCards = Schema.Array(KanbanCard).check(Schema.isMaxLength(200));
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -516,6 +536,7 @@ export const OrchestrationProject = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  kanbanCards: Schema.optional(KanbanCards),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -959,6 +980,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  kanbanCards: Schema.optional(KanbanCards),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1204,6 +1226,8 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  kanbanCards: Schema.optional(KanbanCards),
+  kanbanExpectedUpdatedAt: Schema.optional(IsoDateTime),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -2100,6 +2124,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  kanbanCards: Schema.optional(KanbanCards),
   updatedAt: IsoDateTime,
 });
 

@@ -36,6 +36,55 @@ const projectionRepositoriesLayer = it.layer(
 );
 
 projectionRepositoriesLayer("Projection repositories", (it) => {
+  it.effect("persists Kanban cards with their columns", () =>
+    Effect.gen(function* () {
+      const projects = yield* ProjectionProjectRepository;
+      const projectId = ProjectId.make("project-kanban-cards");
+      const card = {
+        id: "card-1",
+        title: "Review change",
+        branch: "feature/kanban",
+        description: "![Screenshot](kanban-image:image-1)",
+        column: "AI" as const,
+        agentThreadId: ThreadId.make("agent-thread-1"),
+        images: [
+          {
+            id: "image-1",
+            attachment: {
+              type: "image" as const,
+              id: "kanban-project-image",
+              name: "screenshot.png",
+              mimeType: "image/png",
+              sizeBytes: 6,
+            },
+          },
+        ],
+      };
+      yield* projects.upsert({
+        projectId,
+        title: "Kanban project",
+        workspaceRoot: "/tmp/project-kanban-cards",
+        defaultModelSelection: null,
+        defaultThreadEnvMode: null,
+        autoPull: false,
+        scripts: [],
+        kanbanCards: [card],
+        createdAt: "2026-09-29T00:00:00.000Z",
+        updatedAt: "2026-09-29T00:00:00.000Z",
+        deletedAt: null,
+      });
+
+      const persisted = yield* projects.getById({ projectId });
+      assert.deepStrictEqual(Option.getOrThrow(persisted).kanbanCards, [card]);
+      yield* projects.upsert({
+        ...Option.getOrThrow(persisted),
+        kanbanCards: [{ ...card, branch: null }],
+      });
+      const detached = yield* projects.getById({ projectId });
+      assert.strictEqual(Option.getOrThrow(detached).kanbanCards[0]?.branch, null);
+    }),
+  );
+
   it.effect("selects the latest-turn plan before checking implementation status", () =>
     Effect.gen(function* () {
       const plans = yield* ProjectionThreadProposedPlanRepository;
@@ -297,6 +346,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         defaultThreadEnvMode: null,
         autoPull: false,
         scripts: [],
+        kanbanCards: [],
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         deletedAt: null,

@@ -127,3 +127,18 @@ Both options copy the project name, icon, model and workspace defaults, automati
 browser-access preference, and actions. Provider credentials and conversations remain on their original
 machine. Configure any missing provider instances on the destination. The source remains intact,
 existing destination folders are never overwritten, and subsequent changes do not sync automatically.
+
+## Project Kanban
+
+On web and desktop, choose **Open Kanban boards** in the command palette to see every project's
+board, or open a project's menu in the sidebar and choose **Kanban**. Each project has its own
+board with **TODO**, **AI**, and **Done** columns. Add a card under a column, drag it to
+change its status, and click it to edit its title and Markdown description. Paste an image into
+the description editor to insert it at the cursor. Its thumbnail appears above the editor; click
+it to view the full image. Ticket changes save automatically on the project's server and appear
+on connected web and desktop clients. Moving a card to **AI** starts a new agent thread with the
+project's default model and sends the ticket description and images. Open the linked thread from
+its ticket, or use the Kanban icon beside the thread to open that ticket directly.
+
+In the ticket details, attach an existing project branch to track the related work. You can
+change or detach it later. This association does not switch the checkout or an agent thread.

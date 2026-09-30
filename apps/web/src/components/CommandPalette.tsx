@@ -47,6 +47,7 @@ import {
   BlocksIcon,
   ChartNoAxesColumnIcon,
   CloudUploadIcon,
+  Columns3Icon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -2010,6 +2011,17 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:open-kanban-list",
+    searchTerms: ["kanban", "boards", "tickets", "projects"],
+    title: "Open Kanban boards",
+    icon: <Columns3Icon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/kanban" });
+    },
+  });
 
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({

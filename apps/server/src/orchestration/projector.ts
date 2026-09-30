@@ -410,6 +410,7 @@ export function projectEvent(
             faviconPath: payload.faviconPath ?? null,
             projectIcon: payload.projectIcon ?? null,
             scripts: payload.scripts,
+            kanbanCards: [],
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -452,6 +453,9 @@ export function projectEvent(
                     ? { projectIcon: payload.projectIcon }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.kanbanCards !== undefined
+                    ? { kanbanCards: payload.kanbanCards }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,

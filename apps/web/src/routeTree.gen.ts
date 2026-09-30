@@ -14,6 +14,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as StatusRouteImport } from './routes/status'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
+import { Route as KanbanRouteImport } from './routes/kanban_'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
@@ -39,6 +40,7 @@ import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$proje
 import { Route as DevGoalChipsRouteImport } from './routes/dev.goal-chips'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as SettingsPluginsPluginIdRouteImport } from './routes/settings.plugins_.$pluginId'
+import { Route as KanbanEnvironmentIdProjectIdRouteImport } from './routes/kanban.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -65,6 +67,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const PairRoute = PairRouteImport.update({
   id: '/pair',
   path: '/pair',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KanbanRoute = KanbanRouteImport.update({
+  id: '/kanban_',
+  path: '/kanban',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectRoute = ConnectRouteImport.update({
@@ -192,6 +199,12 @@ const SettingsPluginsPluginIdRoute = SettingsPluginsPluginIdRouteImport.update({
   path: '/plugins/$pluginId',
   getParentRoute: () => SettingsRoute,
 } as any)
+const KanbanEnvironmentIdProjectIdRoute =
+  KanbanEnvironmentIdProjectIdRouteImport.update({
+    id: '/kanban/$environmentId/$projectId',
+    path: '/kanban/$environmentId/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -207,6 +220,7 @@ const ChatEnvironmentIdThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/connect': typeof ConnectRoute
+  '/kanban': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -235,10 +249,12 @@ export interface FileRoutesByFullPath {
   '/settings/voice': typeof SettingsVoiceRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/kanban/$environmentId/$projectId': typeof KanbanEnvironmentIdProjectIdRoute
   '/settings/plugins/$pluginId': typeof SettingsPluginsPluginIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
+  '/kanban': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -268,12 +284,14 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/kanban/$environmentId/$projectId': typeof KanbanEnvironmentIdProjectIdRoute
   '/settings/plugins/$pluginId': typeof SettingsPluginsPluginIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
+  '/kanban_': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -303,6 +321,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/kanban/$environmentId/$projectId': typeof KanbanEnvironmentIdProjectIdRoute
   '/settings/plugins_/$pluginId': typeof SettingsPluginsPluginIdRoute
 }
 export interface FileRouteTypes {
@@ -310,6 +329,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/connect'
+    | '/kanban'
     | '/pair'
     | '/settings'
     | '/status'
@@ -338,10 +358,12 @@ export interface FileRouteTypes {
     | '/settings/voice'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/kanban/$environmentId/$projectId'
     | '/settings/plugins/$pluginId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
+    | '/kanban'
     | '/pair'
     | '/settings'
     | '/status'
@@ -371,11 +393,13 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/kanban/$environmentId/$projectId'
     | '/settings/plugins/$pluginId'
   id:
     | '__root__'
     | '/_chat'
     | '/connect'
+    | '/kanban_'
     | '/pair'
     | '/settings'
     | '/status'
@@ -405,12 +429,14 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/kanban/$environmentId/$projectId'
     | '/settings/plugins_/$pluginId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ConnectRoute: typeof ConnectRoute
+  KanbanRoute: typeof KanbanRoute
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   StatusRoute: typeof StatusRoute
@@ -418,6 +444,7 @@ export interface RootRouteChildren {
   WelcomeRoute: typeof WelcomeRoute
   DevGoalChipsRoute: typeof DevGoalChipsRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  KanbanEnvironmentIdProjectIdRoute: typeof KanbanEnvironmentIdProjectIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -455,6 +482,13 @@ declare module '@tanstack/react-router' {
       path: '/pair'
       fullPath: '/pair'
       preLoaderRoute: typeof PairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/kanban_': {
+      id: '/kanban_'
+      path: '/kanban'
+      fullPath: '/kanban'
+      preLoaderRoute: typeof KanbanRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect': {
@@ -632,6 +666,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPluginsPluginIdRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/kanban/$environmentId/$projectId': {
+      id: '/kanban/$environmentId/$projectId'
+      path: '/kanban/$environmentId/$projectId'
+      fullPath: '/kanban/$environmentId/$projectId'
+      preLoaderRoute: typeof KanbanEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -716,6 +757,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ConnectRoute: ConnectRoute,
+  KanbanRoute: KanbanRoute,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
   StatusRoute: StatusRoute,
@@ -723,6 +765,7 @@ const rootRouteChildren: RootRouteChildren = {
   WelcomeRoute: WelcomeRoute,
   DevGoalChipsRoute: DevGoalChipsRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  KanbanEnvironmentIdProjectIdRoute: KanbanEnvironmentIdProjectIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

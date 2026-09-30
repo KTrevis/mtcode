@@ -55,14 +55,15 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   ClockIcon,
+  Columns3Icon,
   EyeIcon,
+  EllipsisVerticalIcon,
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
-  SettingsIcon,
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -1018,11 +1019,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   project: EnvironmentProject | null;
+  kanbanCardId: string | null;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
+  onOpenKanbanCard: (thread: SidebarThreadSummary, cardId: string) => void;
   onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
   onRenameTitleChange: (title: string) => void;
   onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
@@ -1617,6 +1620,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       />
     )
   ) : null;
+  const kanbanButton = props.kanbanCardId ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Open Kanban ticket for ${thread.title}`}
+            className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              props.onOpenKanbanCard(thread, props.kanbanCardId!);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+          />
+        }
+      >
+        <Columns3Icon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Open Kanban ticket</TooltipPopup>
+    </Tooltip>
+  ) : null;
 
   if (variant === "slim") {
     return (
@@ -1721,6 +1747,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     </span>
                   )}
                 </span>
+                {kanbanButton ? (
+                  <span
+                    className={cn(
+                      "pointer-events-none absolute inset-y-0 inline-flex items-center opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
+                      props.settlementSupported || props.snoozeSupported ? "right-8" : "right-0",
+                    )}
+                  >
+                    {kanbanButton}
+                  </span>
+                ) : null}
                 {variantAction === "unsnooze" ? (
                   !props.snoozeSupported ? null : (
                     <button
@@ -1903,7 +1939,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       threadTimeLabel(thread)
                     )}
                   </span>
-                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+                  {kanbanButton ||
+                  props.settlementSupported ||
+                  showSnoozeButton ||
+                  hasUnsentDraft ? (
                     <span
                       className={cn(
                         // focus-visible, not focus-within: a mouse click leaves
@@ -1915,6 +1954,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >
+                      {kanbanButton}
                       {hasUnsentDraft ? (
                         <Tooltip>
                           <TooltipTrigger
@@ -2397,6 +2437,17 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
     [projects],
   );
+  const kanbanCardIdByThreadKey = useMemo(() => {
+    const cardIds = new Map<string, string>();
+    for (const project of projects) {
+      for (const card of project.kanbanCards ?? []) {
+        if (card.agentThreadId) {
+          cardIds.set(`${project.environmentId}:${card.agentThreadId}`, card.id);
+        }
+      }
+    }
+    return cardIds;
+  }, [projects]);
   const projectDisplayNameByKey = useMemo(
     () =>
       new Map(
@@ -2509,6 +2560,7 @@ export default function Sidebar() {
   );
   // Anchor for the scope popup: the header search field, not its icon trigger.
   const headerSearchRef = useRef<HTMLDivElement | null>(null);
+  const projectActionsOpenRef = useRef(false);
   // Safari can send a click after Ctrl+click opens settings. Ignore that one
   // selection, then clear the guard when the picker opens again.
   const suppressNextScopeChangeRef = useRef(false);
@@ -2988,6 +3040,17 @@ export default function Sidebar() {
       });
     },
     [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
+  );
+  const openKanbanCard = useCallback(
+    (thread: SidebarThreadSummary, cardId: string) => {
+      if (isMobile) setOpenMobile(false);
+      void router.navigate({
+        to: "/kanban/$environmentId/$projectId",
+        params: { environmentId: thread.environmentId, projectId: thread.projectId },
+        search: { cardId },
+      });
+    },
+    [isMobile, router, setOpenMobile],
   );
 
   // Dropping files on a row opens that thread and attaches the files there.
@@ -4565,6 +4628,7 @@ export default function Sidebar() {
                   isItemEqualToValue={(a, b) => a.value === b.value}
                   open={projectScopeMenuState.open}
                   onOpenChange={(open) => {
+                    if (!open && projectActionsOpenRef.current) return;
                     if (open) suppressNextScopeChangeRef.current = false;
                     dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
@@ -4680,44 +4744,74 @@ export default function Sidebar() {
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
                         return (
-                          <ComboboxItem
-                            key={item.value}
-                            hideIndicator
-                            value={item}
-                            onContextMenu={(event) => {
-                              if (project) handleProjectSettings(event, project);
-                            }}
-                          >
+                          <div key={item.value} className="flex items-center">
+                            <ComboboxItem
+                              hideIndicator
+                              value={item}
+                              className="min-w-0 flex-1"
+                              onContextMenu={(event) => {
+                                if (project) handleProjectSettings(event, project);
+                              }}
+                            >
+                              {project ? (
+                                <ProjectFavicon project={project} className="size-4 shrink-0" />
+                              ) : (
+                                <FolderIcon className="size-4 shrink-0" />
+                              )}
+                              <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                              {project && showProjectEnvironments ? (
+                                <ProjectEnvironmentBadge
+                                  group={project}
+                                  primaryEnvironmentId={primaryEnvironmentId}
+                                  machineByEnvironmentId={environmentMachineById}
+                                />
+                              ) : null}
+                            </ComboboxItem>
                             {project ? (
-                              <ProjectFavicon project={project} className="size-4 shrink-0" />
-                            ) : (
-                              <FolderIcon className="size-4 shrink-0" />
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-                            {project && showProjectEnvironments ? (
-                              <ProjectEnvironmentBadge
-                                group={project}
-                                primaryEnvironmentId={primaryEnvironmentId}
-                                machineByEnvironmentId={environmentMachineById}
-                              />
-                            ) : null}
-                            {project ? (
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                tabIndex={-1}
-                                aria-hidden="true"
-                                title={`Project settings for ${project.displayName}`}
-                                className="ml-auto"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  void handleProjectSettings(event, project);
+                              <Menu
+                                onOpenChange={(open) => {
+                                  projectActionsOpenRef.current = open;
                                 }}
                               >
-                                <SettingsIcon className="size-3.5" />
-                              </Button>
+                                {/* ComboboxItem cancels pointerdown, so the menu trigger is its sibling. */}
+                                <MenuTrigger
+                                  render={
+                                    <Button
+                                      size="icon-xs"
+                                      variant="ghost-muted"
+                                      aria-label={`Actions for ${project.displayName}`}
+                                      className="mr-2"
+                                    />
+                                  }
+                                >
+                                  <EllipsisVerticalIcon className="size-3.5" />
+                                </MenuTrigger>
+                                <MenuPopup align="end">
+                                  <MenuItem
+                                    onClick={() => {
+                                      suppressNextScopeChangeRef.current = true;
+                                      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+                                      if (isMobile) setOpenMobile(false);
+                                      void router.navigate({
+                                        to: "/kanban/$environmentId/$projectId",
+                                        params: {
+                                          environmentId: project.environmentId,
+                                          projectId: project.id,
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    Open Kanban
+                                  </MenuItem>
+                                  <MenuItem
+                                    onClick={(event) => handleProjectSettings(event, project)}
+                                  >
+                                    Project settings
+                                  </MenuItem>
+                                </MenuPopup>
+                              </Menu>
                             ) : null}
-                          </ComboboxItem>
+                          </div>
                         );
                       }}
                     </ComboboxList>
@@ -4926,6 +5020,7 @@ export default function Sidebar() {
                               projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
                               null
                             }
+                            kanbanCardId={kanbanCardIdByThreadKey.get(threadKey) ?? null}
                             projectDisplayName={
                               projectDisplayNameByKey.get(
                                 `${thread.environmentId}:${thread.projectId}`,
@@ -4938,6 +5033,7 @@ export default function Sidebar() {
                             timestampFormat={timestampFormat}
                             onThreadClick={handleThreadClick}
                             onThreadActivate={navigateToThread}
+                            onOpenKanbanCard={openKanbanCard}
                             onStartRename={startThreadRename}
                             onRenameTitleChange={setRenamingTitle}
                             onCommitRename={commitThreadRename}
