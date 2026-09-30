@@ -17,8 +17,8 @@ import * as NodeOS from "node:os";
 import {
   ClaudeSettings,
   CodexSettings,
-  USAGE_CONTRACT_VERSION,
   ProviderInstanceId,
+  USAGE_CONTRACT_VERSION,
   type ServerSettings as ServerSettingsValue,
   type UsageProviderKind,
   type UsageSource,
@@ -399,7 +399,8 @@ export const make = Effect.gen(function* () {
         ...config,
         homePath: scanHomePath(
           config.homePath,
-          candidate.homeEnvValue,
+          // A managed ChatGPT account owns its home; CODEX_HOME does not redirect it.
+          config.setupMode === "managed" ? null : candidate.homeEnvValue,
           config.shadowHomePath.trim().length > 0,
         ),
       });

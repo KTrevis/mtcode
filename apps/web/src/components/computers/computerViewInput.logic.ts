@@ -173,3 +173,164 @@ export function computerViewFrameDataUrl(frame: {
 }): string {
   return `data:${frame.mimeType};base64,${frame.data}`;
 }
+
+type ComputerViewModifier = "cmd" | "shift" | "alt" | "ctrl" | "fn";
+type RemoteOs = "darwin" | "linux" | "windows" | "unknown";
+
+/**
+ * Carries a shortcut across the Mac/PC divide: Cmd-C pressed on a Mac copies
+ * on a Windows or Linux machine (Ctrl-C there), and Ctrl-C pressed on a PC
+ * copies on a Mac (Cmd-C). Same-family pairs, and inputs without modifiers,
+ * pass through untouched.
+ */
+export function mapShortcutModifiersForRemote(
+  input: ComputerViewInput,
+  context: { readonly localIsMac: boolean; readonly remoteOs: RemoteOs | null },
+): ComputerViewInput {
+  if (
+    input.type !== "key" ||
+    input.modifiers === undefined ||
+    context.remoteOs === null ||
+    context.remoteOs === "unknown"
+  ) {
+    return input;
+  }
+  const remoteIsMac = context.remoteOs === "darwin";
+  if (context.localIsMac === remoteIsMac) return input;
+  const [from, to]: [ComputerViewModifier, ComputerViewModifier] = context.localIsMac
+    ? ["cmd", "ctrl"]
+    : ["ctrl", "cmd"];
+  if (!input.modifiers.includes(from)) return input;
+  const modifiers: ComputerViewModifier[] = [];
+  for (const modifier of input.modifiers) {
+    const mapped = modifier === from ? to : modifier;
+    if (!modifiers.includes(mapped)) modifiers.push(mapped);
+  }
+  return { ...input, modifiers };
+}
+
+export interface ComputerViewKeyPreset {
+  readonly label: string;
+  readonly description: string;
+  readonly input: ComputerViewInput;
+}
+
+/**
+ * One-click system shortcuts for the remote machine: the chords this computer
+ * would otherwise keep for itself (app switching, Spotlight, Task Manager).
+ * Ctrl-Alt-Del is absent on purpose: Windows only accepts it from the
+ * hardware keyboard, so no remote input can send it.
+ */
+export function computerViewKeyPresets(
+  remoteOs: RemoteOs | null,
+): ReadonlyArray<ComputerViewKeyPreset> {
+  if (remoteOs === "darwin") {
+    return [
+      {
+        label: "⌘ Tab",
+        description: "Switch apps",
+        input: { type: "key", key: "tab", modifiers: ["cmd"] },
+      },
+      {
+        label: "⌘ Space",
+        description: "Spotlight",
+        input: { type: "key", key: "space", modifiers: ["cmd"] },
+      },
+      {
+        label: "⌃ ↑",
+        description: "Mission Control",
+        input: { type: "key", key: "up", modifiers: ["ctrl"] },
+      },
+      {
+        label: "⌘ W",
+        description: "Close window",
+        input: { type: "key", key: "w", modifiers: ["cmd"] },
+      },
+      {
+        label: "⌘ Q",
+        description: "Quit app",
+        input: { type: "key", key: "q", modifiers: ["cmd"] },
+      },
+      {
+        label: "⌥ ⌘ Esc",
+        description: "Force Quit",
+        input: { type: "key", key: "escape", modifiers: ["cmd", "alt"] },
+      },
+      {
+        label: "⇧ ⌘ 4",
+        description: "Screenshot",
+        input: { type: "key", key: "4", modifiers: ["cmd", "shift"] },
+      },
+      { label: "Esc", description: "Escape", input: { type: "key", key: "escape" } },
+    ];
+  }
+  const system = remoteOs === "windows" ? "Win" : "Super";
+  return [
+    {
+      label: "Alt Tab",
+      description: "Switch windows",
+      input: { type: "key", key: "tab", modifiers: ["alt"] },
+    },
+    {
+      label: `${system} Tab`,
+      description: "Task view",
+      input: { type: "key", key: "tab", modifiers: ["cmd"] },
+    },
+    {
+      label: `${system} D`,
+      description: "Show desktop",
+      input: { type: "key", key: "d", modifiers: ["cmd"] },
+    },
+    {
+      label: `${system} R`,
+      description: "Run",
+      input: { type: "key", key: "r", modifiers: ["cmd"] },
+    },
+    {
+      label: "Ctrl Shift Esc",
+      description: "Task Manager",
+      input: { type: "key", key: "escape", modifiers: ["ctrl", "shift"] },
+    },
+    {
+      label: "Alt F4",
+      description: "Close window",
+      input: { type: "key", key: "f4", modifiers: ["alt"] },
+    },
+    {
+      label: `${system} Shift S`,
+      description: "Snip",
+      input: { type: "key", key: "s", modifiers: ["cmd", "shift"] },
+    },
+    { label: "Esc", description: "Escape", input: { type: "key", key: "escape" } },
+  ];
+}
+
+export interface ComputerViewFrameSample {
+  readonly at: number;
+  readonly bytes: number;
+}
+
+/**
+ * Frames per second and throughput over the samples inside the window ending
+ * at `now`, for the stats overlay. Base64 inflates by 4/3, so the byte count
+ * is the decoded size.
+ */
+export function summarizeComputerViewFrames(
+  samples: ReadonlyArray<ComputerViewFrameSample>,
+  now: number,
+  windowMs = 2_000,
+): { readonly framesPerSecond: number; readonly kilobytesPerSecond: number } {
+  const recent = samples.filter((sample) => now - sample.at <= windowMs);
+  const seconds = windowMs / 1_000;
+  const bytes = recent.reduce((total, sample) => total + sample.bytes, 0);
+  return {
+    framesPerSecond: Math.round((recent.length / seconds) * 10) / 10,
+    kilobytesPerSecond: Math.round(bytes / 1_024 / seconds),
+  };
+}
+
+/** Decoded byte size of a base64 payload. */
+export function base64DecodedLength(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+}

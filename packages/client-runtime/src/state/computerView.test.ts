@@ -68,4 +68,58 @@ describe("applyComputerViewStreamEvent", () => {
     expect(stalled.frame).toBe(frame);
     expect(stalled.status).toBe("Screen capture failed.");
   });
+
+  it("keeps each cursor shape once and reuses it when the image is omitted", () => {
+    const base = {
+      type: "cursor",
+      visible: true,
+      hotspotX: 0,
+      hotspotY: 0,
+      width: 32,
+      height: 32,
+    } as const;
+    const arrow = applyComputerViewStreamEvent(EMPTY_COMPUTER_VIEW_STATE, {
+      ...base,
+      id: "0x10003",
+      x: 10,
+      y: 20,
+      image: "ARROW",
+    });
+    const hand = applyComputerViewStreamEvent(arrow, {
+      ...base,
+      id: "0x1001f",
+      x: 11,
+      y: 21,
+      image: "HAND",
+    });
+    const backToArrow = applyComputerViewStreamEvent(hand, {
+      ...base,
+      id: "0x10003",
+      x: 12,
+      y: 22,
+    });
+    expect(backToArrow.cursor).toMatchObject({ id: "0x10003", x: 12, y: 22, image: "ARROW" });
+  });
+
+  it("forgets cursor shapes when the stream restarts", () => {
+    const withCursor = applyComputerViewStreamEvent(EMPTY_COMPUTER_VIEW_STATE, {
+      type: "cursor",
+      id: "0x10003",
+      visible: true,
+      x: 0,
+      y: 0,
+      hotspotX: 0,
+      hotspotY: 0,
+      width: 32,
+      height: 32,
+      image: "ARROW",
+    });
+    const restarted = applyComputerViewStreamEvent(withCursor, {
+      type: "ready",
+      displays: [],
+      selectedDisplay: 0,
+    });
+    expect(restarted.cursor).toBeNull();
+    expect(restarted.cursorImages).toEqual({});
+  });
 });

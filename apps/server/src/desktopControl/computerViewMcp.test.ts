@@ -1,12 +1,58 @@
 import { assert, describe, it } from "@effect/vitest";
 
+import { COMPUTER_VIEW_MIN_INTERVAL_MS } from "@t3tools/contracts";
+
 import {
   buildComputerViewFrame,
+  computerViewCaptureArguments,
+  computerViewCaptureIntervalMs,
+  computerViewCursorEvent,
   computerViewToolCall,
+  toolResultCursor,
   toolResultImage,
   toolResultIsError,
   toolResultText,
 } from "./computerViewMcp.ts";
+
+describe("computerViewCaptureArguments", () => {
+  it("asks for standard JPEG when the viewer names no quality", () => {
+    assert.deepStrictEqual(computerViewCaptureArguments({ display: 1, maxWidth: 1600 }), {
+      display: 1,
+      max_width: 1600,
+      format: "jpeg",
+      quality: 55,
+    });
+  });
+
+  it("raises JPEG quality for the high setting", () => {
+    assert.strictEqual(
+      computerViewCaptureArguments({ display: 0, maxWidth: 1280, quality: "high" }).quality,
+      85,
+    );
+  });
+
+  it("switches to PNG for lossless", () => {
+    assert.deepStrictEqual(
+      computerViewCaptureArguments({ display: 0, maxWidth: 1280, quality: "lossless" }),
+      { display: 0, max_width: 1280, format: "png" },
+    );
+  });
+});
+
+describe("computerViewCaptureIntervalMs", () => {
+  it("keeps the host default without a frame rate", () => {
+    assert.strictEqual(computerViewCaptureIntervalMs(undefined), COMPUTER_VIEW_MIN_INTERVAL_MS);
+  });
+
+  it("spaces captures for the requested rate", () => {
+    assert.strictEqual(computerViewCaptureIntervalMs(5), 200);
+    assert.strictEqual(computerViewCaptureIntervalMs(15), 67);
+  });
+
+  it("never captures faster than 30 frames a second", () => {
+    assert.strictEqual(computerViewCaptureIntervalMs(120), 33);
+  });
+});
 
 describe("computerViewToolCall", () => {
   it("maps left clicks with a click count", () => {
@@ -138,5 +184,71 @@ describe("buildComputerViewFrame", () => {
       display,
     });
     assert.equal(frame, null);
+  });
+});
+
+describe("remote cursor", () => {
+  const hostLine = (fields: Record<string, unknown>) => ({
+    content: [
+      { type: "text", text: "display 0: screen origin (0, 0)" },
+      { type: "image", data: "AAAA", mimeType: "image/jpeg" },
+      { type: "text", text: `cursor: ${JSON.stringify(fields)}` },
+    ],
+  });
+
+  it("asks the host for the pointer only when the viewer does", () => {
+    assert.strictEqual(
+      computerViewCaptureArguments({ display: 0, maxWidth: 1280, cursor: true }).cursor,
+      true,
+    );
+    assert.isFalse("cursor" in computerViewCaptureArguments({ display: 0, maxWidth: 1280 }));
+  });
+
+  it("reads the host's cursor line", () => {
+    const cursor = toolResultCursor(
+      hostLine({
+        id: "0x10003",
+        visible: true,
+        x: 700,
+        y: 500,
+        hotspot_x: 0,
+        hotspot_y: 0,
+        width: 32,
+        height: 32,
+        png: "PNG",
+      }),
+    );
+    assert.deepStrictEqual(cursor, {
+      id: "0x10003",
+      visible: true,
+      x: 700,
+      y: 500,
+      hotspotX: 0,
+      hotspotY: 0,
+      width: 32,
+      height: 32,
+      image: "PNG",
+    });
+    assert.isNull(toolResultCursor({ content: [{ type: "text", text: "no cursor" }] }));
+  });
+
+  it("sends each shape's image once and skips unchanged pointers", () => {
+    const arrow = {
+      id: "0x10003",
+      visible: true,
+      x: 1,
+      y: 1,
+      hotspotX: 0,
+      hotspotY: 0,
+      width: 32,
+      height: 32,
+      image: "PNG",
+    };
+    const first = computerViewCursorEvent(arrow, null, new Set());
+    assert.strictEqual(first?.image, "PNG");
+    assert.isNull(computerViewCursorEvent(arrow, arrow, new Set(["0x10003"])));
+    const moved = computerViewCursorEvent({ ...arrow, x: 2 }, arrow, new Set(["0x10003"]));
+    assert.strictEqual(moved?.x, 2);
+    assert.isUndefined(moved?.image);
   });
 });

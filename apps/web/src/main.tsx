@@ -4,6 +4,7 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 
 import "./index.css";
 
+import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { ConnectProvidersRoot, useConnectProviders } from "./cloud/connectProviderContext";
 import { providerHasRelay } from "./cloud/connectProviders";
@@ -15,6 +16,8 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+
+prepareProviderAuthDelivery();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();

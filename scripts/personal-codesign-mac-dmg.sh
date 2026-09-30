@@ -94,10 +94,19 @@ elif [[ "${T3_SKIP_NOTARIZE:-0}" != "1" ]]; then
 fi
 
 notarize() {
-  local target="$1" out
-  echo "notarizing $(basename "$target")..."
-  out="$(xcrun notarytool submit "$target" "${NOTARY_ARGS[@]}" --wait 2>&1)" || true
-  printf '%s\n' "$out"
+  local target="$1" out attempt extra=()
+  for attempt in 1 2 3; do
+    echo "notarizing $(basename "$target") (attempt $attempt)..."
+    out="$(xcrun notarytool submit "$target" "${NOTARY_ARGS[@]}" ${extra[@]+"${extra[@]}"} --wait 2>&1)" || true
+    printf '%s\n' "$out"
+    # A verdict ("status: Accepted/Invalid/...") is final. No verdict means the
+    # upload itself died (abortedUpload / deadlineExceeded on a flaky link),
+    # so retry, skipping S3 transfer acceleration, whose endpoint is the one
+    # that stalls.
+    if printf '%s\n' "$out" | grep -q "^  *status: "; then break; fi
+    extra=(--no-s3-acceleration)
+    sleep 10
+  done
   if ! printf '%s\n' "$out" | grep -q "status: Accepted"; then
     local id
     id="$(printf '%s\n' "$out" | awk '/^  id: /{print $2; exit}')"

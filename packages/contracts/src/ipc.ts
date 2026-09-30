@@ -1326,6 +1326,9 @@ export interface DesktopBridge {
   /** Request any native terminal permission before saving a preference. */
   requestTerminalPermission?: (terminal: ExternalTerminalId) => Promise<void>;
   openTerminal?: (input: OpenExternalTerminalInput) => Promise<void>;
+  /** Receives a local OAuth code for a sign-in owned by a remote environment. */
+  receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
+  cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
   /**
    * Open a System Settings pane by identifier. Optional: older desktop builds

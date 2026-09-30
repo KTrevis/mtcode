@@ -15,6 +15,15 @@ export const COMPUTER_VIEW_MAX_WIDTH_LIMIT = 2560;
  * moving one arrives at roughly 8 frames a second.
  */
 export const COMPUTER_VIEW_MIN_INTERVAL_MS = 120;
+/** Frame-rate ceiling a viewer can ask for; the host's capture speed is the real limit. */
+export const COMPUTER_VIEW_MAX_FRAME_RATE = 30;
+
+/**
+ * Picture quality a viewer can ask for. JPEG at rising quality, then lossless
+ * PNG. The macOS host only produces PNG, so it ignores this.
+ */
+export const ComputerViewQuality = Schema.Literals(["low", "standard", "high", "lossless"]);
+export type ComputerViewQuality = typeof ComputerViewQuality.Type;
 
 export const ComputerViewDisplay = Schema.Struct({
   index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -35,6 +44,17 @@ export const ComputerViewStreamInput = Schema.Struct({
       Schema.isLessThanOrEqualTo(COMPUTER_VIEW_MAX_WIDTH_LIMIT),
     ),
   ),
+  /** Most frames a second the viewer wants. Omitted keeps the host default. */
+  frameRate: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: COMPUTER_VIEW_MAX_FRAME_RATE })),
+  ),
+  quality: Schema.optional(ComputerViewQuality),
+  /**
+   * Also stream the remote pointer (cursor events). Screen captures leave the
+   * pointer out, so a viewer draws it: as its own cursor while controlling,
+   * or at the reported position while only watching. Older hosts ignore it.
+   */
+  cursor: Schema.optional(Schema.Boolean),
 });
 export type ComputerViewStreamInput = typeof ComputerViewStreamInput.Type;
 
@@ -68,10 +88,31 @@ export const ComputerViewStatusEvent = Schema.Struct({
 });
 export type ComputerViewStatusEvent = typeof ComputerViewStatusEvent.Type;
 
+/**
+ * The remote pointer, sent when it changes shape, visibility or position.
+ * `image` (base64 PNG) comes the first time a shape `id` is seen in a stream;
+ * later events for the same shape omit it. Only sent to viewers that asked.
+ */
+export const ComputerViewCursorEvent = Schema.Struct({
+  type: Schema.Literal("cursor"),
+  id: Schema.String,
+  visible: Schema.Boolean,
+  /** Screen coordinates, the same space as frame screenX/screenY. */
+  x: Schema.Number,
+  y: Schema.Number,
+  hotspotX: Schema.Int,
+  hotspotY: Schema.Int,
+  width: Schema.Int,
+  height: Schema.Int,
+  image: Schema.optionalKey(Schema.String),
+});
+export type ComputerViewCursorEvent = typeof ComputerViewCursorEvent.Type;
+
 export const ComputerViewStreamEvent = Schema.Union([
   ComputerViewReadyEvent,
   ComputerViewFrameEvent,
   ComputerViewStatusEvent,
+  ComputerViewCursorEvent,
 ]);
 export type ComputerViewStreamEvent = typeof ComputerViewStreamEvent.Type;
 

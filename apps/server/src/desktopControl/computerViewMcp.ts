@@ -3,12 +3,139 @@
  * plus parsing of the MCP tool results those calls return. Effect-free so the
  * translation can be unit tested without spawning the native binary.
  */
-import type { ComputerViewFrameEvent, ComputerViewInput } from "@t3tools/contracts";
+import {
+  COMPUTER_VIEW_MIN_INTERVAL_MS,
+  type ComputerViewCursorEvent,
+  type ComputerViewFrameEvent,
+  type ComputerViewInput,
+  type ComputerViewQuality,
+} from "@t3tools/contracts";
 import { readImageSize, type ComputerViewDisplayInfo } from "@t3tools/shared/computerView";
 
 export interface DesktopMcpToolCall {
   readonly name: string;
   readonly arguments: Record<string, unknown>;
+}
+
+/** JPEG quality per viewer setting; "lossless" switches the encoding to PNG. */
+const JPEG_QUALITY: Readonly<Record<Exclude<ComputerViewQuality, "lossless">, number>> = {
+  low: 35,
+  standard: 55,
+  high: 85,
+};
+
+/**
+ * `screenshot` arguments for one frame. JPEG keeps a live stream cheap; the
+ * macOS host only produces PNG and ignores both `format` and `quality`, and a
+ * host older than munim-computer-use 0.5.1 ignores `quality`.
+ */
+export function computerViewCaptureArguments(input: {
+  readonly display: number;
+  readonly maxWidth: number;
+  readonly quality?: ComputerViewQuality | undefined;
+  /** Ask for the pointer too (munim-computer-use 0.5.2+ on Windows). */
+  readonly cursor?: boolean | undefined;
+}): Record<string, unknown> {
+  const quality = input.quality ?? "standard";
+  const cursor = input.cursor === true ? { cursor: true } : {};
+  if (quality === "lossless") {
+    return { display: input.display, max_width: input.maxWidth, format: "png", ...cursor };
+  }
+  return {
+    display: input.display,
+    max_width: input.maxWidth,
+    format: "jpeg",
+    quality: JPEG_QUALITY[quality],
+    ...cursor,
+  };
+}
+
+/** The pointer a capture reported, as the host's `cursor: {json}` text line. */
+export interface ComputerViewHostCursor {
+  readonly id: string;
+  readonly visible: boolean;
+  readonly x: number;
+  readonly y: number;
+  readonly hotspotX: number;
+  readonly hotspotY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly image: string | null;
+}
+
+/**
+ * The cursor event to send for this capture, or null when the pointer has not
+ * changed shape, visibility or position since the last one. Each shape's image
+ * travels once per stream: `sentImages` holds the ids the viewer already has.
+ */
+export function computerViewCursorEvent(
+  cursor: ComputerViewHostCursor,
+  previous: ComputerViewHostCursor | null,
+  sentImages: ReadonlySet<string>,
+): ComputerViewCursorEvent | null {
+  if (
+    previous !== null &&
+    previous.id === cursor.id &&
+    previous.visible === cursor.visible &&
+    previous.x === cursor.x &&
+    previous.y === cursor.y
+  ) {
+    return null;
+  }
+  return {
+    type: "cursor",
+    id: cursor.id,
+    visible: cursor.visible,
+    x: cursor.x,
+    y: cursor.y,
+    hotspotX: cursor.hotspotX,
+    hotspotY: cursor.hotspotY,
+    width: cursor.width,
+    height: cursor.height,
+    ...(cursor.image !== null && !sentImages.has(cursor.id) ? { image: cursor.image } : {}),
+  };
+}
+
+export function toolResultCursor(result: McpToolResult): ComputerViewHostCursor | null {
+  for (const item of contentItems(result)) {
+    if (item.type !== "text" || typeof item.text !== "string") continue;
+    if (!item.text.startsWith("cursor: ")) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(item.text.slice("cursor: ".length));
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const value = parsed as Record<string, unknown>;
+    const number = (key: string) =>
+      typeof value[key] === "number" && Number.isFinite(value[key]) ? (value[key] as number) : 0;
+    if (typeof value.id !== "string") return null;
+    return {
+      id: value.id,
+      visible: value.visible === true,
+      x: number("x"),
+      y: number("y"),
+      hotspotX: Math.round(number("hotspot_x")),
+      hotspotY: Math.round(number("hotspot_y")),
+      width: Math.round(number("width")),
+      height: Math.round(number("height")),
+      image: typeof value.png === "string" && value.png.length > 0 ? value.png : null,
+    };
+  }
+  return null;
+}
+
+/**
+ * Gap between captures for a requested frame rate. Without one the host keeps
+ * its default cadence; with one it never captures faster than 30 frames a
+ * second, whatever the viewer asks.
+ */
+export function computerViewCaptureIntervalMs(frameRate: number | undefined): number {
+  if (frameRate === undefined || !Number.isFinite(frameRate) || frameRate <= 0) {
+    return COMPUTER_VIEW_MIN_INTERVAL_MS;
+  }
+  return Math.max(Math.round(1000 / 30), Math.round(1000 / frameRate));
 }
 
 /**

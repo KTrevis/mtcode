@@ -1,3 +1,6 @@
+import { CodexInstallation } from "../CodexInstallation.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
+import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
  *
@@ -25,6 +28,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  EnvironmentId,
   type ClaudeSettings,
   type CodexSettings,
   type CursorSettings,
@@ -264,6 +268,17 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
         Layer.provideMerge(NodeServices.layer),
         Layer.provideMerge(testPtyAdapterLayer),
       ),
+    ),
+    Layer.provideMerge(
+      Layer.mock(CodexInstallation)({ managedDirectory: "unused-managed-installation" }),
+    ),
+    Layer.provideMerge(Layer.mock(ServerSecretStore)({})),
+    Layer.provideMerge(
+      Layer.succeed(ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(
+          EnvironmentId.make("00000000-0000-4000-8000-000000000001"),
+        ),
+      }),
     ),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -622,6 +637,17 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   const infraLayer = OpenCodeRuntimeLive.pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(testPtyAdapter),
+    Layer.provideMerge(
+      Layer.mock(CodexInstallation)({ managedDirectory: "unused-managed-installation" }),
+    ),
+    Layer.provideMerge(Layer.mock(ServerSecretStore)({})),
+    Layer.provideMerge(
+      Layer.succeed(ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(
+          EnvironmentId.make("00000000-0000-4000-8000-000000000001"),
+        ),
+      }),
+    ),
   );
   const testLayer = AntigravityInstallation.layer.pipe(
     Layer.provideMerge(

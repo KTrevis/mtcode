@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  base64DecodedLength,
   classifyPointerGesture,
   computerViewFrameDataUrl,
+  computerViewKeyPresets,
   mapKeyboardEventToComputerViewInput,
+  mapShortcutModifiersForRemote,
   mapWheelToComputerViewInput,
   resolveComputerViewCaptureWidth,
+  summarizeComputerViewFrames,
 } from "./computerViewInput.logic";
 
 const noModifiers = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
@@ -166,5 +170,76 @@ describe("resolveComputerViewCaptureWidth", () => {
 
   it("falls back to the floor when the viewer has not laid out yet", () => {
     expect(resolveComputerViewCaptureWidth({ renderedWidth: 0, devicePixelRatio: 1 })).toBe(960);
+  });
+});
+
+describe("mapShortcutModifiersForRemote", () => {
+  const copy = { type: "key", key: "c", modifiers: ["cmd"] } as const;
+
+  it("sends Cmd shortcuts from a Mac as Ctrl to Windows", () => {
+    expect(mapShortcutModifiersForRemote(copy, { localIsMac: true, remoteOs: "windows" })).toEqual({
+      type: "key",
+      key: "c",
+      modifiers: ["ctrl"],
+    });
+  });
+
+  it("sends Ctrl shortcuts from a PC as Cmd to a Mac", () => {
+    expect(
+      mapShortcutModifiersForRemote(
+        { type: "key", key: "z", modifiers: ["ctrl", "shift"] },
+        { localIsMac: false, remoteOs: "darwin" },
+      ),
+    ).toEqual({ type: "key", key: "z", modifiers: ["cmd", "shift"] });
+  });
+
+  it("does not duplicate a modifier the chord already holds", () => {
+    expect(
+      mapShortcutModifiersForRemote(
+        { type: "key", key: "t", modifiers: ["cmd", "ctrl"] },
+        { localIsMac: true, remoteOs: "linux" },
+      ),
+    ).toEqual({ type: "key", key: "t", modifiers: ["ctrl"] });
+  });
+
+  it("leaves same-family pairs and unknown remotes alone", () => {
+    expect(mapShortcutModifiersForRemote(copy, { localIsMac: true, remoteOs: "darwin" })).toBe(
+      copy,
+    );
+    expect(mapShortcutModifiersForRemote(copy, { localIsMac: true, remoteOs: null })).toBe(copy);
+  });
+});
+
+describe("computerViewKeyPresets", () => {
+  it("offers Mac chords for a Mac and Windows chords for Windows", () => {
+    expect(computerViewKeyPresets("darwin").map((preset) => preset.description)).toContain(
+      "Spotlight",
+    );
+    const windows = computerViewKeyPresets("windows");
+    expect(windows.map((preset) => preset.description)).toContain("Task Manager");
+    expect(windows.find((preset) => preset.description === "Show desktop")?.label).toBe("Win D");
+  });
+});
+
+describe("summarizeComputerViewFrames", () => {
+  it("counts only frames inside the window", () => {
+    const samples = [
+      { at: 0, bytes: 10_240 },
+      { at: 1_500, bytes: 10_240 },
+      { at: 2_500, bytes: 10_240 },
+      { at: 3_000, bytes: 10_240 },
+    ];
+    expect(summarizeComputerViewFrames(samples, 3_000)).toEqual({
+      framesPerSecond: 1.5,
+      kilobytesPerSecond: 15,
+    });
+  });
+});
+
+describe("base64DecodedLength", () => {
+  it("accounts for padding", () => {
+    expect(base64DecodedLength(btoa("abcd"))).toBe(4);
+    expect(base64DecodedLength(btoa("abcde"))).toBe(5);
+    expect(base64DecodedLength(btoa("abc"))).toBe(3);
   });
 });
