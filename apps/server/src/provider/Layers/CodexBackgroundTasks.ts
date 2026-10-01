@@ -1,3 +1,4 @@
+import { MonitoringMetadata } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 // These experimental fields are absent from the pinned generated bindings.
@@ -10,6 +11,7 @@ export const CodexMonitorTurnInput = Schema.Struct({
 });
 export const CodexBackgroundCleanResponse = Schema.Struct({});
 export const CodexBackgroundTaskEvent = Schema.Struct({
+  monitoring: Schema.optional(MonitoringMetadata),
   taskId: Schema.String,
   description: Schema.String,
   status: Schema.Literals(["running", "completed", "failed", "stopped"]),
@@ -34,6 +36,7 @@ interface BackgroundTask {
   readonly taskId: string;
   readonly description: string;
   readonly processId: string;
+  readonly monitoring: MonitoringMetadata;
   monitor: boolean;
   remainder: Record<"stdout" | "stderr", string>;
 }
@@ -73,16 +76,29 @@ export class CodexBackgroundTasks {
     processId: string,
     description: string,
     monitor = true,
+    details?: { readonly label?: string | undefined; readonly nextWakeAt?: string | undefined },
   ): typeof CodexBackgroundTaskEvent.Type {
     const task = {
       taskId,
       processId,
       description,
       monitor,
+      monitoring: MonitoringMetadata.make({
+        category: monitor ? (details?.nextWakeAt ? "scheduled" : "event") : "process",
+        command: description,
+        stoppable: monitor,
+        ...(details?.label?.trim() ? { label: details.label.trim() } : {}),
+        ...(details?.nextWakeAt ? { nextWakeAt: details.nextWakeAt } : {}),
+      }),
       remainder: { stdout: "", stderr: "" },
     };
     this.tasks.set(taskId, task);
-    return { taskId: task.taskId, description: task.description, status: "running" };
+    return {
+      taskId: task.taskId,
+      description: task.description,
+      monitoring: task.monitoring,
+      status: "running",
+    };
   }
 
   subscribe(processId: string): boolean {
@@ -140,6 +156,7 @@ export class CodexBackgroundTasks {
     return {
       taskId: task.taskId,
       description: task.description,
+      monitoring: task.monitoring,
       status: command.exitCode === -1 ? "stopped" : command.exitCode === 0 ? "completed" : "failed",
     };
   }

@@ -1513,7 +1513,26 @@ function mapToRuntimeEvents(
   if (event.kind === "notification" && event.method === "backgroundMonitor/delivered") {
     const output = readPayload(CodexMonitorOutput, event.payload);
     if (!output) return [];
+    const delivered = readPayload(
+      Schema.Struct({ taskId: Schema.String, result: Schema.String }),
+      event.payload,
+    );
     return [
+      ...(delivered
+        ? [
+            {
+              ...runtimeEventBase(event, canonicalThreadId),
+              eventId: EventId.make(`${event.id}:result`),
+              type: "task.progress" as const,
+              payload: {
+                taskId: RuntimeTaskId.make(delivered.taskId),
+                description: "Monitor result",
+                summary: delivered.result,
+                taskType: "shell",
+              },
+            },
+          ]
+        : []),
       {
         ...runtimeEventBase(event, canonicalThreadId),
         type: "item.completed",
@@ -1536,7 +1555,12 @@ function mapToRuntimeEvents(
           {
             ...base,
             type: "task.started",
-            payload: { taskId, description: task.description, taskType: "shell" },
+            payload: {
+              taskId,
+              description: task.description,
+              taskType: "shell",
+              ...(task.monitoring ? { monitoring: task.monitoring } : {}),
+            },
           },
         ]
       : [
@@ -3423,6 +3447,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     sendTurn,
     compaction: { type: "native", start: compactThread },
     interruptTurn,
+    stopTask: (threadId, taskId) =>
+      requireSession(threadId).pipe(
+        Effect.flatMap((session) => session.runtime.stopTask(taskId)),
+        Effect.mapError((cause) =>
+          cause._tag === "ProviderAdapterSessionNotFoundError"
+            ? cause
+            : mapCodexRuntimeError(threadId, "command/exec/terminate", cause),
+        ),
+      ),
     readThread,
     getAgentHistory,
     rollbackThread,

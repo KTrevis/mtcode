@@ -723,6 +723,28 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
     }),
   );
 
+  it.effect("stopping one monitor leaves the running Turn and Goal active", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("stop-one-monitor"),
+          threadId: ThreadId.make("thread-1"),
+          taskId: "monitor-1",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          latestTurn: runningTurn(),
+          session: runningSession(),
+          goal: existingGoal(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.turn-interrupt-requested"]);
+      expect(events[0]?.payload).toMatchObject({ taskId: "monitor-1" });
+    }),
+  );
+
   it.effect("Stop targeting the running Turn Pauses the Goal", () =>
     Effect.gen(function* () {
       const decided = yield* decideOrchestrationCommand({

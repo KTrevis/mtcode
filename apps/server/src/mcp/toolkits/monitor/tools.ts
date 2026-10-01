@@ -1,3 +1,4 @@
+import { IsoDateTime, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
@@ -30,6 +31,12 @@ const MonitorStartTool = Tool.make("monitor_start", {
   description:
     "Start a background command that wakes a new agent turn when it emits a complete output line, exits, or fails to launch. Use this when asked to wait, watch, monitor, or notify later, including timers, instead of sleeping or polling in the current turn. Returns immediately; finish your turn after scheduling.",
   parameters: Schema.Struct({
+    label: Schema.optional(TrimmedNonEmptyString).annotate({
+      description: "Short user-facing description of what is awaited, e.g. CI for PR #123.",
+    }),
+    nextWakeAt: Schema.optional(IsoDateTime).annotate({
+      description: "Known next wake time as an ISO datetime. Omit for event watchers.",
+    }),
     command: Schema.NonEmptyArray(Schema.String).annotate({
       description:
         "Executable and arguments. For Bash commands, use ['bash', '-c', 'sleep 30; echo done'].",

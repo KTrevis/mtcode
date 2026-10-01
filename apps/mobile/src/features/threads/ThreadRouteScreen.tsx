@@ -1,3 +1,4 @@
+import { MonitoringDetails } from "./MonitoringDetails";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import {
@@ -1290,6 +1291,19 @@ function ThreadRouteContent(
         onReturnToThread={props.onReturnToThread}
       />
 
+      {selectedThread.backgroundLiveness === "monitoring" ? (
+        <MonitoringDetails
+          key={selectedThread.id}
+          activities={selectedThreadDetail?.activities ?? []}
+          onStop={async (taskId) => {
+            const result = await interruptThreadTurn({
+              environmentId: selectedThread.environmentId,
+              input: { threadId: selectedThread.id, taskId },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          }}
+        />
+      ) : null}
       {renderThreadRouteBody()}
     </>
   );

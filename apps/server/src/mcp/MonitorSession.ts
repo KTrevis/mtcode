@@ -60,6 +60,7 @@ export const MonitorError = Schema.Union([
 export interface MonitorSession {
   readonly start: (
     command: ReadonlyArray<string>,
+    details?: { readonly label?: string | undefined; readonly nextWakeAt?: string | undefined },
   ) => Effect.Effect<{ monitorId: string; status: "scheduled" }, typeof MonitorError.Type>;
   readonly subscribe: (processId: string) => Effect.Effect<void, typeof MonitorError.Type>;
   readonly unsubscribe: (processId: string) => Effect.Effect<void, typeof MonitorError.Type>;
@@ -83,6 +84,7 @@ export class MonitorSessions extends Context.Service<
     readonly start: (
       sessionId: string,
       command: ReadonlyArray<string>,
+      details?: { readonly label?: string | undefined; readonly nextWakeAt?: string | undefined },
     ) => Effect.Effect<{ monitorId: string; status: "scheduled" }, typeof MonitorError.Type>;
   }
 >()("t3/mcp/MonitorSession/MonitorSessions") {}
@@ -114,10 +116,11 @@ export const make = Effect.sync(() => {
   const start = Effect.fn("MonitorSession.start")(function* (
     sessionId: string,
     command: ReadonlyArray<string>,
+    details?: { readonly label?: string | undefined; readonly nextWakeAt?: string | undefined },
   ) {
     const session = sessions.get(sessionId);
     if (!session) return yield* new MonitorUnavailableError({ sessionId });
-    return yield* session.start(command);
+    return yield* session.start(command, details);
   });
   return { register, invoke, start };
 });

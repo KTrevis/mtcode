@@ -4811,6 +4811,51 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("stops one background process without interrupting the Claude turn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const tasks = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "task.started"),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "watch", attachments: [] });
+      for (const taskId of ["watch-one", "watch-two"])
+        harness.query.emit({
+          type: "system",
+          subtype: "task_started",
+          task_id: taskId,
+          description: "Watch CI",
+          task_type: "local_bash",
+          uuid: taskId,
+          session_id: "sdk-session",
+        } as unknown as SDKMessage);
+      const events = Array.from(yield* Fiber.join(tasks));
+      assert.equal(events[0]?.type, "task.started");
+      if (events[0]?.type === "task.started")
+        assert.deepStrictEqual(events[0].payload.monitoring, {
+          label: "Watch CI",
+          category: "process",
+          command: "Watch CI",
+          stoppable: true,
+        });
+      yield* adapter.stopTask!(session.threadId, "watch-one");
+      assert.deepStrictEqual(harness.query.stopTaskCalls, ["watch-one"]);
+      assert.equal(harness.query.closeCalls, 0);
+      assert.equal((yield* adapter.listSessions()).length, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("interruptTurn settles live tasks and closes the provider session", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

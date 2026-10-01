@@ -2004,6 +2004,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.thread_id": input.threadId,
           "provider.turn_id": input.turnId,
         });
+        if (input.taskId !== undefined) {
+          if (!routed.adapter.stopTask)
+            return yield* new ProviderAdapterRequestError({
+              provider: routed.adapter.provider,
+              method: "task/stop",
+              detail: "This provider does not support stopping individual background tasks.",
+            });
+          return yield* routed.adapter.stopTask(routed.threadId, input.taskId);
+        }
         yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
         yield* analytics.record("provider.turn.interrupted", {
           provider: routed.adapter.provider,

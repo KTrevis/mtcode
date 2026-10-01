@@ -1,3 +1,5 @@
+import { deriveMonitoringTasks } from "@t3tools/client-runtime/state/monitoring";
+import { MonitoringDetails } from "./MonitoringDetails";
 import { isChatGptUsageLimitError } from "@t3tools/shared/usageLimits";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -3103,6 +3105,10 @@ export default function ChatView(props: ChatViewProps) {
     conversationProviderStatus.supportsConversationRollback !== false;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const monitoringTasks = useMemo(
+    () => deriveMonitoringTasks(threadActivities),
+    [threadActivities],
+  );
   const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null;
   const workspaceMutationId = useMemo(() => {
     const activityId = latestWorkspaceMutationId(threadActivities);
@@ -6882,11 +6888,20 @@ export default function ChatView(props: ChatViewProps) {
           aria-hidden="true"
         />
       ),
-      title: working
-        ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working`
-          : "Background work"
-        : "Monitoring",
+      title: working ? (
+        liveCount > 0 ? (
+          `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working`
+        ) : (
+          "Background work"
+        )
+      ) : (
+        <MonitoringDetails
+          key={activeThread.id}
+          tasks={monitoringTasks}
+          environmentId={environmentId}
+          threadId={activeThread.id}
+        />
+      ),
       actions: (
         <>
           {showViewAgents ? (
@@ -6911,6 +6926,8 @@ export default function ChatView(props: ChatViewProps) {
     activeThread,
     addAgentsSurface,
     agentPanelModel.liveCount,
+    environmentId,
+    monitoringTasks,
     handleStopBackgroundWork,
     isStoppingBackgroundWork,
     rightPanelOpen,

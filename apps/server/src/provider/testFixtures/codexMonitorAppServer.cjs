@@ -9,6 +9,7 @@ const thread = {
   forkedFromId: null,
   preview: "",
   ephemeral: true,
+  projectId: null,
   modelProvider: "openai",
   createdAt: 1,
   updatedAt: 1,

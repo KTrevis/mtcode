@@ -632,7 +632,17 @@ const taskAgentLinkageFields = {
 export const TaskAgentLinkage = Schema.Struct(taskAgentLinkageFields);
 export type TaskAgentLinkage = typeof TaskAgentLinkage.Type;
 
+export const MonitoringMetadata = Schema.Struct({
+  label: Schema.optional(TrimmedNonEmptyStringSchema),
+  category: Schema.Literals(["scheduled", "event", "process"]),
+  command: Schema.String,
+  nextWakeAt: Schema.optional(IsoDateTime),
+  stoppable: Schema.Boolean,
+});
+export type MonitoringMetadata = typeof MonitoringMetadata.Type;
+
 const TaskStartedPayload = Schema.Struct({
+  monitoring: Schema.optional(MonitoringMetadata),
   taskId: RuntimeTaskId,
   description: Schema.optional(TrimmedNonEmptyStringSchema),
   ...taskAgentLinkageFields,

@@ -15,12 +15,16 @@ const invoke = Effect.fn("MonitorToolkit.invoke")(function* (
 });
 
 export const MonitorToolkitHandlersLive = MonitorToolkit.toLayer({
-  monitor_start: ({ command }) =>
+  monitor_start: ({ command, label, nextWakeAt }) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       if (!scope.capabilities.has("monitor"))
         return yield* new MonitorSession.MonitorCapabilityError({});
-      return yield* (yield* MonitorSession.MonitorSessions).start(scope.providerSessionId, command);
+      return yield* (yield* MonitorSession.MonitorSessions).start(
+        scope.providerSessionId,
+        command,
+        { label, nextWakeAt },
+      );
     }),
   monitor_unsubscribe: ({ processId }) => invoke("unsubscribe", processId),
 });

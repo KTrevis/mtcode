@@ -178,6 +178,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.sendTurnImpl(input));
   }
 
+  stopTask(_taskId: string) {
+    return Effect.void;
+  }
+
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
@@ -1083,9 +1087,10 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
             (e) =>
               e.type === "task.started" ||
               e.type === "task.completed" ||
+              e.type === "task.progress" ||
               (e.type === "item.completed" && e.payload.title === "Monitor event"),
           ),
-          Stream.take(3),
+          Stream.take(4),
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -1107,7 +1112,12 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           method: "backgroundMonitor/delivered",
           turnId: asTurnId("wake-turn"),
           itemId: asItemId("wake-event"),
-          payload: { name: "background_monitor", output: "CI passed" },
+          payload: {
+            name: "background_monitor",
+            output: "CI passed",
+            taskId: "shell",
+            result: "CI passed",
+          },
         });
         yield* runtime.emit({
           ...base,
@@ -1118,16 +1128,22 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         const events = Array.from(yield* Fiber.join(mapped));
         NodeAssert.deepStrictEqual(
           events.map((e) => e.type),
-          ["task.started", "item.completed", "task.completed"],
+          ["task.started", "task.progress", "item.completed", "task.completed"],
         );
         NodeAssert.deepStrictEqual(events[0]?.payload, {
           taskId: "shell",
           description: "watch-ci",
           taskType: "shell",
         });
-        NodeAssert.equal(events[1]?.turnId, "wake-turn");
-        NodeAssert.equal(events[1]?.itemId, "wake-event");
-        NodeAssert.deepStrictEqual(events[2]?.payload, {
+        NodeAssert.deepStrictEqual(events[1]?.payload, {
+          taskId: "shell",
+          description: "Monitor result",
+          summary: "CI passed",
+          taskType: "shell",
+        });
+        NodeAssert.equal(events[2]?.turnId, "wake-turn");
+        NodeAssert.equal(events[2]?.itemId, "wake-event");
+        NodeAssert.deepStrictEqual(events[3]?.payload, {
           taskId: "shell",
           status: "stopped",
           taskType: "shell",
