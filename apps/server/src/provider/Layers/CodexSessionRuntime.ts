@@ -326,6 +326,7 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly stopTask: (taskId: string) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -3108,7 +3109,7 @@ export const makeCodexSessionRuntime = (
             turnId: TurnId.make(response.turn.id),
             itemId: ProviderItemId.make(`monitor-event:${response.turn.id}`),
             method: "backgroundMonitor/delivered",
-            payload: params.toolOutput,
+            payload: { ...params.toolOutput, taskId: wake.taskId, result: wake.output },
           });
         }).pipe(
           Effect.catch((cause) =>
@@ -3135,7 +3136,7 @@ export const makeCodexSessionRuntime = (
 
     if (options.mcpProviderSessionId) {
       yield* monitorSessions.register(options.mcpProviderSessionId, {
-        start: (command) =>
+        start: (command, details) =>
           turnLock
             .withPermit(
               Effect.gen(function* () {
@@ -3143,7 +3144,13 @@ export const makeCodexSessionRuntime = (
                   return yield* new MonitorSession.MonitorStoppedError({});
                 const monitorId = yield* randomUUIDv4("provider-event");
                 const description = command.join(" ");
-                const task = backgroundTasks.register(monitorId, monitorId, description);
+                const task = backgroundTasks.register(
+                  monitorId,
+                  monitorId,
+                  description,
+                  true,
+                  details,
+                );
                 monitorCommands.set(monitorId, {
                   stdout: new TextDecoder(),
                   stderr: new TextDecoder(),
@@ -3374,6 +3381,29 @@ export const makeCodexSessionRuntime = (
             Effect.sync(() => {
               pendingUserSends -= 1;
             }).pipe(Effect.andThen(Queue.offer(wakeSignals, undefined))),
+        ),
+      stopTask: (taskId) =>
+        turnLock.withPermit(
+          Effect.gen(function* () {
+            const monitor = monitorCommands.get(taskId);
+            if (!monitor)
+              return yield* CodexErrors.CodexAppServerRequestError.internalError(
+                "This background task cannot be stopped individually or has already finished.",
+              );
+            monitor.stopped = true;
+            backgroundTasks.unsubscribe(taskId);
+            yield* client.request("command/exec/terminate", { processId: taskId }).pipe(
+              Effect.timeoutOrElse({
+                duration: "10 seconds",
+                orElse: () =>
+                  Effect.fail(
+                    CodexErrors.CodexAppServerRequestError.internalError(
+                      "Timed out stopping background task.",
+                    ),
+                  ),
+              }),
+            );
+          }),
         ),
       interruptTurn: (turnId) =>
         Effect.sync(() => {

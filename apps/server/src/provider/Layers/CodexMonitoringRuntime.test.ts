@@ -82,6 +82,30 @@ const setup = Effect.fn("setup")(function* (
   return { runtime, until, inspect, subscribe, unsubscribe, startMonitor };
 });
 
+it.effect("stops one monitor without interrupting the thread or another monitor", () =>
+  Effect.gen(function* () {
+    const { runtime, until, inspect, startMonitor } = yield* setup();
+    yield* runtime.sendTurn({ input: "watch" });
+    yield* until("turn/completed");
+    const first = yield* startMonitor(["quiet"]);
+    yield* startMonitor(["quiet"]);
+    yield* runtime.stopTask(first.monitorId);
+    const stopped = yield* until("backgroundTask/changed").pipe(
+      Effect.flatMap(function loop(event): Effect.Effect<ProviderEvent> {
+        return (event.payload as { status?: string }).status === "stopped"
+          ? Effect.succeed(event)
+          : until("backgroundTask/changed").pipe(Effect.flatMap(loop));
+      }),
+    );
+    assert.equal((stopped.payload as { taskId: string }).taskId, first.monitorId);
+    const snapshot = yield* inspect;
+    assert.equal(snapshot.terminatedMonitors, 1);
+    assert.equal(snapshot.interrupted, 0);
+    assert.equal(snapshot.monitorExecutions.length, 2);
+    assert.equal((yield* startMonitor(["quiet"])).status, "scheduled");
+  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, MonitorSession.layer))),
+);
+
 it.effect(
   "starts and subscribes atomically, captures immediate output, and terminates on Stop",
   () =>
@@ -149,6 +173,7 @@ it.effect("wakes an idle thread from tool output and stops without a shutdown wa
     assert.deepStrictEqual(task.payload, {
       taskId: "watch-command",
       description: "watch-ci",
+      monitoring: { category: "process", command: "watch-ci", stoppable: false },
       status: "running",
     });
     yield* until("turn/completed");

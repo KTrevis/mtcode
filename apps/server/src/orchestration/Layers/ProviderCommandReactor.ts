@@ -1948,6 +1948,23 @@ const make = Effect.gen(function* () {
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
+    if (event.payload.taskId !== undefined) {
+      yield* providerService
+        .interruptTurn({ threadId: event.payload.threadId, taskId: event.payload.taskId })
+        .pipe(
+          Effect.catchCause((cause) =>
+            appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.turn.interrupt.failed",
+              summary: "Could not stop background task",
+              detail: formatFailureDetail(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+            }),
+          ),
+        );
+      return;
+    }
     yield* cancelTurnsAfterCompaction(
       event.payload.threadId,
       "Context compaction was interrupted. Send this message again to continue.",

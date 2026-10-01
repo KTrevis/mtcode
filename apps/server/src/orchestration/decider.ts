@@ -3089,6 +3089,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           ...(command.turnId !== undefined ? { turnId: command.turnId } : {}),
+          ...(command.taskId !== undefined ? { taskId: command.taskId } : {}),
           createdAt: command.createdAt,
         },
       };
@@ -3099,7 +3100,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const interruptTargetsActiveTurn =
         command.turnId === undefined ||
         (thread.latestTurn?.state === "running" && thread.latestTurn.turnId === command.turnId);
-      if (thread.goal?.status !== "active" || !interruptTargetsActiveTurn) {
+      if (
+        command.taskId !== undefined ||
+        thread.goal?.status !== "active" ||
+        !interruptTargetsActiveTurn
+      ) {
         return interruptEvent;
       }
       const activeGoal = thread.goal;

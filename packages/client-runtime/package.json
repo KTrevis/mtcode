@@ -247,6 +247,10 @@
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"
     },
+    "./state/monitoring": {
+      "types": "./src/state/monitoring.ts",
+      "default": "./src/state/monitoring.ts"
+    },
     "./state/subagentRuntime": {
       "types": "./src/state/subagentRuntime.ts",
       "default": "./src/state/subagentRuntime.ts"

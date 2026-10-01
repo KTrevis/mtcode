@@ -38,6 +38,7 @@ import {
   claudeUsageResponseToLimits,
 } from "./claudeUsageLimits.ts";
 import {
+  MONITOR_TASK_TYPES,
   ApprovalRequestId,
   classifyTaskAgentKind,
   type CanonicalItemType,
@@ -4325,6 +4326,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: {
             taskId: RuntimeTaskId.make(message.task_id),
             description: message.description,
+            ...(message.task_type && MONITOR_TASK_TYPES.has(message.task_type)
+              ? {
+                  monitoring: {
+                    label: message.description,
+                    category:
+                      message.task_type === "monitor" ? ("event" as const) : ("process" as const),
+                    command: trimmedString(launchInput?.command) ?? message.description,
+                    stoppable: context.query.stopTask !== undefined,
+                  },
+                }
+              : {}),
             ...(message.task_type ? { taskType: message.task_type } : {}),
             ...(owningAgentId ? { agentId: owningAgentId } : {}),
             ...(message.description ? { title: message.description } : {}),
@@ -6712,6 +6724,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    stopTask: Effect.fn("ClaudeAdapter.stopTask")(function* (threadId, taskId) {
+      const context = yield* requireSession(threadId);
+      if (!context.query.stopTask || !context.liveTaskIds.has(taskId))
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "task/stop",
+          detail: "This background task cannot be stopped individually or has already finished.",
+        });
+      yield* Effect.tryPromise({
+        try: () => context.query.stopTask!(taskId),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "task/stop",
+            detail: String(cause),
+          }),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: "10 seconds",
+          orElse: () =>
+            Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "task/stop",
+                detail: "Timed out stopping background task.",
+              }),
+            ),
+        }),
+      );
+    }),
     readThread,
     getAgentHistory,
     rollbackThread,
