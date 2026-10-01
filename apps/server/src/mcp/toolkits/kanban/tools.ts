@@ -96,11 +96,12 @@ export const KanbanTicketMoveResult = Schema.Struct({
 
 const MoveTicketTool = Tool.make("kanban_move_ticket", {
   description:
-    "Move an existing Kanban ticket in the specified project to TODO, AI, or Done. Entering AI starts a new agent thread in a required worktree with the project's default model and setup script, just like a user moving the ticket. Moving a ticket already in AI does not restart it. Omit projectId to use the calling thread's project and omit ticketId to move the ticket linked to the calling thread. Pass both IDs to move another ticket. Returns the linked agentThreadId when present.",
+    "Move an existing Kanban ticket in the specified project to TODO, AI, or Done. Entering AI starts a new agent thread in a required worktree with the project's default model and setup script, just like a user moving the ticket. Optional instructions (maximum 8000 characters) are included alongside the ticket in the new thread's first message, before the agent starts. In instructions, the tool replaces $ticketId with the ticket ID, $currThreadId with the calling coordinator's T3 thread ID (not the new worker ID), and $baseBranch with the worktree base ref (the ticket branch, or HEAD when unset). Replacement is a single pass; unknown placeholders stay literal. Ticket title and description are not substituted. Every new thread also receives these three values as coordination context, even without instructions. Instructions apply only when starting a new thread; moving a ticket already in AI does not restart it or send instructions. Omit projectId to use the calling thread's project and omit ticketId to move the ticket linked to the calling thread. Pass both IDs to move another ticket. Returns the linked agentThreadId when present.",
   parameters: Schema.Struct({
     projectId: Schema.optional(ProjectId),
     ticketId: Schema.optional(KanbanCard.fields.id),
     column: KanbanCard.fields.column,
+    instructions: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(8_000))),
   }),
   success: KanbanTicketMoveResult,
   failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMoveError]),

@@ -419,6 +419,11 @@ it.effect("moves tickets without overwriting other cards and validates move requ
       "InvalidParams",
     );
     expect((yield* move({ ...input, column: "AI" })).isError).toBe(true);
+    for (const instructions of [" ", "x".repeat(8_001), 123]) {
+      expect((yield* move({ ...input, instructions }).pipe(Effect.flip))._tag).toBe(
+        "InvalidParams",
+      );
+    }
     expect(yield* engine.latestSequence).toBe(before);
     yield* engine.dispatch({
       type: "project.delete",
@@ -431,7 +436,7 @@ it.effect("moves tickets without overwriting other cards and validates move requ
 );
 
 it.effect(
-  "entering AI launches through client bootstrap, preserves attachments, and supports restarting after leaving AI",
+  "entering AI includes instructions in the first turn, preserves attachments, and supports restarting without instructions",
   () => {
     const images = [
       {
@@ -447,6 +452,7 @@ it.effect(
     ];
     const launches: ClientOrchestrationCommand[] = [];
     let failLaunch = false;
+    let expectedBaseBranch = "main";
     const socketLayer = Layer.effect(
       Socket.WebSocketConstructor,
       Effect.gen(function* () {
@@ -482,13 +488,13 @@ it.effect(
               expect(command.bootstrap).toMatchObject({
                 createThread: {
                   projectId: targetProjectId,
-                  branch: "main",
+                  branch: expectedBaseBranch === "HEAD" ? null : expectedBaseBranch,
                   title: "Launch",
                   runtimeMode: "full-access",
                 },
                 prepareWorktree: {
                   projectCwd: "/tmp/mcp-kanban-target-test",
-                  baseBranch: "main",
+                  baseBranch: expectedBaseBranch,
                   requireWorktree: true,
                 },
                 runSetupScript: true,
@@ -606,17 +612,37 @@ it.effect(
         kanbanExpectedUpdatedAt: project.updatedAt,
         kanbanCards: [{ ...project.kanbanCards![0]!, branch: "main", images }],
       });
-      const runMove = (column: string) =>
-        move({ projectId: targetProjectId, ticketId: ticket.ticketId, column });
-      const [first, concurrent] = yield* Effect.all([runMove("AI"), runMove("AI")], {
-        concurrency: "unbounded",
-      });
+      const runMove = (column: string, instructions?: string) =>
+        move({
+          projectId: targetProjectId,
+          ticketId: ticket.ticketId,
+          column,
+          ...(instructions === undefined ? {} : { instructions }),
+        });
+      const instructions =
+        "Commit $ticketId on $baseBranch and report to $currThreadId with thread_send. Repeat: $currThreadId. Keep $unknown and $ticketIdExtra literal. Do not merge.";
+      const expandedInstructions = `Commit ${ticket.ticketId} on main and report to ${threadId} with thread_send. Repeat: ${threadId}. Keep $unknown and $ticketIdExtra literal. Do not merge.`;
+      const [first, concurrent] = yield* Effect.all(
+        [
+          runMove("AI", instructions),
+          runMove("AI", "Do not send these instructions to the running agent."),
+        ],
+        {
+          concurrency: "unbounded",
+        },
+      );
       expect(
         first.isError,
         first.content.map((item) => (item.type === "text" ? item.text : item.type)).join("\n"),
       ).toBe(false);
       expect(concurrent.isError).toBe(false);
       expect(launches).toHaveLength(1);
+      expect(launches[0]).toMatchObject({
+        message: {
+          text: `Implement this Kanban ticket in the project.\n\n# Launch\n\nDetails\n\nThe kanban-image references in the description correspond to the attached images, in the same order.\n\n## Coordination context\n\nTicket ID: ${ticket.ticketId}\nCoordinator thread ID: ${threadId}\nBase branch: main\n\n## Agent instructions\n\n${expandedInstructions}`,
+        },
+      });
+      expect((yield* readProject()).kanbanCards![0]!.description).toBe("Details");
       const firstThread = (yield* readProject()).kanbanCards![0]!.agentThreadId;
       expect(firstThread).toBeDefined();
       expect(
@@ -627,7 +653,21 @@ it.effect(
       expect((yield* runMove("AI")).isError).toBe(true);
       expect((yield* readProject()).kanbanCards![0]!.column).toBe("Done");
       failLaunch = false;
+      const beforeRestart = yield* readProject();
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("clear-ticket-base-branch"),
+        projectId: targetProjectId,
+        kanbanExpectedUpdatedAt: beforeRestart.updatedAt,
+        kanbanCards: beforeRestart.kanbanCards!.map((card) => ({ ...card, branch: null })),
+      });
+      expectedBaseBranch = "HEAD";
       expect((yield* runMove("AI")).isError).toBe(false);
+      expect(launches.at(-1)).toMatchObject({
+        message: {
+          text: `Implement this Kanban ticket in the project.\n\n# Launch\n\nDetails\n\nThe kanban-image references in the description correspond to the attached images, in the same order.\n\n## Coordination context\n\nTicket ID: ${ticket.ticketId}\nCoordinator thread ID: ${threadId}\nBase branch: HEAD`,
+        },
+      });
       expect((yield* readProject()).kanbanCards![0]!.agentThreadId).not.toBe(firstThread);
     }).pipe(Effect.provide(launchLayer));
   },

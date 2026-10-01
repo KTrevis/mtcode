@@ -127,7 +127,7 @@ const make = Effect.gen(function* () {
       }
       const enteringAI = input.column === "AI" && card.column !== "AI";
       const agentThreadId = enteringAI
-        ? yield* startTicket(project.value, card)
+        ? yield* startTicket(project.value, card, input.instructions)
         : card.agentThreadId;
       const commandId = CommandId.make(
         `mcp:kanban-move:${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}`,

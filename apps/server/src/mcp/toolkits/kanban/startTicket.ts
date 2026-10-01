@@ -28,12 +28,24 @@ import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts
 import { readPersistedServerRuntimeState } from "../../../serverRuntimeState.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
 import { KanbanTicketMoveError } from "./tools.ts";
+import { McpInvocationContext } from "../../McpInvocationContext.ts";
 
 const makeClient = RpcClient.make(WsRpcGroup);
 const isKanbanTicketMoveError = Schema.is(KanbanTicketMoveError);
 
 export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
-  function* (project: OrchestrationProjectShell, card: KanbanCard) {
+  function* (project: OrchestrationProjectShell, card: KanbanCard, instructions?: string) {
+    const scope = yield* McpInvocationContext;
+    const baseBranch = card.branch ?? "HEAD";
+    const agentInstructions = instructions?.replace(
+      /\$(ticketId|currThreadId|baseBranch)\b/g,
+      (placeholder) =>
+        placeholder === "$ticketId"
+          ? card.id
+          : placeholder === "$currThreadId"
+            ? scope.threadId
+            : baseBranch,
+    );
     const settingsService = yield* ServerSettingsService;
     const registry = yield* ProviderRegistry;
     const settings = resolveProjectSettings(
@@ -116,7 +128,7 @@ export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
             message: {
               messageId: MessageId.make(yield* uuid),
               role: "user",
-              text: `Implement this Kanban ticket in the project.\n\n# ${card.title}\n\n${card.description?.trim() || "No description provided."}${card.images?.length ? "\n\nThe kanban-image references in the description correspond to the attached images, in the same order." : ""}`,
+              text: `Implement this Kanban ticket in the project.\n\n# ${card.title}\n\n${card.description?.trim() || "No description provided."}${card.images?.length ? "\n\nThe kanban-image references in the description correspond to the attached images, in the same order." : ""}\n\n## Coordination context\n\nTicket ID: ${card.id}\nCoordinator thread ID: ${scope.threadId}\nBase branch: ${baseBranch}${agentInstructions ? `\n\n## Agent instructions\n\n${agentInstructions}` : ""}`,
               attachments: (card.images ?? []).map((image) => image.attachment),
             },
             modelSelection,
@@ -136,7 +148,7 @@ export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
               },
               prepareWorktree: {
                 projectCwd: project.workspaceRoot,
-                baseBranch: card.branch ?? "HEAD",
+                baseBranch,
                 branch: buildTemporaryWorktreeBranchName(() => threadId),
                 requireWorktree: true,
               },
