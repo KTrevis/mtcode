@@ -721,7 +721,15 @@ function KanbanPage() {
           environmentId={environmentId}
           disabled={saving || launchingCardId !== null || !project}
           detailsOpen={selectedCard !== undefined}
-          onAdd={(title, column) => save([...cards, { id: randomUUID(), title, column }])}
+          onAdd={async (title, column) => {
+            const id = randomUUID();
+            const saved = await save([...cards, { id, title, column }]);
+            if (saved) {
+              setCloseRequested(false);
+              void navigate({ search: { cardId: id } });
+            }
+            return saved;
+          }}
           onOpen={(id) => {
             setCloseRequested(false);
             void navigate({ search: { cardId: id } });
