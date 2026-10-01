@@ -1,4 +1,5 @@
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { setComposerThreadDragData } from "./chat/composerMentionDrag";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { Spinner } from "~/components/ui/spinner";
 import {
@@ -793,6 +794,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   <span
                     className="min-w-0 flex-1 truncate text-sm"
                     data-testid={`thread-title-${thread.id}`}
+                    draggable
+                    onPointerDown={(event) => {
+                      if (event.pointerType === "mouse") event.stopPropagation();
+                    }}
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      setComposerThreadDragData(event.dataTransfer, {
+                        environmentId: thread.environmentId,
+                        threadId: thread.id,
+                        title: thread.title,
+                      });
+                    }}
                   >
                     {thread.title}
                   </span>
