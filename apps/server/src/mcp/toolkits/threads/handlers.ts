@@ -47,6 +47,80 @@ const readActiveThread = Effect.fn("ThreadRelay.readActiveThread")(function* (
   return Option.filter(thread, ({ archivedAt }) => archivedAt === null);
 });
 
+const finishThread = Effect.fn("ThreadRelay.finishThread")(function* (
+  threadId: ThreadId,
+  action: "archive" | "settle",
+) {
+  const invocation = yield* McpInvocationContext.McpInvocationContext;
+  if (threadId === invocation.threadId) {
+    return yield* new ThreadRelayError({
+      code: action === "archive" ? "self_archive" : "self_settle",
+      detail: `A T3 thread cannot ${action} itself.`,
+    });
+  }
+
+  const query = yield* ProjectionSnapshotQuery;
+  const [source, target] = yield* Effect.all([
+    readActiveThread(query, invocation.threadId),
+    readActiveThread(query, threadId),
+  ]);
+  if (Option.isNone(source)) {
+    return yield* new ThreadRelayError({
+      code: "source_unavailable",
+      detail: "The invoking T3 thread is no longer active.",
+    });
+  }
+  if (Option.isNone(target)) {
+    return yield* new ThreadRelayError({
+      code: "target_not_found",
+      detail: `No active T3 thread exists with id '${threadId}'.`,
+    });
+  }
+  if (source.value.projectId !== target.value.projectId) {
+    return yield* new ThreadRelayError({
+      code: "cross_project",
+      detail: `T3 threads can only ${action} siblings in the same project.`,
+    });
+  }
+  const status = relayStatus(target.value);
+  if (status === "working" || status === "waiting") {
+    return yield* new ThreadRelayError({
+      code: "target_busy",
+      detail: `Thread '${threadId}' is ${status} and cannot be ${action === "archive" ? "archived" : "settled"} until it finishes.`,
+    });
+  }
+
+  const crypto = yield* Crypto.Crypto;
+  const engine = yield* OrchestrationEngineService;
+  const commandUuid = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ThreadRelayError({
+          code: "dispatch_failed",
+          detail: `T3 could not durably ${action} the thread.`,
+          cause,
+        }),
+    ),
+  );
+  yield* engine
+    .dispatch({
+      type: action === "archive" ? "thread.archive" : "thread.settle",
+      commandId: CommandId.make(`mcp:thread-${action}:${commandUuid}`),
+      threadId: target.value.id,
+    })
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new ThreadRelayError({
+            code: "dispatch_failed",
+            detail: `T3 could not durably ${action} the thread.`,
+            cause,
+          }),
+      ),
+    );
+  return target.value.id;
+});
+
 const handlers = {
   thread_list: Effect.fn("ThreadRelay.threadList")(function* () {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
@@ -296,77 +370,13 @@ const handlers = {
     };
   }),
   thread_archive: Effect.fn("ThreadRelay.threadArchive")(function* (input) {
-    const invocation = yield* McpInvocationContext.McpInvocationContext;
-    if (input.threadId === invocation.threadId) {
-      return yield* new ThreadRelayError({
-        code: "self_archive",
-        detail: "A T3 thread cannot archive itself.",
-      });
-    }
-
-    const query = yield* ProjectionSnapshotQuery;
-    const [source, target] = yield* Effect.all([
-      readActiveThread(query, invocation.threadId),
-      readActiveThread(query, input.threadId),
-    ]);
-    if (Option.isNone(source)) {
-      return yield* new ThreadRelayError({
-        code: "source_unavailable",
-        detail: "The invoking T3 thread is no longer active.",
-      });
-    }
-    if (Option.isNone(target)) {
-      return yield* new ThreadRelayError({
-        code: "target_not_found",
-        detail: `No active T3 thread exists with id '${input.threadId}'.`,
-      });
-    }
-    if (source.value.projectId !== target.value.projectId) {
-      return yield* new ThreadRelayError({
-        code: "cross_project",
-        detail: "T3 threads can only archive siblings in the same project.",
-      });
-    }
-    const status = relayStatus(target.value);
-    if (status === "working" || status === "waiting") {
-      return yield* new ThreadRelayError({
-        code: "target_busy",
-        detail: `Thread '${input.threadId}' is ${status} and cannot be archived until it settles.`,
-      });
-    }
-
-    const crypto = yield* Crypto.Crypto;
-    const engine = yield* OrchestrationEngineService;
-    const commandUuid = yield* crypto.randomUUIDv4.pipe(
-      Effect.mapError(
-        (cause) =>
-          new ThreadRelayError({
-            code: "dispatch_failed",
-            detail: "T3 could not durably archive the thread.",
-            cause,
-          }),
-      ),
-    );
-    yield* engine
-      .dispatch({
-        type: "thread.archive",
-        commandId: CommandId.make(`mcp:thread-archive:${commandUuid}`),
-        threadId: target.value.id,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ThreadRelayError({
-              code: "dispatch_failed",
-              detail: "T3 could not durably archive the thread.",
-              cause,
-            }),
-        ),
-      );
     return {
-      threadId: target.value.id,
+      threadId: yield* finishThread(input.threadId, "archive"),
       status: "archived" as const,
     };
+  }),
+  thread_settle: Effect.fn("ThreadRelay.threadSettle")(function* (input) {
+    return { threadId: yield* finishThread(input.threadId, "settle"), status: "settled" as const };
   }),
 } satisfies Parameters<typeof ThreadRelayToolkit.toLayer>[0];
 

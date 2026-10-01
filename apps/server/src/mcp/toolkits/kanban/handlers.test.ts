@@ -37,7 +37,10 @@ import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/
 import { OrchestrationEventStoreLive } from "../../../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { RepositoryIdentityResolver } from "../../../project/RepositoryIdentityResolver.ts";
-import { KanbanToolkitRegistrationLive } from "../../McpHttpServer.ts";
+import {
+  KanbanToolkitRegistrationLive,
+  ThreadRelayToolkitRegistrationLive,
+} from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { KanbanTicketCreateResult, KanbanTicketMoveResult } from "./tools.ts";
 
@@ -101,7 +104,7 @@ const makeTestLayer = <E = never>(
   socketLayer: Layer.Layer<Socket.WebSocketConstructor, E> = Socket.layerWebSocketConstructorGlobal,
   authLayer = Layer.mock(EnvironmentAuth)({}),
 ) =>
-  KanbanToolkitRegistrationLive.pipe(
+  Layer.mergeAll(KanbanToolkitRegistrationLive, ThreadRelayToolkitRegistrationLive).pipe(
     Layer.provideMerge(TestDependencies),
     Layer.provide(
       Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
@@ -162,6 +165,58 @@ const makeHarness = Effect.gen(function* () {
       );
   return { server, engine, call, createTicket, readProject, move };
 });
+
+it.effect(
+  "settling a sibling through MCP marks its linked ticket Done and preserves other tickets",
+  () =>
+    Effect.gen(function* () {
+      const { engine, call, createTicket, readProject } = yield* makeHarness;
+      const workerId = ThreadId.make("settle-worker");
+      for (const id of [threadId, workerId]) {
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`create-${id}`),
+          threadId: id,
+          projectId: targetProjectId,
+          title: id,
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-09-16T00:00:00.000Z",
+        });
+      }
+      const ticket = yield* createTicket({ projectId: targetProjectId, title: "Worker ticket" });
+      yield* createTicket({ projectId: targetProjectId, title: "Other ticket" });
+      const project = yield* readProject();
+      const cards = project.kanbanCards!.map((card) =>
+        card.id === ticket.ticketId
+          ? { ...card, column: "AI" as const, agentThreadId: workerId }
+          : card,
+      );
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("link-settle-ticket"),
+        projectId: targetProjectId,
+        kanbanCards: cards,
+        kanbanExpectedUpdatedAt: project.updatedAt,
+      });
+      const snapshots = yield* ProjectionSnapshotQuery;
+      const settle = () => call({ threadId: workerId }, invocation, "thread_settle");
+      expect((yield* settle()).isError).toBe(false);
+      const settled = Option.getOrThrow(yield* snapshots.getThreadShellById(workerId));
+      expect(settled.settledOverride).toBe("settled");
+      expect(settled.archivedAt).toBeNull();
+      expect((yield* readProject()).kanbanCards).toEqual(
+        cards.map((card) => (card.id === ticket.ticketId ? { ...card, column: "Done" } : card)),
+      );
+      expect((yield* settle()).isError).toBe(false);
+      expect(Option.getOrThrow(yield* snapshots.getThreadShellById(workerId)).settledAt).toBe(
+        settled.settledAt,
+      );
+    }).pipe(Effect.provide(TestLayer)),
+);
 
 it.effect(
   "lists complete tickets in board order, defaults to the caller project, and never mutates",
