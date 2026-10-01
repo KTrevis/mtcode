@@ -44,7 +44,7 @@ import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { observeResponsiveBreakpointFade, usePanelAnimationSettings } from "../../panelAnimations";
-import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectBreadcrumbItem } from "../ProjectBreadcrumbItem";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -481,26 +481,7 @@ export const ChatHeader = memo(function ChatHeader({
             doesn't answer it. */}
           {activeProject ? (
             <>
-              <WorkspaceBreadcrumbItem className="shrink">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-label={`New thread in ${activeProjectName}`}
-                        onClick={onNewThreadInProject}
-                        className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                    }
-                  >
-                    <ProjectFavicon project={activeProject} className="size-3.5" />
-                    <WorkspaceBreadcrumbText className="max-w-40">
-                      {activeProjectName}
-                    </WorkspaceBreadcrumbText>
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
-                </Tooltip>
-              </WorkspaceBreadcrumbItem>
+              <ProjectBreadcrumbItem project={activeProject} onNewThread={onNewThreadInProject} />
               <WorkspaceBreadcrumbSeparator>
                 <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>
               </WorkspaceBreadcrumbSeparator>
