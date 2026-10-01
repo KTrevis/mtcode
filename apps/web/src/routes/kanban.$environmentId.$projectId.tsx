@@ -718,7 +718,9 @@ function KanbanPage() {
       <main className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-6">
         <KanbanBoard
           key={`${environmentId}:${projectId}`}
-          cards={cards}
+          cards={cards.map((card) =>
+            card.id === launchingCardId ? { ...card, column: "AI" as const } : card,
+          )}
           environmentId={environmentId}
           disabled={saving || launchingCardId !== null || !project}
           detailsOpen={selectedCard !== undefined}
