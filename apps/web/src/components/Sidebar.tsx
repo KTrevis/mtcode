@@ -7,6 +7,7 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import * as Schema from "effect/Schema";
 import {
   DndContext,
+  DragOverlay,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -16,6 +17,8 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { createPortal } from "react-dom";
+import { serializeComposerThreadLink } from "@t3tools/shared/composerTrigger";
 import { CSS } from "@dnd-kit/utilities";
 import {
   canSnooze,
@@ -197,6 +200,10 @@ import {
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
+  SIDEBAR_THREAD_DRAG_END_EVENT,
+  SIDEBAR_THREAD_DRAG_OVER_EVENT,
+  dropSidebarThreadInChat,
+  sidebarThreadChatTarget,
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
@@ -998,9 +1005,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // rows. The marker can unpin the thread when the server supports pinning.
   pinningSupported: boolean;
   isPinned: boolean;
-  // Present on rows whose server supports every drop outcome: dnd-kit
-  // sortable bag applied to the row root so the whole row drags (the
-  // pointer sensor's distance constraint keeps plain clicks working).
+  // The whole row drags; drop eligibility gates server actions separately
+  // so references also work on older servers. The distance constraint keeps
+  // plain clicks working.
   sortable?: SortableThreadRowBag | undefined;
   dropVerb: SidebarDropVerb | null;
   // While dragging, the pin marker stays only for a pinned thread still over
@@ -1463,12 +1470,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     ? {
         ref: sortable.setNodeRef,
         style: {
+          pointerEvents: sortable.isDragging ? ("none" as const) : undefined,
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
           visibility:
-            !sortable.isDragging && sortable.transform?.scaleY === 0
+            sortable.isDragging || (!sortable.isDragging && sortable.transform?.scaleY === 0)
               ? ("hidden" as const)
               : undefined,
         },
@@ -3358,9 +3366,16 @@ export default function Sidebar() {
     readonly targetSection: SidebarSection | null;
   } | null>(null);
   const dragTargetSection = dragState?.targetSection ?? null;
+  const dragVerb =
+    dragState === null ? null : resolveSidebarDropVerb(dragState.activeSection, dragTargetSection);
+  const [isDragOutsideSidebar, setIsDragOutsideSidebar] = useState(false);
+  const dragOutsideRef = useRef(false);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const finishThreadDrag = useCallback((started: boolean) => {
     dragSensorRef.current = null;
+    dragOutsideRef.current = false;
+    setIsDragOutsideSidebar(false);
+    window.dispatchEvent(new Event(SIDEBAR_THREAD_DRAG_END_EVENT));
     if (started) {
       listMotionRef.current?.release();
       setDragState(null);
@@ -3372,10 +3387,61 @@ export default function Sidebar() {
   const cancelThreadDrag = useCallback(() => {
     dragSensorRef.current?.cancel();
   }, []);
+  const handleThreadPointerMove = useCallback((coordinates: { x: number; y: number }) => {
+    const bounds = threadListRef.current?.getBoundingClientRect();
+    const outside = bounds != null && (coordinates.x < bounds.left || coordinates.x > bounds.right);
+    dragOutsideRef.current = outside;
+    setIsDragOutsideSidebar(outside);
+    window.dispatchEvent(
+      new CustomEvent(SIDEBAR_THREAD_DRAG_OVER_EVENT, {
+        detail: sidebarThreadChatTarget(coordinates),
+      }),
+    );
+  }, []);
+  const handleThreadPointerDrop = useCallback(
+    (key: string, coordinates: { x: number; y: number }) => {
+      const thread = threadByKey.get(key);
+      const bounds = threadListRef.current?.getBoundingClientRect();
+      const outside =
+        bounds == null ||
+        coordinates.x < bounds.left ||
+        coordinates.x > bounds.right ||
+        coordinates.y < bounds.top ||
+        coordinates.y > bounds.bottom;
+      return (
+        (thread != null &&
+          dropSidebarThreadInChat(
+            coordinates,
+            serializeComposerThreadLink({
+              environmentId: thread.environmentId,
+              threadId: thread.id,
+              title: thread.title,
+            }),
+          )) ||
+        outside
+      );
+    },
+    [threadByKey],
+  );
+  const threadDragModifiers = useCallback<Modifier>(
+    (args) => {
+      if (dragOutsideRef.current) return args.transform;
+      return restrictToFirstScrollableAncestor({
+        ...args,
+        transform: restrictBelowPins({
+          ...args,
+          transform: restrictToVerticalAxis(args),
+        }),
+      });
+    },
+    [restrictBelowPins],
+  );
   const dndSensors = useSensors(
     useSensor(SidebarPointerSensor, {
       distance: 6,
       onAttach: attachDragSensor,
+      onMove: handleThreadPointerMove,
+      onDrop: handleThreadPointerDrop,
       onFinish: finishThreadDrag,
     }),
   );
@@ -3544,8 +3610,8 @@ export default function Sidebar() {
     },
     [sectionByThreadKey],
   );
-  // Include every visible row in the measured order. Older servers disable
-  // pickup on their rows without changing where those rows render.
+  // Include every visible row in the measured order. Older servers can still
+  // provide references, while unsupported sidebar drops are rejected.
   const sidebarListItems = useMemo((): readonly SidebarListItem[] => {
     const rowsOf = (
       list: readonly EnvironmentThreadShell[],
@@ -3693,7 +3759,8 @@ export default function Sidebar() {
     if (draggedThreadKey === undefined || draggedFromSection === undefined)
       return createSidebarCollisionDetection(() => true);
     const source = threadByKey.get(draggedThreadKey);
-    if (source === undefined) return createSidebarCollisionDetection(() => false);
+    if (source === undefined || !draggableThreadKeys.has(draggedThreadKey))
+      return createSidebarCollisionDetection(() => false);
     return createSidebarCollisionDetection(
       (id) => {
         const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
@@ -3739,6 +3806,7 @@ export default function Sidebar() {
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
+      if (!draggableThreadKeys.has(activeKey)) return;
       const activeSection = sectionByThreadKey.get(activeKey);
       const target =
         event.over === null
@@ -4917,12 +4985,9 @@ export default function Sidebar() {
             >
               <DndContext
                 sensors={dndSensors}
+                autoScroll={!isDragOutsideSidebar}
                 collisionDetection={dndCollisionDetection}
-                modifiers={[
-                  restrictToVerticalAxis,
-                  restrictBelowPins,
-                  restrictToFirstScrollableAncestor,
-                ]}
+                modifiers={[threadDragModifiers]}
                 onDragStart={handleThreadDragStart}
                 onDragOver={handleThreadDragOver}
                 onDragEnd={handleThreadDragEnd}
@@ -5063,11 +5128,7 @@ export default function Sidebar() {
                           <SortableThreadRow
                             key={threadKey}
                             id={threadKey}
-                            disabled={
-                              renamingThreadKey === threadKey ||
-                              !draggableThreadKeys.has(threadKey) ||
-                              optimisticDrop !== null
-                            }
+                            disabled={renamingThreadKey === threadKey || optimisticDrop !== null}
                           >
                             {(bag) => renderThreadRowInner(thread, section, bag)}
                           </SortableThreadRow>
@@ -5204,6 +5265,31 @@ export default function Sidebar() {
                     ) : null}
                   </ul>
                 </SortableContext>
+                {createPortal(
+                  <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
+                    {dragState !== null ? (
+                      <div
+                        className={cn(
+                          "pointer-events-none flex flex-col justify-center gap-1 rounded-md bg-sidebar px-3 text-sm text-sidebar-foreground shadow-lg",
+                          (dragTargetSection ?? dragState.activeSection) === "pinned" ||
+                            (dragTargetSection ?? dragState.activeSection) === "active"
+                            ? "h-[78px]"
+                            : "h-9",
+                        )}
+                      >
+                        <span className="truncate font-medium">
+                          {threadByKey.get(dragState.activeKey)?.title}
+                        </span>
+                        {dragVerb !== null ? (
+                          <span className="flex items-center gap-1 text-xs text-primary">
+                            {dropVerbBadge[dragVerb]}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </DragOverlay>,
+                  document.body,
+                )}
               </DndContext>
             </TooltipProvider>
           ) : null}

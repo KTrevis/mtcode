@@ -39,8 +39,10 @@ export function createSidebarCollisionDetection(
   let previousPointerY = options.activationY;
   let boundarySection: "pinned" | "active" | undefined;
   return (args) => {
-    let collisions = closestCenter(args);
+    const bounds = args.droppableRects.values().next().value;
     const pointer = args.pointerCoordinates;
+    if (pointer && bounds && (pointer.x < bounds.left || pointer.x > bounds.right)) return [];
+    let collisions = closestCenter(args);
     const items = options.items;
     const source = items?.find((item) => item.kind === "thread" && item.key === args.active.id);
     const boundary = args.droppableContainers
@@ -256,4 +258,25 @@ export function createSidebarSortingStrategy(input: {
       ? verticalListSortingStrategy(args)
       : (transforms[args.index] ?? stationary);
   };
+}
+
+// Pointer drags share the native mention insertion path without HTML drag events.
+export const SIDEBAR_THREAD_DROP_EVENT = "t3:sidebar-thread-drop";
+export const SIDEBAR_THREAD_DRAG_END_EVENT = "t3:sidebar-thread-drag-end";
+export const SIDEBAR_THREAD_DRAG_OVER_EVENT = "t3:sidebar-thread-drag-over";
+
+export function sidebarThreadChatTarget(coordinates: { x: number; y: number }) {
+  return (
+    document
+      .elementFromPoint(coordinates.x, coordinates.y)
+      ?.closest<HTMLElement>("[data-thread-drop-target]") ?? null
+  );
+}
+
+export function dropSidebarThreadInChat(coordinates: { x: number; y: number }, mention: string) {
+  const target = sidebarThreadChatTarget(coordinates);
+  if (!target) return false;
+  return !target.dispatchEvent(
+    new CustomEvent(SIDEBAR_THREAD_DROP_EVENT, { detail: mention, cancelable: true }),
+  );
 }
