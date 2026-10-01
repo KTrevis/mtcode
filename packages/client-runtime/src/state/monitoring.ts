@@ -4,6 +4,7 @@ import {
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 export interface MonitoringTask {
   readonly id: string;
@@ -12,10 +13,19 @@ export interface MonitoringTask {
   readonly command: string;
   readonly nextWakeAt?: string | undefined;
   readonly stoppable: boolean;
+  readonly startedAt: string;
+  readonly completedAt?: string;
+  readonly status?: string;
   readonly result?: { readonly at: string; readonly text: string };
 }
 
 const decodeMonitoringMetadata = Schema.decodeUnknownOption(MonitoringMetadata);
+
+export function formatMonitoringDuration(task: MonitoringTask, now: number): string {
+  return formatDuration(
+    (task.completedAt ? Date.parse(task.completedAt) : now) - Date.parse(task.startedAt),
+  );
+}
 
 export const monitoringCategoryLabel = {
   scheduled: "Scheduled wait",
@@ -47,7 +57,15 @@ export function deriveMonitoringTasks(
         ))
     ) {
       terminal.add(id);
-      tasks.delete(id);
+      const task = tasks.get(id);
+      if (task && !task.completedAt) {
+        tasks.set(id, {
+          ...task,
+          completedAt: activity.createdAt,
+          status: "status" in payload ? String(payload.status) : "completed",
+          nextWakeAt: undefined,
+        });
+      }
       continue;
     }
     if (
@@ -71,6 +89,9 @@ export function deriveMonitoringTasks(
         command: info?.command ?? detail,
         category: info?.category ?? (payload.taskType === "monitor" ? "event" : "process"),
         stoppable: info?.stoppable ?? false,
+        startedAt: tasks.get(id)?.completedAt
+          ? activity.createdAt
+          : (tasks.get(id)?.startedAt ?? activity.createdAt),
         ...(info?.nextWakeAt ? { nextWakeAt: info.nextWakeAt } : {}),
       });
     } else if (activity.kind === "task.progress" && !terminal.has(id)) {
@@ -84,5 +105,9 @@ export function deriveMonitoringTasks(
       }
     }
   }
-  return Array.from(tasks.values());
+  return Array.from(tasks.values()).sort(
+    (a, b) =>
+      Number(Boolean(a.completedAt)) - Number(Boolean(b.completedAt)) ||
+      (a.completedAt && b.completedAt ? b.completedAt.localeCompare(a.completedAt) : 0),
+  );
 }

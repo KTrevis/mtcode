@@ -1291,19 +1291,18 @@ function ThreadRouteContent(
         onReturnToThread={props.onReturnToThread}
       />
 
-      {selectedThread.backgroundLiveness === "monitoring" ? (
-        <MonitoringDetails
-          key={selectedThread.id}
-          activities={selectedThreadDetail?.activities ?? []}
-          onStop={async (taskId) => {
-            const result = await interruptThreadTurn({
-              environmentId: selectedThread.environmentId,
-              input: { threadId: selectedThread.id, taskId },
-            });
-            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-          }}
-        />
-      ) : null}
+      <MonitoringDetails
+        key={selectedThread.id}
+        active={selectedThread.backgroundLiveness === "monitoring"}
+        activities={selectedThreadDetail?.activities ?? []}
+        onStop={async (taskId) => {
+          const result = await interruptThreadTurn({
+            environmentId: selectedThread.environmentId,
+            input: { threadId: selectedThread.id, taskId },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        }}
+      />
       {renderThreadRouteBody()}
     </>
   );

@@ -1,6 +1,7 @@
 import { useAtomCommand } from "~/state/use-atom-command";
 import {
   monitoringCategoryLabel,
+  formatMonitoringDuration,
   type MonitoringTask,
 } from "@t3tools/client-runtime/state/monitoring";
 import {
@@ -8,7 +9,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { threadEnvironment } from "~/state/threads";
 import { Button } from "./ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popover";
@@ -25,6 +26,13 @@ export function MonitoringDetails({
   const stop = useAtomCommand(threadEnvironment.interruptTurn, "stop monitoring task");
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const running = tasks.some((task) => !task.completedAt);
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [running]);
   const time = (value: string) =>
     new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   async function stopTask(id: string) {
@@ -46,7 +54,8 @@ export function MonitoringDetails({
   return (
     <Popover>
       <PopoverTrigger render={<Button size="xs" variant="ghost" />} aria-label="Monitoring details">
-        Monitoring
+        {running || tasks.length === 0 ? "Monitoring" : "Monitoring history"}
+        {tasks.length === 1 && tasks[0] ? ` · ${formatMonitoringDuration(tasks[0], now)}` : null}
       </PopoverTrigger>
       <PopoverPopup width="lg" side="top" align="end">
         <PopoverTitle>Monitoring</PopoverTitle>
@@ -68,7 +77,7 @@ export function MonitoringDetails({
                     </p>
                     <p className="break-words text-sm font-medium">{task.label}</p>
                   </div>
-                  {task.stoppable ? (
+                  {task.stoppable && !task.completedAt ? (
                     <Button
                       size="xs"
                       variant="ghost"
@@ -81,7 +90,9 @@ export function MonitoringDetails({
                   ) : null}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}
+                  {task.completedAt
+                    ? `${task.status} · Duration ${formatMonitoringDuration(task, now)}`
+                    : `Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
                 </p>
                 <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-2xs text-muted-foreground">
                   {task.command}
@@ -91,7 +102,7 @@ export function MonitoringDetails({
                     Checked at {time(task.result.at)} · {task.result.text}
                   </p>
                 ) : null}
-                {!task.stoppable ? (
+                {!task.stoppable && !task.completedAt ? (
                   <p className="mt-1 text-2xs text-muted-foreground">
                     This provider supports stopping background work together.
                   </p>

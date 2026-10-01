@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import {
   deriveMonitoringTasks,
   monitoringCategoryLabel,
+  formatMonitoringDuration,
 } from "@t3tools/client-runtime/state/monitoring";
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 import { AppText as Text } from "../../components/AppText";
@@ -10,14 +11,23 @@ import { AppText as Text } from "../../components/AppText";
 export function MonitoringDetails({
   activities,
   onStop,
+  active,
 }: {
   activities: ReadonlyArray<OrchestrationThreadActivity>;
   onStop: (taskId: string) => Promise<void>;
+  active: boolean;
 }) {
   const tasks = useMemo(() => deriveMonitoringTasks(activities), [activities]);
   const [open, setOpen] = useState(false);
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const running = tasks.some((task) => !task.completedAt);
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [running]);
   const time = (value: string) =>
     new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   async function stop(id: string) {
@@ -35,6 +45,7 @@ export function MonitoringDetails({
       });
     }
   }
+  if (!active && tasks.length === 0) return null;
   return (
     <View className="border-b border-border px-4 py-2">
       <Pressable
@@ -45,7 +56,9 @@ export function MonitoringDetails({
         className="min-h-11 justify-center"
       >
         <Text className="font-t3-medium text-sm">
-          Monitoring · {open ? "Hide details" : "Details"}
+          {running || active ? "Monitoring" : "Monitoring history"}
+          {tasks.length === 1 && tasks[0] ? ` · ${formatMonitoringDuration(tasks[0], now)}` : ""}
+          {` · ${open ? "Hide details" : "Details"}`}
         </Text>
       </Pressable>
       {open ? (
@@ -62,7 +75,9 @@ export function MonitoringDetails({
                 </Text>
                 <Text className="font-t3-medium text-sm">{task.label}</Text>
                 <Text className="text-xs text-foreground-muted">
-                  {task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}
+                  {task.completedAt
+                    ? `${task.status} · Duration ${formatMonitoringDuration(task, now)}`
+                    : `Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
                 </Text>
                 <Text className="font-mono text-xs text-foreground-muted" selectable>
                   {task.command}
@@ -72,7 +87,7 @@ export function MonitoringDetails({
                     Checked at {time(task.result.at)} · {task.result.text}
                   </Text>
                 ) : null}
-                {task.stoppable ? (
+                {task.completedAt ? null : task.stoppable ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Stop ${task.label}`}

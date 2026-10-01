@@ -6870,7 +6870,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (activeBackgroundLiveness === null || !activeThread) {
+    if (!activeThread || (activeBackgroundLiveness === null && monitoringTasks.length === 0)) {
       return null;
     }
     const working = activeBackgroundLiveness === "working";
@@ -6909,14 +6909,16 @@ export default function ChatView(props: ChatViewProps) {
               View
             </Button>
           ) : null}
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={isStoppingBackgroundWork}
-            onClick={() => void handleStopBackgroundWork()}
-          >
-            {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-          </Button>
+          {activeBackgroundLiveness !== null ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={isStoppingBackgroundWork}
+              onClick={() => void handleStopBackgroundWork()}
+            >
+              {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+            </Button>
+          ) : null}
         </>
       ),
     };
