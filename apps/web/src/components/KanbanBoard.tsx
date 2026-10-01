@@ -53,7 +53,7 @@ function Card({
   return (
     <div
       ref={setNodeRef}
-      className="flex shrink-0 cursor-pointer items-start gap-2 rounded-lg bg-muted/50 px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+      className="group/kanban-card relative shrink-0 cursor-pointer rounded-lg bg-muted/50 px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
       style={{ opacity: isDragging ? 0 : 1 }}
       {...attributes}
       {...listeners}
@@ -75,7 +75,7 @@ function Card({
         }
       }}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         <span className="break-words">{card.title}</span>
         {card.branch ? (
           <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
@@ -84,31 +84,33 @@ function Card({
           </span>
         ) : null}
       </div>
-      {card.agentThreadId ? (
-        <Link
-          to="/$environmentId/$threadId"
-          params={{ environmentId, threadId: card.agentThreadId }}
-          aria-label={`Open agent thread for ${card.title}`}
-          className="cursor-pointer text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      <div className="pointer-events-none absolute top-1 right-1 z-10 flex items-center gap-1 rounded-md bg-muted p-0.5 opacity-0 group-hover/kanban-card:pointer-events-auto group-hover/kanban-card:opacity-100 group-focus-within/kanban-card:pointer-events-auto group-focus-within/kanban-card:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100">
+        {card.agentThreadId ? (
+          <Link
+            to="/$environmentId/$threadId"
+            params={{ environmentId, threadId: card.agentThreadId }}
+            aria-label={`Open agent thread for ${card.title}`}
+            className="cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <MessageSquareIcon className="size-4" />
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          aria-label={`Delete ${card.title}`}
+          className="cursor-pointer rounded p-1 text-muted-foreground hover:text-destructive-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled}
           onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(card.id);
+          }}
         >
-          <MessageSquareIcon className="size-4" />
-        </Link>
-      ) : null}
-      <button
-        type="button"
-        aria-label={`Delete ${card.title}`}
-        className="cursor-pointer text-muted-foreground hover:text-destructive-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={disabled}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete(card.id);
-        }}
-      >
-        <Trash2Icon className="size-4" />
-      </button>
+          <Trash2Icon className="size-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -458,9 +460,8 @@ export function KanbanBoard({
       {createPortal(
         <DragOverlay zIndex={100}>
           {draggedCard ? (
-            <div className="flex w-full cursor-grabbing items-start gap-2 rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
-              <span className="min-w-0 flex-1 break-words">{draggedCard.title}</span>
-              <Trash2Icon className="size-4 shrink-0 text-muted-foreground" />
+            <div className="w-full cursor-grabbing rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
+              <span className="break-words">{draggedCard.title}</span>
             </div>
           ) : null}
         </DragOverlay>,
