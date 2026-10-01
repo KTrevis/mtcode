@@ -23,7 +23,9 @@ function pointer(type: string, values: Partial<PointerEvent> = {}) {
   });
 }
 
-function gesture() {
+function gesture(
+  options: Partial<ConstructorParameters<typeof SidebarPointerSensor>[0]["options"]> = {},
+) {
   const callbacks = {
     onStart: vi.fn(),
     onMove: vi.fn(),
@@ -37,7 +39,7 @@ function gesture() {
   const props = {
     active: "thread",
     event: pointer("pointerdown"),
-    options: { distance: 6, onAttach: vi.fn(), onFinish },
+    options: { distance: 6, onAttach: vi.fn(), onFinish, ...options },
     ...callbacks,
   } as unknown as SensorProps<ConstructorParameters<typeof SidebarPointerSensor>[0]["options"]>;
   const sensor = new SidebarPointerSensor(props);
@@ -76,6 +78,36 @@ describe("sidebar pointer lifecycle", () => {
     expect(drag.onEnd).toHaveBeenCalledOnce();
     expect(drag.onAbort).not.toHaveBeenCalled();
     expect(drag.onFinish).toHaveBeenCalledOnce();
+  });
+
+  it("claims a chat drop at the release position without committing a sidebar move", () => {
+    const onDrop = vi.fn(() => true);
+    const onMove = vi.fn();
+    const drag = gesture({ onDrop, onMove });
+    document.dispatchEvent(pointer("pointermove", { clientX: 400 }));
+    expect(onMove).toHaveBeenCalledWith({ x: 400, y: 10 });
+    document.dispatchEvent(pointer("pointerup", { clientX: 600, clientY: 200, buttons: 0 }));
+    expect(onDrop).toHaveBeenCalledExactlyOnceWith("thread", { x: 600, y: 200 });
+    expect(drag.onCancel).toHaveBeenCalledOnce();
+    expect(drag.onEnd).not.toHaveBeenCalled();
+    expect(drag.onFinish).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("keeps sidebar drops and never inserts on a click or cancellation", () => {
+    const onDrop = vi.fn(() => false);
+    const click = gesture({ onDrop });
+    document.dispatchEvent(pointer("pointerup", { buttons: 0 }));
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(click.onEnd).toHaveBeenCalledOnce();
+    const drag = gesture({ onDrop });
+    document.dispatchEvent(pointer("pointermove", { clientY: 20 }));
+    document.dispatchEvent(pointer("pointerup", { buttons: 0 }));
+    expect(onDrop).toHaveBeenCalledOnce();
+    expect(drag.onEnd).toHaveBeenCalledOnce();
+    const cancelled = gesture({ onDrop });
+    document.dispatchEvent(pointer("pointermove", { clientY: 20 }));
+    cancelled.sensor.cancel();
+    expect(onDrop).toHaveBeenCalledOnce();
   });
 
   const interruptions = {

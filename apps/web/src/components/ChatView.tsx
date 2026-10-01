@@ -1,5 +1,10 @@
 import { deriveMonitoringTasks } from "@t3tools/client-runtime/state/monitoring";
 import { MonitoringDetails } from "./MonitoringDetails";
+import {
+  SIDEBAR_THREAD_DROP_EVENT,
+  SIDEBAR_THREAD_DRAG_OVER_EVENT,
+  SIDEBAR_THREAD_DRAG_END_EVENT,
+} from "./Sidebar.drag";
 import { isChatGptUsageLimitError } from "@t3tools/shared/usageLimits";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -1761,6 +1766,8 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef],
   );
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
+  const threadDropTargetRef = useRef<HTMLDivElement | null>(null);
+  const [isThreadDragOver, setIsThreadDragOver] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [chatSearchThreadKey, setChatSearchThreadKey] = useState<string | null>(null);
   const chatSearchOpen = chatSearchThreadKey === routeThreadKey;
@@ -2043,6 +2050,35 @@ export default function ChatView(props: ChatViewProps) {
   // depend on which route is mounted.
   const isServerThread = activeServerThread !== null;
   const activeThread = activeServerThread ?? localDraftThread;
+  useEffect(() => {
+    const target = threadDropTargetRef.current;
+    if (!target) return;
+    const onDrop = (event: Event) => {
+      if (!(event instanceof CustomEvent) || typeof event.detail !== "string") return;
+      event.preventDefault();
+      if (
+        !composerRef.current?.insertTextAtEnd(`${event.detail} `, { ensureLeadingBoundary: true })
+      ) {
+        toastManager.add({
+          type: "error",
+          title: "Unable to add to chat",
+          description: "The composer is busy; try again once it is ready.",
+        });
+      }
+    };
+    const onOver = (event: Event) =>
+      setIsThreadDragOver(event instanceof CustomEvent && event.detail === target);
+    const onEnd = () => setIsThreadDragOver(false);
+    target.addEventListener(SIDEBAR_THREAD_DROP_EVENT, onDrop);
+    window.addEventListener(SIDEBAR_THREAD_DRAG_OVER_EVENT, onOver);
+    window.addEventListener(SIDEBAR_THREAD_DRAG_END_EVENT, onEnd);
+    return () => {
+      target.removeEventListener(SIDEBAR_THREAD_DROP_EVENT, onDrop);
+      window.removeEventListener(SIDEBAR_THREAD_DRAG_OVER_EVENT, onOver);
+      window.removeEventListener(SIDEBAR_THREAD_DRAG_END_EVENT, onEnd);
+    };
+  }, [composerRef, activeThread != null]);
+
   const latestActiveThreadRef = useRef(activeThread);
   latestActiveThreadRef.current = activeThread;
   const threadError = isServerThread
@@ -11117,7 +11153,10 @@ export default function ChatView(props: ChatViewProps) {
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
           rightPanelMaximized ? "w-0 flex-none" : "flex-1",
+          isThreadDragOver && "ring-2 ring-inset ring-primary/50",
         )}
+        ref={threadDropTargetRef}
+        data-thread-drop-target
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
         {/* Top bar */}

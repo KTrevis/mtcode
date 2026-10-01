@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { closestCenter, type CollisionDetection } from "@dnd-kit/core";
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
+  dropSidebarThreadInChat,
+  SIDEBAR_THREAD_DROP_EVENT,
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
@@ -118,6 +120,11 @@ describe("sidebar collision detection", () => {
       expect(detector(args).map((collision) => collision.id)).toEqual(["source"]);
     },
   );
+
+  it.each([-1, 261])("does not reorder when the pointer leaves the sidebar at x=%s", (x) => {
+    const detector = createSidebarCollisionDetection(() => true);
+    expect(detector({ ...collisionArgs(), pointerCoordinates: { x, y: 200 } })).toEqual([]);
+  });
 
   it("selects the nearest supported target", () => {
     const detector = createSidebarCollisionDetection(() => true);
@@ -833,5 +840,30 @@ describe("lifted card clearance", () => {
   it("follows the list when it scrolls and includes content preceding Pins", () => {
     expect(511 + apply(511, 36, -500, 96).y).toBe(128);
     expect(511 + apply(511, 36, -500, 136, 114).y).toBe(250);
+  });
+});
+
+describe("sidebar thread reference drop", () => {
+  it("inserts exactly once in the hovered chat and ignores other targets", () => {
+    const target = new EventTarget();
+    const mentions: string[] = [];
+    target.addEventListener(SIDEBAR_THREAD_DROP_EVENT, (event) => {
+      event.preventDefault();
+      mentions.push((event as CustomEvent<string>).detail);
+    });
+    const closest = vi.fn<() => EventTarget | null>(() => target);
+    vi.stubGlobal("document", { elementFromPoint: () => ({ closest }) });
+    try {
+      expect(dropSidebarThreadInChat({ x: 800, y: 400 }, "[Thread](t3-thread:///env/id)")).toBe(
+        true,
+      );
+      expect(mentions).toEqual(["[Thread](t3-thread:///env/id)"]);
+      expect(closest).toHaveBeenCalledWith("[data-thread-drop-target]");
+      closest.mockReturnValueOnce(null);
+      expect(dropSidebarThreadInChat({ x: 100, y: 400 }, "ignored")).toBe(false);
+      expect(mentions).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
