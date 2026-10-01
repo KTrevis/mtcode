@@ -129,6 +129,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           "pull-requests",
           "worktree",
           "thread-metadata",
+          "kanban",
           ...request.capabilities,
         ]),
         issuedAt,

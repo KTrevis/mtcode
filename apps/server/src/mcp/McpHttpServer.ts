@@ -42,6 +42,8 @@ import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import { ThreadMetadataToolkitHandlersLive } from "./toolkits/threadMetadata/handlers.ts";
 import { ThreadMetadataToolkit } from "./toolkits/threadMetadata/tools.ts";
 import * as ThreadMetadataMcp from "./ThreadMetadataMcpService.ts";
+import { KanbanToolkitHandlersLive } from "./toolkits/kanban/handlers.ts";
+import { KanbanToolkit } from "./toolkits/kanban/tools.ts";
 import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import {
@@ -683,6 +685,10 @@ export const ThreadMetadataToolkitRegistrationLive = McpServer.toolkit(ThreadMet
   Layer.provide(ThreadMetadataMcp.layer),
 );
 
+export const KanbanToolkitRegistrationLive = McpServer.toolkit(KanbanToolkit).pipe(
+  Layer.provide(KanbanToolkitHandlersLive),
+);
+
 const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
   Layer.provide(WorktreeToolkitHandlersLive),
 );
@@ -715,6 +721,7 @@ export const layer = Layer.mergeAll(
   PullRequestsToolkitRegistrationLive,
   WorktreeToolkitRegistrationLive,
   ThreadMetadataToolkitRegistrationLive,
+  KanbanToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
   MonitorToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

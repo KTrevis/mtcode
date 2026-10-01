@@ -11,6 +11,7 @@ import {
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
+  resolveCommandPaletteHighlight,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
@@ -890,5 +891,41 @@ describe("filterCommandPaletteGroups", () => {
       "setting:default-model",
       "setting:keybinding-modelPicker.toggle",
     ]);
+  });
+});
+
+describe("resolveCommandPaletteHighlight", () => {
+  it("keeps the selected result through filtering and falls back to the first enabled result", () => {
+    const items: CommandPaletteActionItem[] = ["Alpha", "Beta", "Gamma"].map((title) => ({
+      kind: "action",
+      value: title,
+      title,
+      searchTerms: [title],
+      icon: null,
+      run: async () => undefined,
+    }));
+    const filtered = (query: string) =>
+      filterCommandPaletteGroups({
+        activeGroups: [{ value: "projects", label: "Projects", items }],
+        isInSubmenu: true,
+        query,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      }).flatMap((group) => group.items);
+
+    expect(resolveCommandPaletteHighlight(items, null)?.value).toBe("Alpha");
+    expect(resolveCommandPaletteHighlight(filtered("a"), "Beta")?.value).toBe("Beta");
+    expect(resolveCommandPaletteHighlight(filtered("gam"), "Beta")?.value).toBe("Gamma");
+    expect(resolveCommandPaletteHighlight(filtered("missing"), "Gamma")).toBeNull();
+    expect(resolveCommandPaletteHighlight(filtered(""), null)?.value).toBe("Alpha");
+    expect(
+      resolveCommandPaletteHighlight([{ ...items[0]!, disabled: true }, items[1]!], "Alpha")?.value,
+    ).toBe("Beta");
+    expect(
+      resolveCommandPaletteHighlight(
+        items.map((item) => ({ ...item, disabled: true })),
+        "Beta",
+      ),
+    ).toBeNull();
   });
 });

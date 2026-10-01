@@ -62,7 +62,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+x", command: "composer.workspace", when: "!terminalFocus" },
   { key: "mod+shift+g", command: "composer.branch", when: "!terminalFocus" },
   { key: "mod+shift+l", command: "composer.previousWorktree", when: "!terminalFocus" },
-  { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+  { key: "mod+shift+k", command: "kanban.open", when: "!terminalFocus" },
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "mod+o", command: "editor.openFavorite" },
@@ -339,11 +339,24 @@ export function mergeWithDefaultKeybindings(
     return [...DEFAULT_RESOLVED_KEYBINDINGS];
   }
 
-  const overriddenCommands = new Set(custom.map((binding) => binding.command));
+  // Older installs persisted this shortcut's former PR-number default.
+  // Retire it unless Kanban already has an explicit binding.
+  const kanbanDefault = DEFAULT_RESOLVED_KEYBINDINGS.find(
+    (binding) => binding.command === "kanban.open",
+  );
+  const effectiveCustom = custom.some((binding) => binding.command === "kanban.open")
+    ? custom
+    : custom.filter(
+        (binding) =>
+          binding.command !== "pullRequest.copyNumber" ||
+          JSON.stringify(binding.shortcut) !== JSON.stringify(kanbanDefault?.shortcut) ||
+          JSON.stringify(binding.whenAst) !== JSON.stringify(kanbanDefault?.whenAst),
+      );
+  const overriddenCommands = new Set(effectiveCustom.map((binding) => binding.command));
   const retainedDefaults = DEFAULT_RESOLVED_KEYBINDINGS.filter(
     (binding) => !overriddenCommands.has(binding.command),
   );
-  const merged = [...retainedDefaults, ...custom];
+  const merged = [...retainedDefaults, ...effectiveCustom];
 
   if (merged.length <= MAX_KEYBINDINGS_COUNT) {
     return merged;

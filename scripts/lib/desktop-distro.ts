@@ -1,11 +1,11 @@
 /**
- * Public Munim distribution identity for personal-fork desktop builds.
+ * KT distribution identity for personal-fork desktop builds.
  *
- * Set T3CODE_DESKTOP_DISTRO=munim when packaging installers for munimtech.com.
+ * Set T3CODE_DESKTOP_DISTRO=kt when packaging installers for munimtech.com.
  * Default (unset) keeps the official T3 Code identity for the private SSH fleet.
  */
 
-export type DesktopDistroId = "default" | "munim";
+export type DesktopDistroId = "default" | "kt";
 
 export interface DesktopDistroIdentity {
   readonly id: DesktopDistroId;
@@ -44,32 +44,32 @@ const OFFICIAL: DesktopDistroIdentity = {
   nsisInstallDirectoryName: "t3code",
 };
 
-const MUNIM: DesktopDistroIdentity = {
-  id: "munim",
+const KT: DesktopDistroIdentity = {
+  id: "kt",
   appId: "com.munim.mtcode",
-  productName: "MT Code",
+  productName: "KT Code",
   packageName: "mtcode",
   artifactName: "MT-Code-${version}-${arch}.${ext}",
-  description: "MT Code — Munim Technologies fork of T3 Code",
+  description: "KT Code — Munim Technologies fork of T3 Code",
   author: "Munim, Inc.",
   updateRepository: "munimtechnologies/mtcode",
   protocolSchemes: ["mtcode", "mtcode-dev"],
-  protocolName: "MT Code",
+  protocolName: "KT Code",
   linuxExecutableName: "mtcode",
   linuxStartupWmClass: "mtcode",
   linuxMaintainer: "Munim Technologies <support@munimtech.com>",
-  nsisShortcutName: "MT Code",
+  nsisShortcutName: "KT Code",
   nsisInstallDirectoryName: "mtcode",
 };
 
 export function resolveDesktopDistroId(
   raw: string | undefined | null = process.env.T3CODE_DESKTOP_DISTRO,
 ): DesktopDistroId {
-  return raw?.trim() === "munim" ? "munim" : "default";
+  return raw?.trim() === "kt" || raw?.trim() === "munim" ? "kt" : "default";
 }
 
 export function resolveDesktopDistroIdentity(
   raw: string | undefined | null = process.env.T3CODE_DESKTOP_DISTRO,
 ): DesktopDistroIdentity {
-  return resolveDesktopDistroId(raw) === "munim" ? MUNIM : OFFICIAL;
+  return resolveDesktopDistroId(raw) === "kt" ? KT : OFFICIAL;
 }

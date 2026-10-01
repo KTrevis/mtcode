@@ -4,7 +4,8 @@ import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
-import { APP_BASE_NAME } from "../../branding";
+import { APP_BASE_NAME, APP_HAS_UPDATE_TRACKS } from "../../branding";
+import ktLogo from "../../../../../assets/munim/kt-logo.png";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -90,28 +91,39 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     >
       {/* Center the visible capitals, without the font's ascender/descender space. */}
       <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-        <BrandWordmark />
-        <span
-          className={cn(
-            "truncate [text-box:trim-both_cap_alphabetic]",
-            onBackdrop ? "text-white/70" : "text-muted-foreground",
-          )}
-        >
-          {BRAND_LABEL}
-        </span>
+        <BrandWordmark onBackdrop={onBackdrop} />
+        {BRAND_MARK !== "KT" ? (
+          <span
+            className={cn(
+              "truncate [text-box:trim-both_cap_alphabetic]",
+              onBackdrop ? "text-white/70" : "text-muted-foreground",
+            )}
+          >
+            {BRAND_LABEL}
+          </span>
+        ) : null}
       </span>
     </Link>
   );
 }
 
 // The mark is the first word of the app name and the label is the rest, so a
-// rebranded distro ("MT Code") shows its own wordmark instead of T3's.
+// rebranded distro ("KT Code") shows its own wordmark instead of T3's.
 const [BRAND_MARK = "T3", ...BRAND_REST] = APP_BASE_NAME.split(" ");
 const BRAND_LABEL = BRAND_REST.join(" ");
 
-function BrandWordmark() {
-  if (BRAND_MARK === "MT") {
-    return <MTWordmark />;
+function BrandWordmark({ onBackdrop }: { onBackdrop: boolean }) {
+  if (BRAND_MARK === "KT") {
+    return (
+      <img
+        alt="KT Code"
+        src={ktLogo}
+        className={cn(
+          "h-6 w-6 shrink-0 self-center",
+          !onBackdrop && "brightness-0 dark:brightness-100",
+        )}
+      />
+    );
   }
   if (BRAND_MARK !== "T3") {
     return (
@@ -121,28 +133,6 @@ function BrandWordmark() {
     );
   }
   return <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />;
-}
-
-// The brand row is baseline-aligned, which rests an inline SVG's bottom edge on
-// the text baseline. The mark is 12px and the `text-sm` label's caps are 10px,
-// so left alone the whole difference piles up above the label. Dropping it 2px
-// puts the top of the mark on the cap line; the mark is also top-heavy (its ink
-// centroid sits 45% down rather than 50%), so centring the box alone still
-// reads high. Keep the height, move the mark.
-function MTWordmark() {
-  return (
-    <svg
-      aria-label="MT"
-      className="h-3 w-auto shrink-0 translate-y-[2px]"
-      viewBox="0 0 725 657"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M52.55 87.88L52.71 88.31L51.91 88.23L-0.00 603.93L105.52 614.54L135.85 313.36L180.70 434.81L181.21 439.26L182.29 439.14L184.07 443.91L265.79 413.73L273.57 383.74L293.72 313.04L312.99 481.66L219.10 524.02L180.96 657.00L668.78 436.99L668.19 435.67L631.01 110.43L725.00 105.25L719.20 0.00L419.05 16.55L424.86 121.80L525.04 116.27L554.38 372.82L413.31 436.42L366.62 27.95L262.49 39.87L262.94 43.85L212.90 219.50L150.87 51.56Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
 }
 
 function SidebarUtilityItem({
@@ -244,7 +234,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       )}
       {/* Footer pages show Back instead of the utility items; the update pill
           belongs with those items, not next to a lone Back. */}
-      {isOnUtilityPage ? null : <SidebarUpdatePill />}
+      {isOnUtilityPage || !APP_HAS_UPDATE_TRACKS ? null : <SidebarUpdatePill />}
     </SidebarMenu>
   );
 });

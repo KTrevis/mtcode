@@ -29,7 +29,7 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-// MT Code keeps the fork's connect-provider Clerk gate (the key may come from an
+// KT Code keeps the fork's connect-provider Clerk gate (the key may come from an
 // embedded provider at runtime), but the Clerk runtime itself is a split chunk
 // like upstream: nothing Clerk-related sits in the startup graph for local-mode
 // users.
@@ -107,7 +107,7 @@ export const startup = Promise.all([clerkGateModule, router.load()])
   .catch((error: unknown) => {
     // Let the bootstrap entry show the error unless a reload is already scheduled.
     if (reloadScheduled) return;
-    console.error("MT Code failed to load its startup chunks.", error);
+    console.error("KT Code failed to load its startup chunks.", error);
     const bootShell = document.getElementById("boot-shell");
-    if (bootShell) bootShell.textContent = "MT Code could not load. Reload to try again.";
+    if (bootShell) bootShell.textContent = "KT Code could not load. Reload to try again.";
   });

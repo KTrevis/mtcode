@@ -175,6 +175,17 @@ export interface CommandPaletteView {
   readonly initialQuery?: string;
 }
 
+export function resolveCommandPaletteHighlight(
+  items: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>,
+  highlightedValue: string | null,
+) {
+  return (
+    items.find((item) => !item.disabled && item.value === highlightedValue) ??
+    items.find((item) => !item.disabled) ??
+    null
+  );
+}
+
 export function enumerateCommandPaletteItems(
   items: ReadonlyArray<CommandPaletteActionItem>,
 ): CommandPaletteActionItem[] {

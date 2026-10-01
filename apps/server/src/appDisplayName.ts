@@ -2,14 +2,14 @@
  * The product name this server belongs to, for messages a user reads.
  *
  * The desktop app passes its brand down when it starts the backend, so a
- * Munim build says "MT Code" where the official build says "T3 Code". A
- * standalone server (CLI, SSH, WSL) has no brand to inherit and keeps the
- * upstream name.
+ * Munim build says "KT Code" where the official build says "T3 Code". A
+ * standalone server (CLI, SSH, WSL) has no brand to inherit and uses the
+ * fork's default name.
  *
  * @module appDisplayName
  */
 
-export const DEFAULT_APP_DISPLAY_NAME = "MT Code";
+export const DEFAULT_APP_DISPLAY_NAME = "KT Code";
 
 export function resolveAppDisplayName(
   env: Record<string, string | undefined> = process.env,

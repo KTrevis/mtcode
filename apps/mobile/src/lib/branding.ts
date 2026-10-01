@@ -24,7 +24,7 @@ export function getProductName(): string {
   return (
     readString(brandingExtra().productName) ??
     readString(Constants.expoConfig?.name)?.replace(/\s+(Dev|Preview)$/, "") ??
-    "T3 Code"
+    "KT Code"
   );
 }
 
@@ -53,7 +53,7 @@ export function getAppSchemePreview(): string {
   return readString(brandingExtra().schemePreview) ?? `${getAppScheme()}-preview`;
 }
 
-/** First word of the product name for wordmark slots ("MT" / "T3"). */
+/** First word of the product name for wordmark slots ("KT" / "T3"). */
 export function getBrandMark(): string {
   return getProductName().split(" ")[0] ?? "T3";
 }

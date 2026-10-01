@@ -35,9 +35,9 @@ const nightlyMacIconPngPath = NodePath.join(
   "nightly",
   "nightly-macos-1024.png",
 );
-const isMunimDistro = process.env.T3CODE_DESKTOP_DISTRO === "munim";
+const isKtDistro = ["kt", "munim"].includes(process.env.T3CODE_DESKTOP_DISTRO?.trim());
 const packagedMacIconPngPath =
-  isMunimDistro && NodeFS.existsSync(munimMacIconPngPath)
+  isKtDistro && NodeFS.existsSync(munimMacIconPngPath)
     ? munimMacIconPngPath
     : NodeFS.existsSync(nightlyMacIconPngPath)
       ? nightlyMacIconPngPath

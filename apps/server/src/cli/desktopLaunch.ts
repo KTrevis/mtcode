@@ -16,6 +16,8 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 // MT names come first so a Munim install is found before any legacy T3 bundle
 // left on the same machine; the T3 entries stay for official installs.
 export const DESKTOP_APP_NAMES = [
+  "KT Code",
+  "KT Code (Dev)",
   "MT Code",
   "MT Code (Alpha)",
   "MT Code (Dev)",

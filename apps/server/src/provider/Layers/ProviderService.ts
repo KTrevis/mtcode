@@ -946,6 +946,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     const capabilities = new Set<McpCapability>([
       "pull-requests",
       "thread-metadata",
+      "kanban",
       "thread-reference",
       "worktree",
     ]);

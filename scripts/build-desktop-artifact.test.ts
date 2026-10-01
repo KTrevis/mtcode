@@ -276,7 +276,27 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42", "default"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17", "default"), "latest");
-    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42", "munim"), "latest");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42", "kt"), "latest");
+  });
+
+  it("uses KT branding for both current and legacy distro selections", () => {
+    for (const distro of ["kt", "munim"]) {
+      process.env.T3CODE_DESKTOP_DISTRO = distro;
+      try {
+        for (const version of ["0.0.17", "0.0.17-nightly.20260413.42"]) {
+          assert.equal(resolveDesktopProductName(version), "KT Code");
+          assert.equal(resolveDesktopUpdateChannel(version), "latest");
+          assert.equal(resolveDesktopWebAssetBrand(version), "munim");
+          assert.deepStrictEqual(resolveDesktopBuildIconAssets(version), {
+            macIconPng: BRAND_ASSET_PATHS.munimMacIconPng,
+            linuxIconPng: BRAND_ASSET_PATHS.munimLinuxIconPng,
+            windowsIconIco: BRAND_ASSET_PATHS.munimWindowsIconIco,
+          });
+        }
+      } finally {
+        delete process.env.T3CODE_DESKTOP_DISTRO;
+      }
+    }
   });
 
   it("keeps the plain desktop product name for personal fork packaging", () => {

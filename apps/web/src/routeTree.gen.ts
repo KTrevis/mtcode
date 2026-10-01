@@ -14,7 +14,6 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as StatusRouteImport } from './routes/status'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
-import { Route as KanbanRouteImport } from './routes/kanban_'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
@@ -67,11 +66,6 @@ const SettingsRoute = SettingsRouteImport.update({
 const PairRoute = PairRouteImport.update({
   id: '/pair',
   path: '/pair',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KanbanRoute = KanbanRouteImport.update({
-  id: '/kanban_',
-  path: '/kanban',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectRoute = ConnectRouteImport.update({
@@ -220,7 +214,6 @@ const ChatEnvironmentIdThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/connect': typeof ConnectRoute
-  '/kanban': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -254,7 +247,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
-  '/kanban': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -291,7 +283,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
-  '/kanban_': typeof KanbanRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
@@ -329,7 +320,6 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/connect'
-    | '/kanban'
     | '/pair'
     | '/settings'
     | '/status'
@@ -363,7 +353,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
-    | '/kanban'
     | '/pair'
     | '/settings'
     | '/status'
@@ -399,7 +388,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_chat'
     | '/connect'
-    | '/kanban_'
     | '/pair'
     | '/settings'
     | '/status'
@@ -436,7 +424,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ConnectRoute: typeof ConnectRoute
-  KanbanRoute: typeof KanbanRoute
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   StatusRoute: typeof StatusRoute
@@ -482,13 +469,6 @@ declare module '@tanstack/react-router' {
       path: '/pair'
       fullPath: '/pair'
       preLoaderRoute: typeof PairRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kanban_': {
-      id: '/kanban_'
-      path: '/kanban'
-      fullPath: '/kanban'
-      preLoaderRoute: typeof KanbanRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect': {
@@ -757,7 +737,6 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ConnectRoute: ConnectRoute,
-  KanbanRoute: KanbanRoute,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
   StatusRoute: StatusRoute,

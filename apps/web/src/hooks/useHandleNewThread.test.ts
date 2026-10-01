@@ -16,6 +16,12 @@ const testState = vi.hoisted(() => {
     readonly promotedTo: null;
     readonly threadId: string;
   } | null = null;
+  const context = {
+    params: {} as Record<string, string>,
+    activeThread: null as { environmentId: string; projectId: string } | null,
+    draft: null as { environmentId: string; projectId: string } | null,
+    projects: [{ environmentId: "environment-ssh", id: "project-remote" }],
+  };
   const router = {
     state: {
       location: { href: "/" },
@@ -28,8 +34,8 @@ const testState = vi.hoisted(() => {
   const draftStore = {
     getComposerDraft: vi.fn(() => ({})),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
-    getDraftSession: vi.fn(() => null),
-    getDraftThread: vi.fn(() => null),
+    getDraftSession: vi.fn(() => context.draft),
+    getDraftThread: vi.fn(() => context.draft),
     applyStickyState: vi.fn(),
     setDraftThreadContext: vi.fn(),
     setLogicalProjectDraftThreadId: vi.fn(),
@@ -37,6 +43,7 @@ const testState = vi.hoisted(() => {
   };
 
   return {
+    context,
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
     get projectFileRead() {
@@ -132,18 +139,23 @@ vi.mock("@t3tools/shared/serverSettings", () => ({
     settings.defaultRuntimeMode ?? "full-access",
 }));
 vi.mock("@tanstack/react-router", () => ({
-  useParams: () => null,
+  useParams: () => testState.context.params,
   useRouter: () => testState.router,
 }));
 vi.mock("react", () => ({
   useCallback: <T>(callback: T) => callback,
   useMemo: <T>(factory: () => T) => factory(),
 }));
-vi.mock("../components/Sidebar.logic", () => ({ orderItemsByPreferredIds: () => [] }));
+vi.mock("../components/Sidebar.logic", () => ({
+  orderItemsByPreferredIds: (input: { items: unknown[] }) => input.items,
+}));
 vi.mock("../composerDraftStore", () => {
-  const useComposerDraftStore = Object.assign(() => null, {
-    getState: () => testState.draftStore,
-  });
+  const useComposerDraftStore = Object.assign(
+    (select: (store: typeof testState.draftStore) => unknown) => select(testState.draftStore),
+    {
+      getState: () => testState.draftStore,
+    },
+  );
   return {
     composerDraftHasUserContent: () => false,
     markPromotedDraftThreadByRef: vi.fn(),
@@ -180,9 +192,9 @@ vi.mock("../state/entities", () => ({
     },
   ],
   readThreadShell: () => null,
-  useProjects: () => [],
+  useProjects: () => testState.context.projects,
   useServerConfigs: () => new Map(),
-  useThread: () => null,
+  useThread: () => testState.context.activeThread,
 }));
 vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: () => null }));
 vi.mock("../state/server", () => ({
@@ -191,14 +203,13 @@ vi.mock("../state/server", () => ({
   // `state/presentation` builds its atoms from this at import time.
   serverEnvironment: { configValueAtom: {} },
 }));
-vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
   useUiStateStore: () => [],
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
-import { useNewThreadHandler } from "./useHandleNewThread";
+import { useHandleNewThread, useNewThreadHandler } from "./useHandleNewThread";
 
 describe.each([
   ["new", null],
@@ -325,6 +336,55 @@ describe.each([
         opened!.draftId,
         expect.objectContaining({ envMode: "worktree", startFromOrigin }),
       );
+    },
+  );
+});
+
+describe("current project context", () => {
+  it.each([
+    {
+      params: {},
+      thread: { environmentId: "chat-host", projectId: "chat-project" },
+      draft: null,
+      expected: { environmentId: "chat-host", projectId: "chat-project" },
+    },
+    {
+      params: { draftId: "draft" },
+      thread: null,
+      draft: { environmentId: "draft-host", projectId: "draft-project" },
+      expected: { environmentId: "draft-host", projectId: "draft-project" },
+    },
+    {
+      params: { environmentId: "environment-ssh", projectId: "project-remote" },
+      thread: null,
+      draft: null,
+      expected: { environmentId: "environment-ssh", projectId: "project-remote" },
+    },
+    {
+      params: { environmentId: "other-host", projectId: "project-remote" },
+      thread: null,
+      draft: null,
+      expected: null,
+    },
+    { params: {}, thread: null, draft: null, expected: null },
+  ])(
+    "resolves the displayed project without falling back to another board: $params",
+    ({ params, thread, draft, expected }) => {
+      testState.context.params = params;
+      testState.context.activeThread = thread;
+      testState.context.draft = draft;
+      try {
+        const result = useHandleNewThread();
+        expect(result.defaultProjectRef).toEqual({
+          environmentId: "environment-ssh",
+          projectId: "project-remote",
+        });
+        expect(result.currentProjectRef).toEqual(expected);
+      } finally {
+        testState.context.params = {};
+        testState.context.activeThread = null;
+        testState.context.draft = null;
+      }
     },
   );
 });

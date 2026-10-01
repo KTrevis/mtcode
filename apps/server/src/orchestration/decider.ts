@@ -515,6 +515,49 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.kanban-ticket.create": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cannot create tickets in a deleted project.",
+        });
+      }
+      const cards = project.kanbanCards ?? [];
+      if (cards.length >= 200 || cards.some((card) => card.id === command.ticketId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            cards.length >= 200
+              ? "Kanban supports at most 200 tickets."
+              : "Ticket ID already exists.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          kanbanCards: [
+            ...cards,
+            {
+              id: command.ticketId,
+              title: command.title,
+              ...(command.description !== undefined ? { description: command.description } : {}),
+              column: "TODO",
+            },
+          ],
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "project.delete": {
       yield* requireProject({
         readModel,

@@ -41,22 +41,22 @@ describe("branding", () => {
     expect(branding.APP_DISPLAY_NAME).toBe("T3 Code (Nightly)");
   });
 
-  it("does not apply a Nightly stage to MT Code", async () => {
-    vi.stubEnv("VITE_APP_BASE_NAME", "MT Code");
+  it("does not apply a Nightly stage to KT Code", async () => {
+    vi.stubEnv("VITE_APP_BASE_NAME", "KT Code");
     vi.stubEnv("VITE_APP_STAGE_LABEL", "Nightly");
-    vi.stubEnv("VITE_APP_DISPLAY_NAME", "MT Code");
+    vi.stubEnv("VITE_APP_DISPLAY_NAME", "KT Code");
 
     const branding = await import("./branding");
 
-    expect(branding.APP_BASE_NAME).toBe("MT Code");
+    expect(branding.APP_BASE_NAME).toBe("KT Code");
     expect(branding.APP_HAS_UPDATE_TRACKS).toBe(false);
     expect(branding.APP_STAGE_LABEL).not.toBe("Nightly");
-    expect(branding.APP_DISPLAY_NAME).toBe("MT Code");
+    expect(branding.APP_DISPLAY_NAME).toBe("KT Code");
   });
 
   it("normalizes hosted app channel metadata", async () => {
     // Hosted channel labels only apply to a build that HAS update tracks; the
-    // fork's default base name (MT Code) deliberately has none, so name the
+    // fork's default base name (KT Code) deliberately has none, so name the
     // tracked build explicitly rather than leaning on the default.
     vi.stubEnv("VITE_APP_BASE_NAME", "T3 Code");
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "nightly");
@@ -147,7 +147,7 @@ describe("branding logic", () => {
     ).toBe("0.0.34-nightly.20260818.1127");
   });
 
-  it("does not label MT Code servers as Nightly", () => {
+  it("does not label KT Code servers as Nightly", () => {
     expect(
       resolveServerBackedAppStageLabel({
         primaryServerVersion: "0.0.28-nightly.20260616.12",

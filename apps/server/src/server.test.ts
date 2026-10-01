@@ -11938,9 +11938,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "bootstraps first-send worktree turns on the server before dispatching turn start",
-    () =>
+  it.effect.each([
+    { baseBranch: "main", startFromOrigin: true },
+    { baseBranch: "HEAD", startFromOrigin: false },
+  ])(
+    "bootstraps first-send worktree turns from $baseBranch on the server before dispatching turn start",
+    ({ baseBranch, startFromOrigin }) =>
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
         const bootstrapGitOperations: string[] = [];
@@ -12041,6 +12044,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             orchestrationEngine: {
               dispatch: (command) =>
                 Effect.sync(() => {
+                  if (command.type === "thread.turn.start") {
+                    assert.equal(createWorktree.mock.calls.length, 1);
+                    assert.equal(runForThread.mock.calls.length, 1);
+                    assertTrue(
+                      dispatchedCommands.some(
+                        (previous) =>
+                          previous.type === "thread.meta.update" &&
+                          previous.worktreePath === "/tmp/bootstrap-worktree",
+                      ),
+                    );
+                  }
                   dispatchedCommands.push(command);
                   return { sequence: dispatchedCommands.length };
                 }),
@@ -12082,9 +12096,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 },
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
-                  baseBranch: "main",
+                  baseBranch,
                   branch: "t3code/bootstrap-refName",
-                  startFromOrigin: true,
+                  startFromOrigin,
+                  requireWorktree: true,
                 },
                 runSetupScript: true,
               },
@@ -12122,33 +12137,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         }
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
-          refName: fetchedOriginCommit,
+          refName: startFromOrigin ? fetchedOriginCommit : baseBranch,
           newRefName: "t3code/bootstrap-refName",
-          baseRefName: "main",
+          baseRefName: baseBranch,
           path: null,
         });
-        assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          remoteName: "origin",
-          refName: "main",
-        });
-        assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          remoteName: "origin",
-          refName: "main",
-        });
-        assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: "main",
-          fallbackRemoteName: "origin",
-        });
-        assert.deepEqual(bootstrapGitOperations, [
-          "remote-exists",
-          "fetch",
-          "remote-branch-exists",
-          "resolve-remote-commit",
-          "create-worktree",
-        ]);
+        if (startFromOrigin) {
+          assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
+            cwd: "/tmp/project",
+            remoteName: "origin",
+            refName: "main",
+          });
+          assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
+            cwd: "/tmp/project",
+            remoteName: "origin",
+            refName: "main",
+          });
+          assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
+            cwd: "/tmp/project",
+            refName: "main",
+            fallbackRemoteName: "origin",
+          });
+          assert.deepEqual(bootstrapGitOperations, [
+            "remote-exists",
+            "fetch",
+            "remote-branch-exists",
+            "resolve-remote-commit",
+            "create-worktree",
+          ]);
+        } else {
+          assert.equal(fetchRemote.mock.calls.length, 0);
+          assert.deepEqual(bootstrapGitOperations, ["create-worktree"]);
+        }
         const runForThreadInput = runForThread.mock.calls[0]?.[0];
         assert.deepEqual(
           runForThreadInput && {

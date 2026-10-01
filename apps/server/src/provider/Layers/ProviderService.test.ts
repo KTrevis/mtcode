@@ -5345,6 +5345,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "kanban",
             "monitor",
             "pull-requests",
             "thread-metadata",
@@ -5367,6 +5368,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "kanban",
             "monitor",
             "preview",
             "pull-requests",
@@ -5390,6 +5392,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "kanban",
             "monitor",
             "pull-requests",
             "thread-metadata",
@@ -5409,6 +5412,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "kanban",
             "monitor",
             "pull-requests",
             "thread-metadata",
@@ -5429,6 +5433,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "kanban",
             "monitor",
             "pull-requests",
             "thread-metadata",
@@ -5448,6 +5453,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "kanban",
             "monitor",
             "preview",
             "pull-requests",
@@ -5471,6 +5477,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "kanban",
             "monitor",
             "pull-requests",
             "thread-metadata",
@@ -5497,6 +5504,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "kanban",
             "monitor",
             "preview",
             "pull-requests",

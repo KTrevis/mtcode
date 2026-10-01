@@ -42,7 +42,7 @@ describe("resolveThreadDeepLinkScheme", () => {
       "t3code",
     );
     assert.equal(
-      DesktopDeepLink.resolveThreadDeepLinkScheme({ baseName: "MT Code", isDevelopment: false }),
+      DesktopDeepLink.resolveThreadDeepLinkScheme({ baseName: "KT Code", isDevelopment: false }),
       "mtcode",
     );
   });
@@ -53,7 +53,7 @@ describe("resolveThreadDeepLinkScheme", () => {
       "t3code-dev",
     );
     assert.equal(
-      DesktopDeepLink.resolveThreadDeepLinkScheme({ baseName: "MT Code", isDevelopment: true }),
+      DesktopDeepLink.resolveThreadDeepLinkScheme({ baseName: "KT Code", isDevelopment: true }),
       "mtcode-dev",
     );
   });
@@ -495,10 +495,10 @@ describe("DesktopDeepLink", () => {
 
     return Effect.gen(function* () {
       yield* configureWith(
-        makeServices(harness, { baseName: "MT Code", isPackaged: true, platform: "darwin" }),
+        makeServices(harness, { baseName: "KT Code", isPackaged: true, platform: "darwin" }),
         {
           processArguments: [
-            "/Applications/MT Code.app",
+            "/Applications/KT Code.app",
             `mtcode://threads/${ENVIRONMENT_ID}/${THREAD_ID}`,
           ],
         },
@@ -528,7 +528,7 @@ describe("DesktopDeepLink", () => {
     const renderer = makeSender(7);
 
     return Effect.gen(function* () {
-      yield* configureWith(makeServices(harness, { baseName: "MT Code" }), {
+      yield* configureWith(makeServices(harness, { baseName: "KT Code" }), {
         processArguments: ["mtcode", `t3code://threads/${ENVIRONMENT_ID}/${THREAD_ID}`],
       });
 

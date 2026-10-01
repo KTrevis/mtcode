@@ -1,15 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import {
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES,
@@ -20,11 +9,13 @@ import {
 } from "@t3tools/contracts";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { runAttachmentUploadCycle } from "@t3tools/client-runtime/state/attachments";
+import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
-import { GitBranchIcon, MessageSquareIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, type FormEvent } from "react";
-import { createPortal } from "react-dom";
+import { GitBranchIcon, Trash2Icon, XIcon } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+
+import { KanbanBoard, reorderKanbanCard, type KanbanColumn } from "../components/KanbanBoard";
 
 import { isElectron } from "../env";
 import { usePaginatedBranches } from "../state/queries";
@@ -39,7 +30,7 @@ import {
   ComboboxStatus,
 } from "../components/ui/combobox";
 import { useProjects, useServerConfigs } from "../state/entities";
-import { newMessageId, newThreadId, randomUUID } from "../lib/utils";
+import { newMessageId, newThreadId, randomHex, randomUUID } from "../lib/utils";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
@@ -72,157 +63,6 @@ import {
   WorkspaceBreadcrumbText,
 } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-
-const columns = ["TODO", "AI", "Done"] as const;
-type Column = (typeof columns)[number];
-
-function Card({
-  card,
-  environmentId,
-  disabled,
-  onOpen,
-  onDelete,
-}: {
-  card: KanbanCard;
-  environmentId: string;
-  disabled: boolean;
-  onOpen: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: card.id,
-    disabled,
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className="flex shrink-0 cursor-pointer items-start gap-2 rounded-lg bg-muted/50 px-2 py-2 text-sm active:cursor-grabbing"
-      style={{ opacity: isDragging ? 0 : 1 }}
-      {...attributes}
-      {...listeners}
-      onClick={() => {
-        if (!isDragging) onOpen(card.id);
-      }}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === "Enter") {
-          event.preventDefault();
-          onOpen(card.id);
-        } else {
-          listeners?.onKeyDown?.(event);
-        }
-      }}
-    >
-      <div className="min-w-0 flex-1">
-        <span className="break-words">{card.title}</span>
-        {card.branch ? (
-          <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-            <GitBranchIcon className="size-3 shrink-0" />
-            <span className="truncate">{card.branch}</span>
-          </span>
-        ) : null}
-      </div>
-      {card.agentThreadId ? (
-        <Link
-          to="/$environmentId/$threadId"
-          params={{ environmentId, threadId: card.agentThreadId }}
-          aria-label={`Open agent thread for ${card.title}`}
-          className="cursor-pointer text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <MessageSquareIcon className="size-4" />
-        </Link>
-      ) : null}
-      <button
-        type="button"
-        aria-label={`Delete ${card.title}`}
-        className="cursor-pointer text-muted-foreground hover:text-destructive-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={disabled}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete(card.id);
-        }}
-      >
-        <Trash2Icon className="size-4" />
-      </button>
-    </div>
-  );
-}
-
-function ColumnView({
-  column,
-  cards,
-  environmentId,
-  disabled,
-  onAdd,
-  onOpen,
-  onDelete,
-}: {
-  column: Column;
-  cards: readonly KanbanCard[];
-  environmentId: string;
-  disabled: boolean;
-  onAdd: (title: string, column: Column) => Promise<boolean>;
-  onOpen: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: column });
-  const [title, setTitle] = useState("");
-  const add = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!title.trim() || disabled) return;
-    if (await onAdd(title.trim(), column)) setTitle("");
-  };
-
-  return (
-    <section
-      ref={setNodeRef}
-      className={`flex h-full min-h-0 w-72 shrink-0 flex-col gap-3 rounded-lg p-2 ${isOver ? "bg-accent/50" : ""}`}
-    >
-      <h2 className="flex items-center gap-2 px-1 text-sm font-semibold">
-        {column}
-        <span className="text-xs font-normal text-muted-foreground">{cards.length}</span>
-      </h2>
-      <form onSubmit={add} className="flex shrink-0 items-center gap-1">
-        <Input
-          nativeInput
-          aria-label={`New card in ${column}`}
-          placeholder="Add a card"
-          maxLength={200}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          disabled={disabled}
-          size="sm"
-        />
-        <Button
-          type="submit"
-          size="icon-xs"
-          variant="ghost-muted"
-          disabled={disabled || !title.trim()}
-          aria-label={`Add card to ${column}`}
-        >
-          <PlusIcon className="size-4" />
-        </Button>
-      </form>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-        {cards.map((card) => (
-          <Card
-            key={card.id}
-            card={card}
-            environmentId={environmentId}
-            disabled={disabled}
-            onOpen={onOpen}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function CardBranchPicker({
   environmentId,
@@ -637,10 +477,6 @@ function KanbanPage() {
   const { environmentId, projectId } = Route.useParams();
   const { cardId } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor),
-  );
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const project = projects.find(
@@ -652,7 +488,6 @@ function KanbanPage() {
     cards: readonly KanbanCard[];
     baseUpdatedAt: string;
   } | null>(null);
-  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [launchingCardId, setLaunchingCardId] = useState<string | null>(null);
   const [closeRequested, setCloseRequested] = useState(false);
   const saving =
@@ -662,7 +497,6 @@ function KanbanPage() {
     JSON.stringify(project.kanbanCards ?? []) !== JSON.stringify(pending.cards);
   const cards = saving ? pending.cards : (project?.kanbanCards ?? []);
   const selectedCard = cards.find((card) => card.id === cardId);
-  const draggedCard = cards.find((card) => card.id === draggedCardId);
 
   const save = async (next: readonly KanbanCard[]) => {
     if (!project || saving) return false;
@@ -752,14 +586,12 @@ function KanbanPage() {
       },
     };
   };
-  const move = async (id: string, column: Column) => {
+  const move = async (id: string, column: KanbanColumn, index?: number) => {
     const card = cards.find((candidate) => candidate.id === id);
-    if (!card || card.column === column || !project || launchingCardId !== null) return;
-    if (column !== "AI") {
-      await save(
-        cards.map((candidate) => (candidate.id === id ? { ...candidate, column } : candidate)),
-      );
-      return;
+    if (!card || !project || saving || launchingCardId !== null) return false;
+    if (card.column === column && index === undefined) return false;
+    if (column !== "AI" || card.column === column) {
+      return save(reorderKanbanCard(cards, id, column, index));
     }
 
     const config = serverConfigs.get(project.environmentId);
@@ -776,7 +608,18 @@ function KanbanPage() {
           description: "Choose an available default model for this project first.",
         }),
       );
-      return;
+      return false;
+    }
+
+    if (config.environment.capabilities.requiredWorktreeBootstrap !== true) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not start agent",
+          description: "Update this server before starting Kanban tickets in worktrees.",
+        }),
+      );
+      return false;
     }
 
     const threadId = newThreadId();
@@ -809,10 +652,17 @@ function KanbanPage() {
             modelSelection,
             runtimeMode,
             interactionMode: "default",
-            branch: null,
+            branch: card.branch ?? null,
             worktreePath: null,
             createdAt,
           },
+          prepareWorktree: {
+            projectCwd: project.workspaceRoot,
+            baseBranch: card.branch ?? "HEAD",
+            branch: buildTemporaryWorktreeBranchName(randomHex),
+            requireWorktree: true,
+          },
+          runSetupScript: true,
         },
         createdAt,
       },
@@ -828,11 +678,11 @@ function KanbanPage() {
         }),
       );
       setLaunchingCardId(null);
-      return;
+      return false;
     }
     const moved = await save(
-      cards.map((candidate) =>
-        candidate.id === id ? { ...candidate, column, agentThreadId: threadId } : candidate,
+      reorderKanbanCard(cards, id, column, index).map((candidate) =>
+        candidate.id === id ? { ...candidate, agentThreadId: threadId } : candidate,
       ),
     );
     toastManager.update(progressToast, {
@@ -841,29 +691,14 @@ function KanbanPage() {
       description: moved ? card.title : "Find the new thread in the project sidebar.",
     });
     setLaunchingCardId(null);
-  };
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDraggedCardId(null);
-    if (over && columns.includes(over.id as Column))
-      void move(String(active.id), over.id as Column);
+    return moved;
   };
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <WorkspacePageHeader electron={isElectron} className="relative bg-background">
         <WorkspaceBreadcrumb ariaLabel="Kanban breadcrumb" className="flex-1 overflow-clip">
-          <WorkspaceBreadcrumbItem>
-            <Link
-              to="/kanban"
-              className="hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <WorkspaceBreadcrumbText>Kanban</WorkspaceBreadcrumbText>
-            </Link>
-          </WorkspaceBreadcrumbItem>
-          <WorkspaceBreadcrumbSeparator>
-            <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>
-          </WorkspaceBreadcrumbSeparator>
-          <WorkspaceBreadcrumbItem current className="shrink">
+          <WorkspaceBreadcrumbItem className="shrink">
             <span className="inline-flex min-w-0 items-center gap-1.5">
               {project ? <ProjectFavicon project={project} className="size-3.5" /> : null}
               <WorkspaceBreadcrumbText className="max-w-40">
@@ -871,46 +706,29 @@ function KanbanPage() {
               </WorkspaceBreadcrumbText>
             </span>
           </WorkspaceBreadcrumbItem>
+          <WorkspaceBreadcrumbSeparator>
+            <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>
+          </WorkspaceBreadcrumbSeparator>
+          <WorkspaceBreadcrumbItem current>
+            <WorkspaceBreadcrumbText>Kanban</WorkspaceBreadcrumbText>
+          </WorkspaceBreadcrumbItem>
         </WorkspaceBreadcrumb>
       </WorkspacePageHeader>
       <main className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-6">
-        <DndContext
-          sensors={sensors}
-          onDragStart={({ active }) => setDraggedCardId(String(active.id))}
-          onDragEnd={onDragEnd}
-          onDragCancel={() => setDraggedCardId(null)}
-        >
-          <div className="flex h-full min-h-0 gap-4">
-            {columns.map((column) => (
-              <ColumnView
-                key={column}
-                column={column}
-                environmentId={environmentId}
-                cards={cards.filter((card) => card.column === column)}
-                disabled={saving || launchingCardId !== null || !project}
-                onAdd={(title, target) =>
-                  save([...cards, { id: randomUUID(), title, column: target }])
-                }
-                onOpen={(id) => {
-                  setCloseRequested(false);
-                  void navigate({ search: { cardId: id } });
-                }}
-                onDelete={(id) => void save(cards.filter((card) => card.id !== id))}
-              />
-            ))}
-          </div>
-          {createPortal(
-            <DragOverlay zIndex={100}>
-              {draggedCard ? (
-                <div className="flex w-full cursor-grabbing items-start gap-2 rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
-                  <span className="min-w-0 flex-1 break-words">{draggedCard.title}</span>
-                  <Trash2Icon className="size-4 shrink-0 text-muted-foreground" />
-                </div>
-              ) : null}
-            </DragOverlay>,
-            document.body,
-          )}
-        </DndContext>
+        <KanbanBoard
+          key={`${environmentId}:${projectId}`}
+          cards={cards}
+          environmentId={environmentId}
+          disabled={saving || launchingCardId !== null || !project}
+          detailsOpen={selectedCard !== undefined}
+          onAdd={(title, column) => save([...cards, { id: randomUUID(), title, column }])}
+          onOpen={(id) => {
+            setCloseRequested(false);
+            void navigate({ search: { cardId: id } });
+          }}
+          onDelete={(id) => void save(cards.filter((card) => card.id !== id))}
+          onMove={move}
+        />
       </main>
       <RightPanelSheet
         open={selectedCard !== undefined}

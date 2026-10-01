@@ -217,16 +217,16 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
-  it.effect("keeps MT Code on a single latest channel without a Nightly stage", () => {
-    process.env.T3CODE_DESKTOP_DISTRO = "munim";
+  it.effect("keeps KT Code on a single latest channel without a Nightly stage", () => {
+    process.env.T3CODE_DESKTOP_DISTRO = "kt";
     return Effect.gen(function* () {
       const environment = yield* makeEnvironment({
         appVersion: "0.0.34-nightly.20260818.1127",
         isPackaged: true,
       });
 
-      assert.equal(environment.branding.baseName, "MT Code");
-      assert.equal(environment.branding.displayName, "MT Code");
+      assert.equal(environment.branding.baseName, "KT Code");
+      assert.equal(environment.branding.displayName, "KT Code");
       assert.equal(environment.branding.stageLabel, "Alpha");
       assert.equal(environment.defaultDesktopSettings.updateChannel, "latest");
     });

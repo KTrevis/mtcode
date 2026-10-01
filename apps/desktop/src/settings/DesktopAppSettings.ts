@@ -506,7 +506,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const settingsRef = yield* SynchronizedRef.make(environment.defaultDesktopSettings);
-  const singleReleaseChannel = environment.branding.baseName === "MT Code";
+  const singleReleaseChannel = environment.branding.baseName === "KT Code";
 
   const updateInMemory = (update: (settings: DesktopSettings) => DesktopSettings) =>
     SynchronizedRef.modify(settingsRef, (settings) => {

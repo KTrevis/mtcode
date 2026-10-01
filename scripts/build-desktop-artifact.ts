@@ -959,7 +959,7 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
-  readonly t3DesktopDistro?: "munim";
+  readonly t3DesktopDistro?: "kt";
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -2757,7 +2757,7 @@ export function resolveDesktopUpdateChannel(
   version: string,
   distroId: DesktopDistroId = resolveDesktopDistroId(),
 ): "latest" | "nightly" {
-  if (distroId === "munim") {
+  if (distroId === "kt") {
     return "latest";
   }
 
@@ -2776,14 +2776,14 @@ export function isDesktopPreviewVersion(version: string): boolean {
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
-  if (resolveDesktopDistroId() === "munim") {
+  if (resolveDesktopDistroId() === "kt") {
     return "munim";
   }
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
-  if (resolveDesktopDistroId() === "munim") {
+  if (resolveDesktopDistroId() === "kt") {
     return {
       macIconPng: BRAND_ASSET_PATHS.munimMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.munimLinuxIconPng,
@@ -2824,10 +2824,10 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(_version: string): string {
-  // Munim public distro uses its own product name; otherwise keep plain "T3 Code"
+  // KT distro uses its own product name; otherwise keep plain "T3 Code"
   // (personal fleet still uses nightly icons/artwork via the version string).
   const distro = resolveDesktopDistroIdentity();
-  if (distro.id === "munim") {
+  if (distro.id === "kt") {
     return distro.productName;
   }
   return desktopPackageJson.productName ?? "T3 Code";
@@ -3940,7 +3940,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
-    ...(distro.id === "munim" ? { t3DesktopDistro: "munim" as const } : {}),
+    ...(distro.id === "kt" ? { t3DesktopDistro: "kt" as const } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description: distro.description,

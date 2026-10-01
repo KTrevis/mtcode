@@ -30,6 +30,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import {
   hasExplicitComposerModelSelection,
   resolveAvailableNewThreadProjectRef,
+  resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
@@ -522,10 +523,8 @@ export function useNewThreadHandler() {
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeParams = useParams({ strict: false });
+  const routeTarget = resolveThreadRouteTarget(routeParams);
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const activeThread = useThread(routeThreadRef);
@@ -550,8 +549,21 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const routeProject = projects.find(
+    (project) =>
+      project.environmentId === routeParams.environmentId && project.id === routeParams.projectId,
+  );
+  const currentProjectRef = resolveThreadActionProjectRef({
+    activeThread: activeThread ?? undefined,
+    activeDraftThread,
+    defaultProjectRef: routeProject
+      ? scopeProjectRef(routeProject.environmentId, routeProject.id)
+      : null,
+    handleNewThread,
+  });
 
   return {
+    currentProjectRef,
     activeDraftThread,
     activeThread,
     defaultProjectRef: orderedProjects[0]

@@ -15,6 +15,7 @@ export type McpCapability =
   | "thread-reference"
   | "worktree"
   | "thread-metadata"
+  | "kanban"
   | "monitor";
 
 export interface McpInvocationScope {

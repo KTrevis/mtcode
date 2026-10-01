@@ -33,9 +33,21 @@ in Settings.
 ## Copy pull request references
 
 With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
-to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
-Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
-or “Copy Number”. They copy the selected PR and leave terminal input alone.
+to copy its URL. To copy its number with a `#` prefix, assign a shortcut to
+“Copy Number” in Settings. These commands leave terminal input alone.
+
+## Project Kanban
+
+Use `mod+shift+k` or “Open current project Kanban” in the command palette to open
+the board for the current thread or draft.
+
+In the board, use arrow keys to navigate tickets and Enter to open one. Escape
+closes the ticket and returns focus to it. Shift+Left/Right moves the ticket to
+another column; moving into AI starts an agent. Shift+Up/Down reorders tickets
+within the current column. Press N to add a ticket in the focused column.
+Press Escape from a board control to return to the last ticket, keeping any draft
+text. If focus was lost after clicking elsewhere, an arrow key resumes the last
+ticket. These keys leave text editing and thread shortcuts alone.
 
 ## iPad
 

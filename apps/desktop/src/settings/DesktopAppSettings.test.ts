@@ -166,7 +166,7 @@ describe("DesktopSettings", () => {
     );
   });
 
-  it.effect("ignores a persisted nightly track on MT Code", () => {
+  it.effect("ignores a persisted nightly track on KT Code", () => {
     process.env.T3CODE_DESKTOP_DISTRO = "munim";
     return withSettings(
       Effect.gen(function* () {

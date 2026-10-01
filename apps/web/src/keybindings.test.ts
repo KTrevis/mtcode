@@ -1343,10 +1343,45 @@ describe("plus key parsing", () => {
 });
 
 describe("composer and pull request shortcuts", () => {
-  it("fills missing number shortcuts without replacing the saved URL binding", () => {
+  it("replaces the persisted former PR-number default with Kanban", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+      ]),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "K", metaKey: true, shiftKey: true }), bindings, {
+        platform: "MacIntel",
+      }),
+      "kanban.open",
+    );
+    assert.isFalse(bindings.some((binding) => binding.command === "pullRequest.copyNumber"));
+  });
+
+  it("preserves explicitly configured Kanban and custom PR-number bindings", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        { key: "mod+shift+j", command: "kanban.open", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+      ]),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "j", metaKey: true, shiftKey: true }), bindings, {
+        platform: "MacIntel",
+      }),
+      "kanban.open",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", metaKey: true, shiftKey: true }), bindings, {
+        platform: "MacIntel",
+      }),
+      "pullRequest.copyNumber",
+    );
+  });
+
+  it("fills missing Kanban shortcuts without replacing the saved URL binding", () => {
     const olderServerBindings = DEFAULT_RESOLVED_KEYBINDINGS.filter(
-      (binding) =>
-        binding.command !== "pullRequest.copyNumber" && binding.command !== "thread.copyReference",
+      (binding) => binding.command !== "kanban.open" && binding.command !== "thread.copyReference",
     );
     const bindings = mergeWithDefaultKeybindings([
       ...olderServerBindings,
@@ -1355,7 +1390,7 @@ describe("composer and pull request shortcuts", () => {
       ]),
     ]);
     for (const [key, command] of [
-      ["k", "pullRequest.copyNumber"],
+      ["k", "kanban.open"],
       ["8", "thread.copyReference"],
       ["c", null],
       ["y", null],
@@ -1397,7 +1432,7 @@ describe("composer and pull request shortcuts", () => {
     ["g", "composer.branch"],
     ["l", "composer.previousWorktree"],
     ["c", "thread.copyReference"],
-    ["k", "pullRequest.copyNumber"],
+    ["k", "kanban.open"],
     ["Enter", "thread.steerQueuedMessage"],
   ] as const;
 

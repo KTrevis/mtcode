@@ -70,6 +70,7 @@ import {
   useDeferredValue,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
@@ -178,6 +179,7 @@ import {
   filterCommandPaletteGroups,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
+  resolveCommandPaletteHighlight,
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
@@ -771,6 +773,7 @@ function OpenCommandPaletteDialog(props: {
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  const resultIdPrefix = useId();
   const clientSettings = useClientSettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
@@ -795,7 +798,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, currentProjectRef, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const startComputerThread = useStartComputerThread();
   const { runGoalAction, showGoalStatus } = useThreadGoalActions();
@@ -1339,38 +1342,6 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
-  // Starting on a computer needs no project: the thread opens on that machine's
-  // home directory, the way Codex does. Listed above Projects so "just talk to
-  // this computer" is the first thing in the picker.
-  const computerThreadItems = useMemo<CommandPaletteActionItem[]>(
-    () =>
-      addProjectEnvironmentOptions.map((option) => ({
-        kind: "action",
-        value: `new-thread-on-computer:${option.environmentId}`,
-        searchTerms: [
-          option.label,
-          option.environmentId,
-          "computer",
-          "machine",
-          "device",
-          "no folder",
-          "whole computer",
-        ],
-        title: option.label,
-        description: option.isConnected
-          ? option.isPrimary
-            ? "This device · no folder needed"
-            : "No folder needed"
-          : option.status,
-        disabled: !option.isConnected,
-        icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          await startComputerThread(option.environmentId);
-        },
-      })),
-    [addProjectEnvironmentOptions, startComputerThread],
-  );
-
   const projectThreadItems = useMemo(
     () =>
       enumerateCommandPaletteItems(
@@ -1545,7 +1516,7 @@ function OpenCommandPaletteDialog(props: {
 
   function handleQueryChange(nextQuery: string): void {
     browseNavigation.invalidate();
-    setHighlightedItemValue(null);
+    if (isBrowsing || isRemoteProjectCloneFlow) setHighlightedItemValue(null);
     setQuery(nextQuery);
     if (nextQuery === "" && currentView?.initialQuery) {
       popView();
@@ -1833,11 +1804,6 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [
         {
-          value: "computers",
-          label: "Computers",
-          items: enumerateCommandPaletteItems(computerThreadItems),
-        },
-        {
           value: "projects",
           label: "Projects",
           items: enumerateCommandPaletteItems(prioritized),
@@ -1849,7 +1815,6 @@ function OpenCommandPaletteDialog(props: {
     browseNavigation,
     currentProjectEnvironmentId,
     currentProjectId,
-    computerThreadItems,
     openIntent,
     projectThreadItems,
     pushPaletteView,
@@ -1874,7 +1839,6 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["new thread", "chat", "create", "draft", "computer"],
     title: "New thread",
     icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-    shortcutCommand: "chat.new",
     run: async () => {
       await startComputerThread();
     },
@@ -1913,12 +1877,10 @@ function OpenCommandPaletteDialog(props: {
       value: "action:new-thread-in",
       searchTerms: ["new thread", "project", "pick", "choose", "select"],
       title: "New thread in...",
+      shortcutCommand: "chat.new",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [
-        { value: "computers", label: "Computers", items: computerThreadItems },
-        { value: "projects", label: "Projects", items: projectThreadItems },
-      ],
+      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
 
     if (hasExternalConversationImport) {
@@ -2014,12 +1976,18 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
-    value: "action:open-kanban-list",
-    searchTerms: ["kanban", "boards", "tickets", "projects"],
-    title: "Open Kanban boards",
+    value: "action:open-project-kanban",
+    shortcutCommand: "kanban.open",
+    searchTerms: ["open", "kanban", "board", "tickets", "current project"],
+    title: "Open current project Kanban",
+    description: currentProjectRef
+      ? projectByKey.get(`${currentProjectRef.environmentId}:${currentProjectRef.projectId}`)?.title
+      : "Open a project thread first",
+    disabled: currentProjectRef === null,
     icon: <Columns3Icon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/kanban" });
+      if (!currentProjectRef) return;
+      await navigate({ to: "/kanban/$environmentId/$projectId", params: currentProjectRef });
     },
   });
 
@@ -2868,6 +2836,25 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
   }
 
+  const ownsHighlight = !isBrowsing && !isRemoteProjectCloneFlow;
+  const enabledItems = displayedGroups
+    .flatMap((group) => group.items)
+    .filter((item) => !item.disabled);
+  const activeItem = ownsHighlight
+    ? resolveCommandPaletteHighlight(enabledItems, highlightedItemValue)
+    : null;
+  if (ownsHighlight && highlightedItemValue !== (activeItem?.value ?? null)) {
+    setHighlightedItemValue(activeItem?.value ?? null);
+  }
+  const activeResultId = activeItem
+    ? `${resultIdPrefix}-${enabledItems.indexOf(activeItem)}`
+    : undefined;
+  useLayoutEffect(() => {
+    if (ownsHighlight && activeResultId) {
+      document.getElementById(activeResultId)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [ownsHighlight, activeResultId]);
+
   const inputPlaceholder =
     remoteProjectInputPlaceholder(addProjectCloneFlow) ??
     getCommandPaletteInputPlaceholder(paletteMode);
@@ -3229,6 +3216,7 @@ function OpenCommandPaletteDialog(props: {
       <CommandPaletteContent
         key={`${viewStack.length}-${browseGeneration}-${isBrowsing}-${addProjectCloneFlow?.step ?? "none"}`}
         aria-label="Command palette"
+        id={resultIdPrefix}
         autoHighlight={isBrowsing || isRemoteProjectCloneFlow ? false : "always"}
         footerActionLabel={footerActionLabel}
         footerTrailing={footerTrailing}
@@ -3263,10 +3251,34 @@ function OpenCommandPaletteDialog(props: {
               ? { startAddon: <FolderPlusIcon /> }
               : {}),
           onKeyDown: handleKeyDown,
+          ...(ownsHighlight
+            ? {
+                "aria-activedescendant": activeResultId,
+                onKeyDownCapture: (event) => {
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const index = enabledItems.findIndex((item) => item === activeItem);
+                    const nextIndex =
+                      (index + (event.key === "ArrowDown" ? 1 : -1) + enabledItems.length) %
+                      enabledItems.length;
+                    setHighlightedItemValue(enabledItems[nextIndex]?.value ?? null);
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (activeItem) executeItem(activeItem);
+                  }
+                },
+              }
+            : {}),
         }}
         mode="none"
-        onItemHighlighted={(value) => {
-          setHighlightedItemValue(typeof value === "string" ? value : null);
+        onItemHighlighted={(value, details) => {
+          if (!ownsHighlight || details.reason === "pointer") {
+            setHighlightedItemValue(typeof value === "string" ? value : null);
+          }
         }}
         onValueChange={handleQueryChange}
         showBackHint={isSubmenu}

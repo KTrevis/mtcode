@@ -29,7 +29,7 @@ describe("KeybindingsSettings.logic", () => {
       "modelPicker.previousProvider",
       "modelPicker.nextProvider",
       "thread.copyReference",
-      "pullRequest.copyNumber",
+      "kanban.open",
     ]) {
       expect(rows.find((row) => row.command === command)).toMatchObject({
         source: "Default",

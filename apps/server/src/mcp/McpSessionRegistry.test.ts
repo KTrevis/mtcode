@@ -49,7 +49,9 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
 
     const resolved = yield* registry.resolve(token);
     expect(resolved?.threadId).toBe(threadId);
-    expect(resolved?.capabilities).toEqual(new Set(["preview", "pull-requests"]));
+    expect(resolved?.capabilities).toEqual(
+      new Set(["preview", "pull-requests", "worktree", "thread-metadata", "kanban"]),
+    );
 
     yield* registry.revokeThread(threadId);
     expect(yield* registry.resolve(token)).toBeUndefined();
@@ -82,18 +84,21 @@ it.effect("always grants pull-requests and gates browser and device access indep
         .pipe(Effect.map((scope) => [...(scope?.capabilities ?? [])].sort()));
 
     expect(yield* capabilitiesOf(withPreview)).toEqual([
+      "kanban",
       "preview",
       "pull-requests",
       "thread-metadata",
       "worktree",
     ]);
     expect(yield* capabilitiesOf(withoutPreview)).toEqual([
+      "kanban",
       "pull-requests",
       "thread-metadata",
       "worktree",
     ]);
     expect(yield* capabilitiesOf(withDevice)).toEqual([
       "device",
+      "kanban",
       "pull-requests",
       "thread-metadata",
       "worktree",
@@ -191,7 +196,19 @@ it.effect("preserves the explicitly granted toolkit capabilities", () =>
     const resolved = yield* registry.resolve(
       issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
     );
-    expect(Array.from(resolved!.capabilities)).toEqual(["pull-requests", "monitor"]);
-    expect(Array.from(issued.config.capabilities)).toEqual(["pull-requests", "monitor"]);
+    expect(Array.from(resolved!.capabilities)).toEqual([
+      "pull-requests",
+      "worktree",
+      "thread-metadata",
+      "kanban",
+      "monitor",
+    ]);
+    expect(Array.from(issued.config.capabilities)).toEqual([
+      "pull-requests",
+      "worktree",
+      "thread-metadata",
+      "kanban",
+      "monitor",
+    ]);
   }),
 );

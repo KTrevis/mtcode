@@ -79,6 +79,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "preview.resetZoom",
   "computerView.toggle",
   "commandPalette.toggle",
+  "kanban.open",
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",

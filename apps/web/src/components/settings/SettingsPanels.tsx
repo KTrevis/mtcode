@@ -4178,7 +4178,7 @@ export function GeneralSettingsPanel() {
       <VoiceDictationSettingsSection />
 
       <SettingsSection id="about" title="About">
-        {isElectron || HOSTED_APP_CHANNEL ? (
+        {APP_HAS_UPDATE_TRACKS && (isElectron || HOSTED_APP_CHANNEL) ? (
           <AboutVersionSection />
         ) : (
           <SettingsRow

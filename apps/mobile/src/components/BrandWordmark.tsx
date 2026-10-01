@@ -1,4 +1,4 @@
-import type { ColorValue } from "react-native";
+import { Image, type ColorValue } from "react-native";
 
 import { getBrandMark } from "../lib/branding";
 import { T3Wordmark } from "./T3Wordmark";
@@ -10,6 +10,15 @@ import { AppText as Text } from "./AppText";
  */
 export function BrandWordmark(props: { readonly height: number; readonly color: ColorValue }) {
   const mark = getBrandMark();
+  if (mark === "KT") {
+    return (
+      <Image
+        accessibilityLabel="KT Code"
+        source={require("../../../../assets/munim/kt-logo.png")}
+        style={{ width: props.height, height: props.height, tintColor: props.color }}
+      />
+    );
+  }
   if (mark !== "T3") {
     return (
       <Text

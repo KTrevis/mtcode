@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - pre-ready distro resolution reads the packaged package.json synchronously before app services exist.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
-export type DesktopDistroId = "default" | "munim";
+export type DesktopDistroId = "default" | "kt";
 
 export interface RuntimeDesktopDistro {
   readonly id: DesktopDistroId;
@@ -18,9 +18,9 @@ export interface RuntimeDesktopDistro {
 function readPackagedDistro(appPath: string | undefined): DesktopDistroId | null {
   if (!appPath) return null;
   try {
-    const raw = readFileSync(join(appPath, "package.json"), "utf8");
+    const raw = NodeFS.readFileSync(NodePath.join(appPath, "package.json"), "utf8");
     const pkg = JSON.parse(raw) as { t3DesktopDistro?: string };
-    if (pkg.t3DesktopDistro === "munim") return "munim";
+    if (pkg.t3DesktopDistro === "kt" || pkg.t3DesktopDistro === "munim") return "kt";
   } catch {
     // unpackaged / missing
   }
@@ -32,7 +32,8 @@ export function resolveRuntimeDesktopDistroId(input: {
   readonly appPath?: string | undefined;
   readonly isDevelopment: boolean;
 }): DesktopDistroId {
-  if (input.env.T3CODE_DESKTOP_DISTRO?.trim() === "munim") return "munim";
+  const configured = input.env.T3CODE_DESKTOP_DISTRO?.trim();
+  if (configured === "kt" || configured === "munim") return "kt";
   if (!input.isDevelopment) {
     const packaged = readPackagedDistro(input.appPath);
     if (packaged) return packaged;
@@ -46,10 +47,10 @@ export function resolveRuntimeDesktopDistro(input: {
   readonly isDevelopment: boolean;
 }): RuntimeDesktopDistro {
   const id = resolveRuntimeDesktopDistroId(input);
-  if (id === "munim") {
+  if (id === "kt") {
     return {
       id,
-      baseName: "MT Code",
+      baseName: "KT Code",
       userDataDirName: input.isDevelopment ? "mt-dev" : "mt",
       legacyUserDataDirName: input.isDevelopment ? "MT Code (Dev)" : "MT Code (Alpha)",
       defaultHomeDirName: ".mt",

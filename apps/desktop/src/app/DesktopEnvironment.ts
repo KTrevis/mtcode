@@ -200,7 +200,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     input.isPackaged && input.platform === "win32"
       ? path.join(input.resourcesPath, "server.asar")
       : appRoot;
-  const singleReleaseChannel = distro.id === "munim";
+  const singleReleaseChannel = distro.id === "kt";
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,

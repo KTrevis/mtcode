@@ -26,9 +26,9 @@ const UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const THREAD_ID_SEGMENT = "[^/?#]+";
 
 /**
- * The OS-level URL scheme other tools open thread links with. MT Code installs
+ * The OS-level URL scheme other tools open thread links with. KT Code installs
  * next to T3 Code (its own bundle id and data dir), so each product owns its
- * own scheme: `mtcode://` when the build is branded "MT Code", `t3code://`
+ * own scheme: `mtcode://` when the build is branded "KT Code", `t3code://`
  * otherwise, with a `-dev` suffix for unpackaged runs. This is separate from
  * `ElectronProtocol.getDesktopScheme`, which stays `t3code://app` because it
  * is the renderer's internal origin and the OAuth callback host.
@@ -40,7 +40,7 @@ export function resolveThreadDeepLinkScheme(input: {
   readonly baseName: string;
   readonly isDevelopment: boolean;
 }): string {
-  const scheme = input.baseName === "MT Code" ? "mtcode" : "t3code";
+  const scheme = input.baseName === "KT Code" ? "mtcode" : "t3code";
   return input.isDevelopment ? `${scheme}-dev` : scheme;
 }
 
@@ -342,7 +342,7 @@ export const make = Effect.gen(function* () {
         );
 
       // Claim the scheme for this install so the OS routes links here even
-      // when a sibling product (T3 Code next to MT Code) or an older copy is
+      // when a sibling product (T3 Code next to KT Code) or an older copy is
       // also installed. Packaged builds only: the bundle carries the scheme in
       // its Info.plist / registry entry, and a dev Electron binary would
       // otherwise claim it for every checkout. Linux resolves handlers from

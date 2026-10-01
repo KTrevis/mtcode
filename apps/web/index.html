@@ -476,13 +476,13 @@
       }
 
       /* Brands that ship a wordmark (see resolveWebIconOverrides) swap it in for
-         the app icon. The image is black-on-transparent; invert it in dark mode
-         so the same asset reads on both boot backgrounds, like the Motes splash. */
+         the app icon. The white mark uses the foreground color in each theme. */
       #boot-shell-wordmark {
         display: none;
         width: min(13.75rem, 22vw);
         height: auto;
         object-fit: contain;
+        filter: brightness(0);
       }
 
       html.boot-has-wordmark #boot-shell-logo {
@@ -499,7 +499,7 @@
       }
 
       html.dark.boot-has-wordmark #boot-shell-wordmark {
-        filter: invert(1);
+        filter: none;
       }
 
       #boot-error {
@@ -526,7 +526,7 @@
         cursor: pointer;
       }
     </style>
-    <title>T3 Code (Alpha)</title>
+    <title>KT Code</title>
   </head>
   <body>
     <div id="root">
