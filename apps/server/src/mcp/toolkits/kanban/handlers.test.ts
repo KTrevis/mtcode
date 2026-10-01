@@ -164,6 +164,109 @@ const makeHarness = Effect.gen(function* () {
 });
 
 it.effect(
+  "lists complete tickets in board order, defaults to the caller project, and never mutates",
+  () =>
+    Effect.gen(function* () {
+      const { server, engine, call, createTicket, readProject } = yield* makeHarness;
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-list-caller"),
+        createdAt: "2026-09-16T00:00:00.000Z",
+        threadId,
+        projectId,
+        title: "Caller",
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const first = yield* createTicket({
+        projectId: targetProjectId,
+        title: "First",
+        description: "Details",
+      });
+      yield* createTicket({ projectId: targetProjectId, title: "Second" });
+      const project = yield* readProject();
+      const cards = project.kanbanCards!.map((card) =>
+        card.id === first.ticketId
+          ? {
+              ...card,
+              column: "AI" as const,
+              branch: "feature",
+              agentThreadId: threadId,
+              images: [
+                {
+                  id: "image",
+                  attachment: {
+                    type: "image" as const,
+                    id: "attachment",
+                    name: "shot.png",
+                    mimeType: "image/png",
+                    sizeBytes: 12,
+                  },
+                },
+              ],
+            }
+          : card,
+      );
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("seed-list-metadata"),
+        projectId: targetProjectId,
+        kanbanCards: cards,
+        kanbanExpectedUpdatedAt: project.updatedAt,
+      });
+      const tool = server.tools.find(({ tool }) => tool.name === "kanban_list_tickets")?.tool;
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
+      const before = yield* engine.latestSequence;
+      const explicit = yield* call(
+        { projectId: targetProjectId },
+        invocation,
+        "kanban_list_tickets",
+      );
+      expect(explicit.isError).toBe(false);
+      expect(explicit.structuredContent).toEqual({ projectId: targetProjectId, tickets: cards });
+      const implicit = yield* call({}, invocation, "kanban_list_tickets");
+      expect(implicit.isError).toBe(false);
+      expect(implicit.structuredContent).toEqual({ projectId, tickets: [] });
+      expect(yield* engine.latestSequence).toBe(before);
+    }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "rejects list requests with invalid IDs, missing capability, missing caller, or inactive projects",
+  () =>
+    Effect.gen(function* () {
+      const { engine, call } = yield* makeHarness;
+      const list = (args: Record<string, unknown>, scope = invocation) =>
+        call(args, scope, "kanban_list_tickets");
+      const before = yield* engine.latestSequence;
+      expect((yield* list({ projectId: " " }).pipe(Effect.flip))._tag).toBe("InvalidParams");
+      expect(
+        (yield* list({ projectId: targetProjectId }, { ...invocation, capabilities: new Set() }))
+          .isError,
+      ).toBe(true);
+      expect((yield* list({ projectId: "missing" })).isError).toBe(true);
+      expect((yield* list({})).isError).toBe(true);
+      expect(yield* engine.latestSequence).toBe(before);
+      yield* engine.dispatch({
+        type: "project.delete",
+        commandId: CommandId.make("delete-list-project"),
+        projectId: targetProjectId,
+        force: true,
+      });
+      const after = yield* engine.latestSequence;
+      expect((yield* list({ projectId: targetProjectId })).isError).toBe(true);
+      expect(yield* engine.latestSequence).toBe(after);
+    }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
   "creates tickets in the explicit project, preserves existing cards, and deduplicates retries",
   () =>
     Effect.gen(function* () {

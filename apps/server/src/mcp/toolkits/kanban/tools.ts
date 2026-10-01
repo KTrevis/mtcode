@@ -37,6 +37,29 @@ export const KanbanTicketCreateResult = Schema.Struct({
   sequence: NonNegativeInt,
 });
 
+export class KanbanTicketListError extends Schema.TaggedError<KanbanTicketListError>()(
+  "KanbanTicketListError",
+  { detail: Schema.String, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+const ListTicketsTool = Tool.make("kanban_list_tickets", {
+  description:
+    "Read all Kanban tickets in board order from an active project on this environment. Omit projectId to use the calling thread's project. Returns projectId and tickets with their IDs, titles, descriptions, columns, images, branches, and linked agent thread IDs when present. An empty board returns an empty tickets array. Does not move tickets or start agents.",
+  parameters: Schema.Struct({ projectId: Schema.optional(ProjectId) }),
+  success: Schema.Struct({ projectId: ProjectId, tickets: Schema.Array(KanbanCard) }),
+  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketListError]),
+  dependencies: [McpInvocationContext, ProjectionSnapshotQuery],
+})
+  .annotate(Tool.Title, "List Kanban tickets")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
 const CreateTicketTool = Tool.make("kanban_create_ticket", {
   description:
     "Create a Kanban ticket in the specified project on this environment. Requires the project's exact projectId, a title (maximum 200 characters), and optionally a description (maximum 4000 characters). Appends to TODO without starting an agent. Boards support at most 200 tickets. Reuse clientRequestId for retries within this provider session to avoid duplicate tickets; retries return the original ticket ID and command receipt.",
@@ -148,6 +171,7 @@ const DeleteTicketTool = Tool.make("kanban_delete_ticket", {
   .annotate(Tool.OpenWorld, false);
 
 export const KanbanToolkit = Toolkit.make(
+  ListTicketsTool,
   CreateTicketTool,
   UpdateTicketTool,
   DeleteTicketTool,

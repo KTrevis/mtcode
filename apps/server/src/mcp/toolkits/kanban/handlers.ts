@@ -8,6 +8,7 @@ import { OrchestrationEngineService } from "../../../orchestration/Services/Orch
 import { requireMcpCapability } from "../../McpInvocationContext.ts";
 import {
   KanbanTicketCreateError,
+  KanbanTicketListError,
   KanbanTicketMutationError,
   KanbanTicketMoveError,
   KanbanToolkit,
@@ -57,6 +58,35 @@ const make = Effect.gen(function* () {
     return { projectId: input.projectId, ticketId: input.ticketId, commandId, sequence };
   });
   return KanbanToolkit.of({
+    kanban_list_tickets: Effect.fn("KanbanToolkit.listTickets")(function* (input) {
+      const scope = yield* requireMcpCapability("kanban");
+      const snapshots = yield* ProjectionSnapshotQuery;
+      const projectId = yield* Effect.gen(function* () {
+        if (input.projectId !== undefined) return input.projectId;
+        const caller = yield* snapshots.getThreadShellById(scope.threadId);
+        return Option.getOrNull(caller)?.projectId;
+      }).pipe(
+        Effect.mapError((cause) => new KanbanTicketListError({ detail: cause.message, cause })),
+      );
+      if (!projectId) {
+        return yield* new KanbanTicketListError({
+          detail: "Pass the target projectId.",
+          cause: null,
+        });
+      }
+      const project = yield* snapshots
+        .getProjectShellById(projectId)
+        .pipe(
+          Effect.mapError((cause) => new KanbanTicketListError({ detail: cause.message, cause })),
+        );
+      if (Option.isNone(project)) {
+        return yield* new KanbanTicketListError({
+          detail: "Project does not exist or is deleted.",
+          cause: null,
+        });
+      }
+      return { projectId, tickets: project.value.kanbanCards ?? [] };
+    }),
     kanban_update_ticket: (input) => mutateTicket("project.kanban-ticket.update", input),
     kanban_delete_ticket: (input) => mutateTicket("project.kanban-ticket.delete", input),
     kanban_move_ticket: Effect.fn("KanbanToolkit.moveTicket")(function* (input) {
