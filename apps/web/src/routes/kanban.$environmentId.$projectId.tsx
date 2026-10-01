@@ -412,6 +412,7 @@ function CardDetails({
           ) : null}
           <Textarea
             id="kanban-card-description"
+            variant="unbounded"
             value={description}
             maxLength={4_000}
             onChange={(event) => setDescription(event.target.value)}
