@@ -82,6 +82,94 @@ function makeSession(status: OrchestrationSession["status"]): OrchestrationSessi
 }
 
 it.layer(NodeServices.layer)("settled thread decider", (it) => {
+  for (const type of ["thread.settle", "thread.auto-settle"] as const) {
+    it.effect(`${type} moves linked Kanban tickets to Done without changing other cards`, () =>
+      Effect.gen(function* () {
+        const readModel = makeReadModel(null);
+        const thread = readModel.threads[0]!;
+        const cards = [
+          {
+            id: "linked-ai",
+            title: "Implement ticket",
+            description: "Keep this description",
+            column: "AI" as const,
+            agentThreadId: thread.id,
+          },
+          {
+            id: "linked-todo",
+            title: "Follow-up",
+            column: "TODO" as const,
+            agentThreadId: thread.id,
+          },
+          { id: "done", title: "Finished", column: "Done" as const, agentThreadId: thread.id },
+          { id: "unlinked", title: "Unlinked", column: "TODO" as const },
+          {
+            id: "other-thread",
+            title: "Other thread",
+            column: "AI" as const,
+            agentThreadId: ThreadId.make("thread-2"),
+          },
+        ];
+        const model = {
+          ...readModel,
+          projects: [
+            {
+              id: thread.projectId,
+              title: "Project",
+              workspaceRoot: "/tmp/project-1",
+              defaultModelSelection: null,
+              scripts: [],
+              kanbanCards: cards,
+              createdAt: NOW,
+              updatedAt: NOW,
+              deletedAt: null,
+            },
+          ],
+        };
+        const result = yield* decideOrchestrationCommand({
+          command: {
+            type,
+            commandId: CommandId.make(`cmd-kanban-${type}`),
+            threadId: thread.id,
+            settledAt: SETTLED_AT,
+            snapshotSequence: model.snapshotSequence,
+          },
+          readModel: model,
+        });
+        const events = Array.isArray(result) ? result : [result];
+        expect(events.map((event) => event.type)).toEqual([
+          "project.meta-updated",
+          "thread.settled",
+        ]);
+        let projected: OrchestrationReadModel = model;
+        for (const event of events) {
+          projected = yield* projectEvent(projected, {
+            ...event,
+            sequence: projected.snapshotSequence + 1,
+          });
+        }
+        expect(projected.threads[0]?.settledOverride).toBe("settled");
+        expect(projected.projects[0]?.kanbanCards).toEqual([
+          { ...cards[0], column: "Done" },
+          { ...cards[1], column: "Done" },
+          ...cards.slice(2),
+        ]);
+        expect(projected.projects[0]?.updatedAt).toBe(events[0]!.occurredAt);
+
+        const repeated = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.settle",
+            commandId: CommandId.make("cmd-kanban-settle-again"),
+            threadId: thread.id,
+          },
+          readModel: projected,
+        });
+        const repeatedEvents = Array.isArray(repeated) ? repeated : [repeated];
+        expect(repeatedEvents.map((event) => event.type)).toEqual(["thread.settled"]);
+      }),
+    );
+  }
+
   it.effect("preserves the activity stamp when automatically settling", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({

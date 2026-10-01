@@ -1071,9 +1071,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
       // Settling is "I'm done with this": clear states that would keep the
       // row pinned or snoozed instead of showing the new settled state.
-      const companionEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      const project = readModel.projects.find((project) => project.id === thread.projectId);
+      if (
+        project?.deletedAt === null &&
+        project.kanbanCards?.some(
+          (card) => card.agentThreadId === thread.id && card.column !== "Done",
+        )
+      ) {
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: project.id,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "project.meta-updated",
+          payload: {
+            projectId: project.id,
+            kanbanCards: project.kanbanCards.map((card) =>
+              card.agentThreadId === thread.id ? { ...card, column: "Done" as const } : card,
+            ),
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      // Keep the final event on the thread: command receipts use its aggregate.
+      events.push(settledEvent);
       for (const [requestId, request] of pendingRequests) {
-        companionEvents.push({
+        events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
             aggregateId: command.threadId,
@@ -1097,7 +1123,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // Settling is also "don't continue this on its own".
       if (thread.usageLimitResumeAt != null) {
-        companionEvents.push({
+        events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
             aggregateId: command.threadId,
@@ -1109,7 +1135,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (thread.pinnedAt != null) {
-        companionEvents.push({
+        events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
             aggregateId: command.threadId,
@@ -1124,7 +1150,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (thread.snoozedUntil != null) {
-        companionEvents.push({
+        events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
             aggregateId: command.threadId,
@@ -1139,7 +1165,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return companionEvents.length > 0 ? [settledEvent, ...companionEvents] : settledEvent;
+      return events.length > 1 ? events : settledEvent;
     }
 
     case "thread.unsettle": {
