@@ -19,6 +19,7 @@ export class ThreadRelayError extends Schema.TaggedError<ThreadRelayError>()("Th
     "target_not_found",
     "self_send",
     "self_archive",
+    "self_settle",
     "cross_project",
     "spawn_limit",
     "target_busy",
@@ -143,9 +144,23 @@ export const ThreadArchiveTool = Tool.make("thread_archive", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false);
 
+export const ThreadSettleTool = Tool.make("thread_settle", {
+  description:
+    "Settle a finished sibling T3 thread in this thread's project after reviewing and integrating its work. Marks its linked Kanban tickets Done without archiving the thread. Self-settlement, archived threads, other projects, working threads, and threads waiting on the user are refused. Repeated settlement succeeds. The user can reopen the thread, and new work via thread_send makes it active again.",
+  parameters: Schema.Struct({ threadId: ThreadId }),
+  success: Schema.Struct({ threadId: ThreadId, status: Schema.Literal("settled") }),
+  failure: ThreadRelayError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Settle sibling thread")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, true);
+
 export const ThreadRelayToolkit = Toolkit.make(
   ThreadListTool,
   ThreadSendTool,
   ThreadCreateTool,
   ThreadArchiveTool,
+  ThreadSettleTool,
 );

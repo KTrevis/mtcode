@@ -305,3 +305,70 @@ it.effect("archives idle siblings only", () => {
     }),
   ).pipe(Effect.provide(makeTestLayer(dispatched, { threads: [source, target, idleSibling] })));
 });
+
+it.effect("settles finished siblings and allows repeated settlement without archiving", () => {
+  const dispatched: Array<OrchestrationCommand> = [];
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
+      expect(
+        server.tools.find(({ tool }) => tool.name === "thread_settle")?.tool.annotations,
+      ).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = yield* callTool("thread_settle", { threadId: idleThreadId });
+        expect(result.isError).toBe(false);
+        expect(result.structuredContent).toEqual({ threadId: idleThreadId, status: "settled" });
+      }
+      expect(dispatched).toHaveLength(2);
+      expect(dispatched).toMatchObject([
+        { type: "thread.settle", threadId: idleThreadId },
+        { type: "thread.settle", threadId: idleThreadId },
+      ]);
+    }),
+  ).pipe(Effect.provide(makeTestLayer(dispatched, { threads: [source, idleSibling] })));
+});
+
+it.effect("refuses self, missing, archived, cross-project, busy, or waiting settle targets", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cases = [
+        { threads: [source], targetId: sourceThreadId },
+        { threads: [source], targetId: targetThreadId },
+        { threads: [idleSibling], targetId: idleThreadId },
+        ...[
+          { archivedAt: now },
+          { projectId: ProjectId.make("other-project") },
+          { backgroundLiveness: "working" as const },
+          { hasPendingApprovals: true },
+          { hasPendingUserInput: true },
+        ].map((input) => ({
+          threads: [source, makeThread(targetThreadId, input)],
+          targetId: targetThreadId,
+        })),
+      ];
+      for (const { threads, targetId } of cases) {
+        const dispatched: Array<OrchestrationCommand> = [];
+        const result = yield* callTool("thread_settle", { threadId: targetId }).pipe(
+          Effect.provide(makeTestLayer(dispatched, { threads })),
+        );
+        expect(result.isError).toBe(true);
+        expect(dispatched).toEqual([]);
+      }
+      const dispatched: Array<OrchestrationCommand> = [];
+      const result = yield* callTool("thread_settle", { threadId: idleThreadId }).pipe(
+        Effect.provide(
+          makeTestLayer(dispatched, {
+            threads: [source, idleSibling],
+            failDispatchOf: "thread.settle",
+          }),
+        ),
+      );
+      expect(result.isError).toBe(true);
+      expect(dispatched).toHaveLength(1);
+    }),
+  ),
+);
