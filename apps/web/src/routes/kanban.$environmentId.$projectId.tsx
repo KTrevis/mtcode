@@ -886,7 +886,9 @@ function KanbanPage() {
                 key={column}
                 column={column}
                 environmentId={environmentId}
-                cards={cards.filter((card) => card.column === column)}
+                cards={cards.filter(
+                  (card) => (card.id === launchingCardId ? "AI" : card.column) === column,
+                )}
                 disabled={saving || launchingCardId !== null || !project}
                 onAdd={(title, target) =>
                   save([...cards, { id: randomUUID(), title, column: target }])
