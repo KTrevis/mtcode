@@ -1,4 +1,4 @@
-import { CommandId } from "@t3tools/contracts";
+import { CommandId, type ProjectId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -6,7 +6,12 @@ import * as Semaphore from "effect/Semaphore";
 
 import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
 import { requireMcpCapability } from "../../McpInvocationContext.ts";
-import { KanbanTicketCreateError, KanbanTicketMoveError, KanbanToolkit } from "./tools.ts";
+import {
+  KanbanTicketCreateError,
+  KanbanTicketMutationError,
+  KanbanTicketMoveError,
+  KanbanToolkit,
+} from "./tools.ts";
 
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { startTicket } from "./startTicket.ts";
@@ -16,7 +21,44 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   // ponytail: serialize MCP moves; use per-project locks if launch throughput matters.
   const moveLock = yield* Semaphore.make(1);
+  const mutateTicket = Effect.fn("KanbanToolkit.mutateTicket")(function* (
+    type: "project.kanban-ticket.update" | "project.kanban-ticket.delete",
+    input: {
+      projectId: ProjectId;
+      ticketId: string;
+      clientRequestId?: string | undefined;
+      title?: string | undefined;
+      description?: string | undefined;
+    },
+  ) {
+    const scope = yield* requireMcpCapability("kanban");
+    const requestId = input.clientRequestId ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
+    const commandId = CommandId.make(
+      `mcp:${type}:${[scope.providerSessionId, input.projectId, input.ticketId, requestId]
+        .map((part) => `${part.length}:${part}`)
+        .join(":")}`,
+    );
+    const { sequence } = yield* engine
+      .dispatch({
+        type,
+        commandId,
+        projectId: input.projectId,
+        ticketId: input.ticketId,
+        ...(type === "project.kanban-ticket.update"
+          ? {
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.description !== undefined ? { description: input.description } : {}),
+            }
+          : {}),
+      })
+      .pipe(
+        Effect.mapError((cause) => new KanbanTicketMutationError({ detail: cause.message, cause })),
+      );
+    return { projectId: input.projectId, ticketId: input.ticketId, commandId, sequence };
+  });
   return KanbanToolkit.of({
+    kanban_update_ticket: (input) => mutateTicket("project.kanban-ticket.update", input),
+    kanban_delete_ticket: (input) => mutateTicket("project.kanban-ticket.delete", input),
     kanban_move_ticket: Effect.fn("KanbanToolkit.moveTicket")(function* (input) {
       const scope = yield* requireMcpCapability("kanban");
       const snapshots = yield* ProjectionSnapshotQuery;

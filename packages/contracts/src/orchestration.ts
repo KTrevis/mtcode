@@ -1249,6 +1249,22 @@ const ProjectKanbanTicketMoveCommand = Schema.Struct({
   expectedUpdatedAt: Schema.optional(IsoDateTime),
 });
 
+const ProjectKanbanTicketUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.kanban-ticket.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  ticketId: TrimmedNonEmptyString,
+  title: Schema.optional(KanbanCard.fields.title),
+  description: KanbanCard.fields.description,
+});
+
+const ProjectKanbanTicketDeleteCommand = Schema.Struct({
+  type: Schema.Literal("project.kanban-ticket.delete"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  ticketId: TrimmedNonEmptyString,
+});
+
 const ProjectDeleteCommand = Schema.Struct({
   type: Schema.Literal("project.delete"),
   commandId: CommandId,
@@ -2030,6 +2046,8 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 const InternalOrchestrationCommand = Schema.Union([
   ProjectKanbanTicketCreateCommand,
   ProjectKanbanTicketMoveCommand,
+  ProjectKanbanTicketUpdateCommand,
+  ProjectKanbanTicketDeleteCommand,
   ThreadQueuedTurnDispatchCommand,
   ThreadAutoSettleCommand,
   ThreadUsageResumeArmCommand,

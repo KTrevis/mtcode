@@ -42,7 +42,9 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ProjectFavicon } from "../components/ProjectFavicon";
+import { ProjectBreadcrumbItem } from "../components/ProjectBreadcrumbItem";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { RightPanelSheet } from "../components/RightPanelSheet";
 import { ExpandedImageDialog } from "../components/chat/ExpandedImageDialog";
 import {
@@ -478,6 +480,7 @@ function KanbanPage() {
   const { environmentId, projectId } = Route.useParams();
   const { cardId } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
+  const handleNewThread = useNewThreadHandler();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const project = projects.find(
@@ -698,15 +701,24 @@ function KanbanPage() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <WorkspacePageHeader electron={isElectron} className="relative bg-background">
-        <WorkspaceBreadcrumb ariaLabel="Kanban breadcrumb" className="flex-1 overflow-clip">
-          <WorkspaceBreadcrumbItem className="shrink">
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              {project ? <ProjectFavicon project={project} className="size-3.5" /> : null}
+        <WorkspaceBreadcrumb
+          ariaLabel="Kanban breadcrumb"
+          className="flex-1 overflow-clip [overflow-clip-margin:2px]"
+        >
+          {project ? (
+            <ProjectBreadcrumbItem
+              project={project}
+              onNewThread={() => {
+                void handleNewThread(scopeProjectRef(project.environmentId, project.id));
+              }}
+            />
+          ) : (
+            <WorkspaceBreadcrumbItem className="shrink">
               <WorkspaceBreadcrumbText className="max-w-40">
-                {project?.title ?? "Project unavailable"}
+                Project unavailable
               </WorkspaceBreadcrumbText>
-            </span>
-          </WorkspaceBreadcrumbItem>
+            </WorkspaceBreadcrumbItem>
+          )}
           <WorkspaceBreadcrumbSeparator>
             <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>
           </WorkspaceBreadcrumbSeparator>

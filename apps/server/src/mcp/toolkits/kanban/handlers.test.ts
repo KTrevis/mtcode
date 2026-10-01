@@ -136,9 +136,9 @@ const makeHarness = Effect.gen(function* () {
     workspaceRoot: "/tmp/mcp-kanban-target-test",
     createdAt,
   });
-  const call = (args: Record<string, unknown>, scope = invocation) =>
+  const call = (args: Record<string, unknown>, scope = invocation, name = "kanban_create_ticket") =>
     server
-      .callTool({ name: "kanban_create_ticket", arguments: args })
+      .callTool({ name, arguments: args })
       .pipe(
         Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
         Effect.provideService(McpSchema.McpServerClient, client),
@@ -528,4 +528,140 @@ it.effect(
       expect((yield* readProject()).kanbanCards![0]!.agentThreadId).not.toBe(firstThread);
     }).pipe(Effect.provide(launchLayer));
   },
+);
+
+it.effect(
+  "updates and deletes tickets atomically, preserves metadata, and deduplicates retries",
+  () =>
+    Effect.gen(function* () {
+      const { server, engine, call, createTicket, readProject } = yield* makeHarness;
+      for (const name of ["kanban_update_ticket", "kanban_delete_ticket"]) {
+        expect(server.tools.find(({ tool }) => tool.name === name)?.tool.annotations).toMatchObject(
+          {
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: true,
+          },
+        );
+      }
+      const first = yield* createTicket({ projectId: targetProjectId, title: "First" });
+      const second = yield* createTicket({ projectId: targetProjectId, title: "Second" });
+      const project = yield* readProject();
+      const cards = project.kanbanCards!.map((card) => ({
+        ...card,
+        branch: "feature",
+        agentThreadId: threadId,
+        column: "Done" as const,
+        images: [],
+      }));
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("seed-metadata"),
+        projectId: targetProjectId,
+        kanbanCards: cards,
+        kanbanExpectedUpdatedAt: project.updatedAt,
+      });
+      const update = {
+        projectId: targetProjectId,
+        ticketId: first.ticketId,
+        title: "  Updated  ",
+        clientRequestId: "update",
+      };
+      const before = yield* engine.latestSequence;
+      const results = yield* Effect.all(
+        [
+          call(update, invocation, "kanban_update_ticket"),
+          call(
+            { projectId: targetProjectId, ticketId: first.ticketId, description: "Details" },
+            invocation,
+            "kanban_update_ticket",
+          ),
+          call(
+            { projectId: targetProjectId, ticketId: second.ticketId, clientRequestId: "delete" },
+            invocation,
+            "kanban_delete_ticket",
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+      expect(results.every((result) => !result.isError)).toBe(true);
+      expect(yield* engine.readEvents(before).pipe(Stream.runCollect)).toHaveLength(3);
+      expect((yield* readProject()).kanbanCards).toEqual([
+        { ...cards[0], title: "Updated", description: "Details" },
+      ]);
+      expect((yield* readProject(projectId)).kanbanCards ?? []).toEqual([]);
+      const after = yield* engine.latestSequence;
+      expect((yield* call(update, invocation, "kanban_update_ticket")).structuredContent).toEqual(
+        results[0]!.structuredContent,
+      );
+      expect(
+        (yield* call(
+          { projectId: targetProjectId, ticketId: second.ticketId, clientRequestId: "delete" },
+          invocation,
+          "kanban_delete_ticket",
+        )).structuredContent,
+      ).toEqual(results[2]!.structuredContent);
+      expect(yield* engine.latestSequence).toBe(after);
+      expect(
+        (yield* call(
+          { projectId: targetProjectId, ticketId: first.ticketId, description: "" },
+          invocation,
+          "kanban_update_ticket",
+        )).isError,
+      ).toBe(false);
+      expect((yield* readProject()).kanbanCards?.[0]?.description).toBe("");
+    }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "rejects invalid mutations, missing tickets, missing capability, and deleted projects",
+  () =>
+    Effect.gen(function* () {
+      const { engine, call, createTicket, readProject } = yield* makeHarness;
+      const ticket = yield* createTicket({ projectId: targetProjectId, title: "Keep" });
+      const input = { projectId: targetProjectId, ticketId: ticket.ticketId };
+      const before = yield* engine.latestSequence;
+      for (const args of [
+        { projectId: targetProjectId, title: "Missing ID" },
+        { ...input, title: " " },
+        { ...input, title: "x".repeat(201) },
+        { ...input, description: "x".repeat(4001) },
+      ]) {
+        expect((yield* call(args, invocation, "kanban_update_ticket").pipe(Effect.flip))._tag).toBe(
+          "InvalidParams",
+        );
+      }
+      expect((yield* call(input, invocation, "kanban_update_ticket")).isError).toBe(true);
+      for (const name of ["kanban_update_ticket", "kanban_delete_ticket"]) {
+        const args = { ...input, title: "Changed" };
+        expect((yield* call({ ...args, ticketId: "missing" }, invocation, name)).isError).toBe(
+          true,
+        );
+        expect((yield* call({ ...args, projectId }, invocation, name)).isError).toBe(true);
+        expect((yield* call({ ...args, projectId: "missing" }, invocation, name)).isError).toBe(
+          true,
+        );
+        expect((yield* call(args, { ...invocation, capabilities: new Set() }, name)).isError).toBe(
+          true,
+        );
+        expect(
+          (yield* call({ ...args, ticketId: " " }, invocation, name).pipe(Effect.flip))._tag,
+        ).toBe("InvalidParams");
+      }
+      expect(yield* engine.latestSequence).toBe(before);
+      expect((yield* readProject()).kanbanCards).toEqual([
+        { id: ticket.ticketId, title: "Keep", column: "TODO" },
+      ]);
+      yield* engine.dispatch({
+        type: "project.delete",
+        projectId: targetProjectId,
+        force: true,
+        commandId: CommandId.make("delete-project"),
+      });
+      const after = yield* engine.latestSequence;
+      for (const name of ["kanban_update_ticket", "kanban_delete_ticket"]) {
+        expect((yield* call({ ...input, title: "Changed" }, invocation, name)).isError).toBe(true);
+      }
+      expect(yield* engine.latestSequence).toBe(after);
+    }).pipe(Effect.provide(TestLayer)),
 );

@@ -608,6 +608,62 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.kanban-ticket.update":
+    case "project.kanban-ticket.delete": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cannot modify tickets in a deleted project.",
+        });
+      }
+      const cards = project.kanbanCards ?? [];
+      if (!cards.some((card) => card.id === command.ticketId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket ID does not exist in this project.",
+        });
+      }
+      if (
+        command.type === "project.kanban-ticket.update" &&
+        command.title === undefined &&
+        command.description === undefined
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Provide a title or description to update.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          kanbanCards:
+            command.type === "project.kanban-ticket.delete"
+              ? cards.filter((card) => card.id !== command.ticketId)
+              : cards.map((card) =>
+                  card.id === command.ticketId
+                    ? {
+                        ...card,
+                        ...(command.title !== undefined ? { title: command.title } : {}),
+                        ...(command.description !== undefined
+                          ? { description: command.description }
+                          : {}),
+                      }
+                    : card,
+                ),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "project.delete": {
       yield* requireProject({
         readModel,
