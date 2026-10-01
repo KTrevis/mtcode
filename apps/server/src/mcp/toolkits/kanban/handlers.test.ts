@@ -2,14 +2,25 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  AuthSessionId,
+  ClientOrchestrationCommand,
+  OrchestrationCommand,
+  ProviderDriverKind,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
+import * as Socket from "effect/unstable/socket/Socket";
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { persistServerRuntimeState } from "../../../serverRuntimeState.ts";
+import { layerTest as SettingsLayer } from "../../../serverSettings.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer } from "effect/unstable/ai";
@@ -28,9 +39,21 @@ import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { RepositoryIdentityResolver } from "../../../project/RepositoryIdentityResolver.ts";
 import { KanbanToolkitRegistrationLive } from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { KanbanTicketCreateResult } from "./tools.ts";
+import { KanbanTicketCreateResult, KanbanTicketMoveResult } from "./tools.ts";
 
 const decodeResult = Schema.decodeUnknownEffect(KanbanTicketCreateResult);
+const encodeRpcResponse = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeMoveResult = Schema.decodeUnknownEffect(KanbanTicketMoveResult);
+const decodeRpcRequest = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      _tag: Schema.String,
+      id: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+      payload: Schema.optional(ClientOrchestrationCommand),
+    }),
+  ),
+);
+const decodeCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const threadId = ThreadId.make("calling-thread");
 const targetProjectId = ProjectId.make("target-project");
 const projectId = ProjectId.make("project");
@@ -70,14 +93,27 @@ const EngineLayer = Layer.mergeAll(
   Layer.provide(SqlitePersistenceMemory),
 );
 const TestDependencies = Layer.mergeAll(McpServer.McpServer.layer, EngineLayer).pipe(
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-kanban-test-" })),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-kanban-test-" })),
   Layer.provide(NodeServices.layer),
 );
-const TestLayer = KanbanToolkitRegistrationLive.pipe(
-  Layer.provideMerge(TestDependencies),
-  Layer.provide(Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) })),
-  Layer.provide(NodeServices.layer),
-);
+const makeTestLayer = <E = never>(
+  providerLayer = Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+  socketLayer: Layer.Layer<Socket.WebSocketConstructor, E> = Socket.layerWebSocketConstructorGlobal,
+  authLayer = Layer.mock(EnvironmentAuth)({}),
+) =>
+  KanbanToolkitRegistrationLive.pipe(
+    Layer.provideMerge(TestDependencies),
+    Layer.provide(
+      Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(SettingsLayer()),
+    Layer.provideMerge(providerLayer),
+    Layer.provideMerge(authLayer),
+    Layer.provideMerge(socketLayer),
+  );
+
+const TestLayer = makeTestLayer();
 
 const makeHarness = Effect.gen(function* () {
   const server = yield* McpServer.McpServer;
@@ -117,7 +153,14 @@ const makeHarness = Effect.gen(function* () {
     expect(result.isError).toBe(false);
     return yield* decodeResult(result.structuredContent);
   });
-  return { server, engine, call, createTicket, readProject };
+  const move = (args: Record<string, unknown>, scope = invocation) =>
+    server
+      .callTool({ name: "kanban_move_ticket", arguments: args })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+  return { server, engine, call, createTicket, readProject, move };
 });
 
 it.effect(
@@ -226,4 +269,263 @@ it.effect("enforces the board limit without losing existing tickets", () =>
     expect(yield* engine.latestSequence).toBe(before);
     expect((yield* readProject()).kanbanCards).toHaveLength(200);
   }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("moves tickets without overwriting other cards and validates move requests", () =>
+  Effect.gen(function* () {
+    const { createTicket, readProject, move, engine } = yield* makeHarness;
+    const first = yield* createTicket({ projectId: targetProjectId, title: "First" });
+    const second = yield* createTicket({ projectId: targetProjectId, title: "Second" });
+    const input = { projectId: targetProjectId, ticketId: first.ticketId, column: "Done" };
+    const moved = yield* move(input);
+    expect(moved.isError).toBe(false);
+    expect(yield* decodeMoveResult(moved.structuredContent)).toMatchObject(input);
+    expect((yield* readProject()).kanbanCards).toEqual([
+      { id: second.ticketId, title: "Second", column: "TODO" },
+      { id: first.ticketId, title: "First", column: "Done" },
+    ]);
+    expect((yield* move({ ...input, column: "TODO" })).isError).toBe(false);
+    expect(
+      (yield* engine
+        .dispatch({
+          type: "project.kanban-ticket.move",
+          commandId: CommandId.make("missing-agent"),
+          projectId: targetProjectId,
+          ticketId: first.ticketId,
+          column: "AI",
+        })
+        .pipe(Effect.flip)).message,
+    ).toContain("requires starting an agent thread");
+    expect(
+      (yield* engine
+        .dispatch({
+          type: "project.kanban-ticket.move",
+          commandId: CommandId.make("stale-move"),
+          projectId: targetProjectId,
+          ticketId: first.ticketId,
+          column: "Done",
+          expectedUpdatedAt: "2000-01-01T00:00:00.000Z",
+        })
+        .pipe(Effect.flip)).message,
+    ).toContain("Kanban changed");
+    const before = yield* engine.latestSequence;
+    expect((yield* move(input, { ...invocation, capabilities: new Set() })).isError).toBe(true);
+    expect((yield* move({ ...input, ticketId: "missing" })).isError).toBe(true);
+    expect((yield* move({ ...input, projectId })).isError).toBe(true);
+    expect((yield* move({ ...input, column: "invalid" }).pipe(Effect.flip))._tag).toBe(
+      "InvalidParams",
+    );
+    expect((yield* move({ ...input, column: "AI" })).isError).toBe(true);
+    expect(yield* engine.latestSequence).toBe(before);
+    yield* engine.dispatch({
+      type: "project.delete",
+      commandId: CommandId.make("delete-move-project"),
+      projectId: targetProjectId,
+      force: true,
+    });
+    expect((yield* move(input)).isError).toBe(true);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "entering AI launches through client bootstrap, preserves attachments, and supports restarting after leaving AI",
+  () => {
+    const images = [
+      {
+        id: "image",
+        attachment: {
+          type: "image" as const,
+          id: "attachment",
+          name: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 12,
+        },
+      },
+    ];
+    const launches: ClientOrchestrationCommand[] = [];
+    let failLaunch = false;
+    const socketLayer = Layer.effect(
+      Socket.WebSocketConstructor,
+      Effect.gen(function* () {
+        const engine = yield* OrchestrationEngineService;
+        const requests = yield* Queue.unbounded<{
+          data: string | Uint8Array;
+          events: EventTarget;
+        }>();
+        yield* Effect.forever(
+          Effect.gen(function* () {
+            const { data, events } = yield* Queue.take(requests);
+
+            const request = yield* decodeRpcRequest(
+              typeof data === "string" ? data : new TextDecoder().decode(data),
+            );
+            if (request._tag !== "Request" || !request.payload) return;
+            const command = request.payload;
+            const exit = yield* Effect.gen(function* () {
+              launches.push(command);
+              if (failLaunch)
+                return {
+                  _tag: "Failure",
+                  cause: [
+                    {
+                      _tag: "Fail",
+                      error: { _tag: "OrchestrationDispatchCommandError", message: "failed" },
+                    },
+                  ],
+                };
+              expect(command.type).toBe("thread.turn.start");
+              if (command.type !== "thread.turn.start" || !command.bootstrap?.createThread)
+                return yield* Effect.die("Missing bootstrap");
+              expect(command.bootstrap).toMatchObject({
+                createThread: {
+                  projectId: targetProjectId,
+                  branch: "main",
+                  title: "Launch",
+                  runtimeMode: "full-access",
+                },
+                prepareWorktree: {
+                  projectCwd: "/tmp/mcp-kanban-target-test",
+                  baseBranch: "main",
+                  requireWorktree: true,
+                },
+                runSetupScript: true,
+              });
+              expect(command.message).toMatchObject({
+                text: expect.stringContaining("# Launch\n\nDetails"),
+                attachments: images.map((image) => image.attachment),
+              });
+              yield* engine.dispatch({
+                type: "thread.create",
+                commandId: CommandId.make(`create-${command.threadId}`),
+                threadId: command.threadId,
+                ...command.bootstrap.createThread,
+              });
+              const { bootstrap: _bootstrap, ...turn } = command;
+              const result = yield* engine.dispatch(yield* decodeCommand(turn));
+              return { _tag: "Success", value: result };
+            });
+            events.dispatchEvent(
+              new MessageEvent("message", {
+                data: yield* encodeRpcResponse({ _tag: "Exit", requestId: request.id, exit }),
+              }),
+            );
+          }).pipe(Effect.orDie),
+        ).pipe(Effect.forkScoped);
+        return (url: string): Socket.WebSocketLike => {
+          expect(url).toBe("ws://127.0.0.1:1234/ws?wsTicket=test-ticket");
+          const events = new EventTarget();
+          return {
+            readyState: 1,
+            addEventListener: (type, listener, options) =>
+              events.addEventListener(
+                type,
+                listener as Exclude<Parameters<EventTarget["addEventListener"]>[1], null>,
+                options,
+              ),
+            removeEventListener: (type, listener) =>
+              events.removeEventListener(
+                type,
+                listener as Exclude<Parameters<EventTarget["addEventListener"]>[1], null>,
+              ),
+            close: () => {},
+            send: (data) => {
+              Queue.offerUnsafe(requests, { data, events });
+            },
+          };
+        };
+      }),
+    ).pipe(
+      Layer.provide(TestDependencies),
+      Layer.provide(
+        Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
+      ),
+    );
+    const launchLayer = makeTestLayer(
+      Layer.mock(ProviderRegistry)({
+        getProviders: Effect.succeed([
+          {
+            instanceId: providerInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            version: "1.0.0",
+            enabled: true,
+            installed: true,
+            status: "ready",
+            auth: { status: "authenticated" },
+            checkedAt: "2026-09-16T00:00:00.000Z",
+            models: [],
+            slashCommands: [],
+            skills: [],
+          },
+        ]),
+      }),
+      socketLayer,
+      Layer.mock(EnvironmentAuth)({
+        issueSession: () =>
+          DateTime.now.pipe(
+            Effect.map((expiresAt) => ({
+              sessionId: AuthSessionId.make("launch-session"),
+              token: "test-token",
+              method: "bearer-access-token" as const,
+              scopes: ["orchestration:operate" as const],
+              subject: "test",
+              client: { deviceType: "bot" as const },
+              expiresAt,
+            })),
+          ),
+        revokeSession: () => Effect.succeed(true),
+        issueWebSocketTicket: () =>
+          DateTime.now.pipe(Effect.map((expiresAt) => ({ ticket: "test-ticket", expiresAt }))),
+      }),
+    );
+    return Effect.gen(function* () {
+      const { createTicket, readProject, move, engine } = yield* makeHarness;
+      const config = yield* ServerConfig;
+      yield* persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: {
+          version: 1,
+          pid: process.pid,
+          port: 1234,
+          origin: "http://127.0.0.1:1234",
+          startedAt: "2026-09-16T00:00:00.000Z",
+        },
+      });
+      const ticket = yield* createTicket({
+        projectId: targetProjectId,
+        title: "Launch",
+        description: "Details",
+      });
+      const project = yield* readProject();
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("attach-image"),
+        projectId: targetProjectId,
+        kanbanExpectedUpdatedAt: project.updatedAt,
+        kanbanCards: [{ ...project.kanbanCards![0]!, branch: "main", images }],
+      });
+      const runMove = (column: string) =>
+        move({ projectId: targetProjectId, ticketId: ticket.ticketId, column });
+      const [first, concurrent] = yield* Effect.all([runMove("AI"), runMove("AI")], {
+        concurrency: "unbounded",
+      });
+      expect(
+        first.isError,
+        first.content.map((item) => (item.type === "text" ? item.text : item.type)).join("\n"),
+      ).toBe(false);
+      expect(concurrent.isError).toBe(false);
+      expect(launches).toHaveLength(1);
+      const firstThread = (yield* readProject()).kanbanCards![0]!.agentThreadId;
+      expect(firstThread).toBeDefined();
+      expect(
+        (yield* move({ column: "Done" }, { ...invocation, threadId: firstThread! })).isError,
+      ).toBe(false);
+      expect((yield* readProject()).kanbanCards![0]!.agentThreadId).toBe(firstThread);
+      failLaunch = true;
+      expect((yield* runMove("AI")).isError).toBe(true);
+      expect((yield* readProject()).kanbanCards![0]!.column).toBe("Done");
+      failLaunch = false;
+      expect((yield* runMove("AI")).isError).toBe(false);
+      expect((yield* readProject()).kanbanCards![0]!.agentThreadId).not.toBe(firstThread);
+    }).pipe(Effect.provide(launchLayer));
+  },
 );

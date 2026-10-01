@@ -69,6 +69,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.create":
     case "project.meta.update":
     case "project.kanban-ticket.create":
+    case "project.kanban-ticket.move":
     case "project.delete":
       return {
         aggregateKind: "project",

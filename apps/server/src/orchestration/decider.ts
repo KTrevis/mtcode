@@ -558,6 +558,56 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.kanban-ticket.move": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const cards = project.kanbanCards ?? [];
+      const card = cards.find((candidate) => candidate.id === command.ticketId);
+      if (project.deletedAt !== null || !card) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket does not exist in an active project.",
+        });
+      }
+      if (
+        command.expectedUpdatedAt !== undefined &&
+        command.expectedUpdatedAt !== project.updatedAt
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Kanban changed since it was loaded. Refresh and try again.",
+        });
+      }
+      if (command.column === "AI" && card.column !== "AI" && !command.agentThreadId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Moving to AI requires starting an agent thread.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const moved = {
+        ...card,
+        column: command.column,
+        ...(command.agentThreadId ? { agentThreadId: command.agentThreadId } : {}),
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          kanbanCards:
+            card.column === command.column
+              ? cards.map((candidate) => (candidate.id === card.id ? moved : candidate))
+              : [...cards.filter((candidate) => candidate.id !== card.id), moved],
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "project.delete": {
       yield* requireProject({
         readModel,

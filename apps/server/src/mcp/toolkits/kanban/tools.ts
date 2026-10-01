@@ -5,8 +5,17 @@ import {
   NonNegativeInt,
   ProjectId,
   TrimmedNonEmptyString,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as Crypto from "effect/Crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Socket from "effect/unstable/socket/Socket";
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import { ServerConfig } from "../../../config.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { ServerSettingsService } from "../../../serverSettings.ts";
+import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
@@ -47,4 +56,48 @@ const CreateTicketTool = Tool.make("kanban_create_ticket", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const KanbanToolkit = Toolkit.make(CreateTicketTool);
+export class KanbanTicketMoveError extends Schema.TaggedError<KanbanTicketMoveError>()(
+  "KanbanTicketMoveError",
+  { detail: Schema.String, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+export const KanbanTicketMoveResult = Schema.Struct({
+  ...KanbanTicketCreateResult.fields,
+  column: KanbanCard.fields.column,
+  agentThreadId: Schema.optional(ThreadId),
+});
+
+const MoveTicketTool = Tool.make("kanban_move_ticket", {
+  description:
+    "Move an existing Kanban ticket in the specified project to TODO, AI, or Done. Entering AI starts a new agent thread in a required worktree with the project's default model and setup script, just like a user moving the ticket. Moving a ticket already in AI does not restart it. Omit projectId to use the calling thread's project and omit ticketId to move the ticket linked to the calling thread. Pass both IDs to move another ticket. Returns the linked agentThreadId when present.",
+  parameters: Schema.Struct({
+    projectId: Schema.optional(ProjectId),
+    ticketId: Schema.optional(KanbanCard.fields.id),
+    column: KanbanCard.fields.column,
+  }),
+  success: KanbanTicketMoveResult,
+  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMoveError]),
+  dependencies: [
+    McpInvocationContext,
+    OrchestrationEngineService,
+    ProjectionSnapshotQuery,
+    ServerSettingsService,
+    ProviderRegistry,
+    ServerConfig,
+    EnvironmentAuth,
+    Socket.WebSocketConstructor,
+    FileSystem.FileSystem,
+    Crypto.Crypto,
+  ],
+})
+  .annotate(Tool.Title, "Move Kanban ticket")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
+export const KanbanToolkit = Toolkit.make(CreateTicketTool, MoveTicketTool);

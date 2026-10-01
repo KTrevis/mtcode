@@ -1,3 +1,4 @@
+import * as Socket from "effect/unstable/socket/Socket";
 import * as NodeCrypto from "node:crypto";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -721,7 +722,7 @@ export const layer = Layer.mergeAll(
   PullRequestsToolkitRegistrationLive,
   WorktreeToolkitRegistrationLive,
   ThreadMetadataToolkitRegistrationLive,
-  KanbanToolkitRegistrationLive,
+  KanbanToolkitRegistrationLive.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal)),
   DeviceToolkitRegistrationLive,
   MonitorToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));
