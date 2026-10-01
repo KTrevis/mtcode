@@ -14,17 +14,13 @@ export interface MonitoringTask {
   readonly nextWakeAt?: string | undefined;
   readonly stoppable: boolean;
   readonly startedAt: string;
-  readonly completedAt?: string;
-  readonly status?: string;
   readonly result?: { readonly at: string; readonly text: string };
 }
 
 const decodeMonitoringMetadata = Schema.decodeUnknownOption(MonitoringMetadata);
 
 export function formatMonitoringDuration(task: MonitoringTask, now: number): string {
-  return formatDuration(
-    (task.completedAt ? Date.parse(task.completedAt) : now) - Date.parse(task.startedAt),
-  );
+  return formatDuration(now - Date.parse(task.startedAt));
 }
 
 export const monitoringCategoryLabel = {
@@ -33,12 +29,11 @@ export const monitoringCategoryLabel = {
   process: "Background process",
 } as const;
 
-/** Fold the task journal, including providers that only publish a command. */
+/** Fold the task journal into current watches, excluding finished tasks. */
 export function deriveMonitoringTasks(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): MonitoringTask[] {
   const tasks = new Map<string, MonitoringTask>();
-  const terminal = new Set<string>();
   for (const activity of [...activities].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     const payload = activity.payload;
     if (
@@ -56,16 +51,7 @@ export function deriveMonitoringTasks(
           String(payload.status),
         ))
     ) {
-      terminal.add(id);
-      const task = tasks.get(id);
-      if (task && !task.completedAt) {
-        tasks.set(id, {
-          ...task,
-          completedAt: activity.createdAt,
-          status: "status" in payload ? String(payload.status) : "completed",
-          nextWakeAt: undefined,
-        });
-      }
+      tasks.delete(id);
       continue;
     }
     if (
@@ -75,7 +61,6 @@ export function deriveMonitoringTasks(
       MONITOR_TASK_TYPES.has(payload.taskType) &&
       !("agentId" in payload && payload.agentId)
     ) {
-      terminal.delete(id);
       const metadata =
         "monitoring" in payload ? decodeMonitoringMetadata(payload.monitoring) : undefined;
       const detail =
@@ -89,12 +74,10 @@ export function deriveMonitoringTasks(
         command: info?.command ?? detail,
         category: info?.category ?? (payload.taskType === "monitor" ? "event" : "process"),
         stoppable: info?.stoppable ?? false,
-        startedAt: tasks.get(id)?.completedAt
-          ? activity.createdAt
-          : (tasks.get(id)?.startedAt ?? activity.createdAt),
+        startedAt: tasks.get(id)?.startedAt ?? activity.createdAt,
         ...(info?.nextWakeAt ? { nextWakeAt: info.nextWakeAt } : {}),
       });
-    } else if (activity.kind === "task.progress" && !terminal.has(id)) {
+    } else if (activity.kind === "task.progress") {
       const task = tasks.get(id);
       if (task && "summary" in payload && typeof payload.summary === "string") {
         tasks.set(id, {
@@ -105,9 +88,5 @@ export function deriveMonitoringTasks(
       }
     }
   }
-  return Array.from(tasks.values()).sort(
-    (a, b) =>
-      Number(Boolean(a.completedAt)) - Number(Boolean(b.completedAt)) ||
-      (a.completedAt && b.completedAt ? b.completedAt.localeCompare(a.completedAt) : 0),
-  );
+  return Array.from(tasks.values());
 }

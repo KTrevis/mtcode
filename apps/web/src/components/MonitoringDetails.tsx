@@ -27,7 +27,7 @@ export function MonitoringDetails({
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
-  const running = tasks.some((task) => !task.completedAt);
+  const running = tasks.length > 0;
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);
@@ -54,7 +54,7 @@ export function MonitoringDetails({
   return (
     <Popover>
       <PopoverTrigger render={<Button size="xs" variant="ghost" />} aria-label="Monitoring details">
-        {running || tasks.length === 0 ? "Monitoring" : "Monitoring history"}
+        Monitoring
         {tasks.length === 1 && tasks[0] ? ` · ${formatMonitoringDuration(tasks[0], now)}` : null}
       </PopoverTrigger>
       <PopoverPopup width="lg" side="top" align="end">
@@ -77,7 +77,7 @@ export function MonitoringDetails({
                     </p>
                     <p className="break-words text-sm font-medium">{task.label}</p>
                   </div>
-                  {task.stoppable && !task.completedAt ? (
+                  {task.stoppable ? (
                     <Button
                       size="xs"
                       variant="ghost"
@@ -90,9 +90,7 @@ export function MonitoringDetails({
                   ) : null}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {task.completedAt
-                    ? `${task.status} · Duration ${formatMonitoringDuration(task, now)}`
-                    : `Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
+                  {`Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
                 </p>
                 <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-2xs text-muted-foreground">
                   {task.command}
@@ -102,7 +100,7 @@ export function MonitoringDetails({
                     Checked at {time(task.result.at)} · {task.result.text}
                   </p>
                 ) : null}
-                {!task.stoppable && !task.completedAt ? (
+                {!task.stoppable ? (
                   <p className="mt-1 text-2xs text-muted-foreground">
                     This provider supports stopping background work together.
                   </p>

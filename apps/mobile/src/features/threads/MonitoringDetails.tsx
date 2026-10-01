@@ -22,7 +22,7 @@ export function MonitoringDetails({
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
-  const running = tasks.some((task) => !task.completedAt);
+  const running = active && tasks.length > 0;
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);
@@ -45,7 +45,7 @@ export function MonitoringDetails({
       });
     }
   }
-  if (!active && tasks.length === 0) return null;
+  if (!active) return null;
   return (
     <View className="border-b border-border px-4 py-2">
       <Pressable
@@ -56,7 +56,7 @@ export function MonitoringDetails({
         className="min-h-11 justify-center"
       >
         <Text className="font-t3-medium text-sm">
-          {running || active ? "Monitoring" : "Monitoring history"}
+          Monitoring
           {tasks.length === 1 && tasks[0] ? ` · ${formatMonitoringDuration(tasks[0], now)}` : ""}
           {` · ${open ? "Hide details" : "Details"}`}
         </Text>
@@ -75,9 +75,7 @@ export function MonitoringDetails({
                 </Text>
                 <Text className="font-t3-medium text-sm">{task.label}</Text>
                 <Text className="text-xs text-foreground-muted">
-                  {task.completedAt
-                    ? `${task.status} · Duration ${formatMonitoringDuration(task, now)}`
-                    : `Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
+                  {`Running for ${formatMonitoringDuration(task, now)} · ${task.nextWakeAt ? `Check at ${time(task.nextWakeAt)}` : "Waiting for an event"}`}
                 </Text>
                 <Text className="font-mono text-xs text-foreground-muted" selectable>
                   {task.command}
@@ -87,7 +85,7 @@ export function MonitoringDetails({
                     Checked at {time(task.result.at)} · {task.result.text}
                   </Text>
                 ) : null}
-                {task.completedAt ? null : task.stoppable ? (
+                {task.stoppable ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Stop ${task.label}`}

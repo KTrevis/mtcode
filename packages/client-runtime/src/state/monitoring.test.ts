@@ -51,14 +51,7 @@ it("keeps independent watches and their durations, clears consumed wake times an
   });
   const completed = row("task.completed", { taskId: "ci", status: "stopped" }, 36);
   const tasks = deriveMonitoringTasks([started, process, completed, progress]);
-  expect(tasks.map((task) => task.id)).toEqual(["server", "ci"]);
-  expect(tasks[1]).toMatchObject({
-    startedAt: started.createdAt,
-    completedAt: completed.createdAt,
-    status: "stopped",
-    nextWakeAt: undefined,
-  });
-  expect(formatMonitoringDuration(tasks[1]!, Date.parse(row("", {}, 50).createdAt))).toBe("6m");
+  expect(tasks.map((task) => task.id)).toEqual(["server"]);
   expect(formatMonitoringDuration(tasks[0]!, Date.parse(completed.createdAt))).toBe("5m");
   expect(
     deriveMonitoringTasks([
@@ -67,32 +60,29 @@ it("keeps independent watches and their durations, clears consumed wake times an
       completed,
       row("task.completed", { taskId: "server" }, 40),
     ]).map((task) => task.id),
-  ).toEqual(["server", "ci"]);
-  expect(
-    deriveMonitoringTasks([process, row("task.completed", { taskId: "server" }, 40)])[0],
-  ).toMatchObject({ status: "completed", completedAt: row("", {}, 40).createdAt });
+  ).toEqual([]);
 });
 
 it.each(["completed", "failed", "stopped", "cancelled", "interrupted", "idle"])(
-  "freezes duration on %s and starts a fresh duration when the task restarts",
+  "removes %s tasks, ignores late updates and resets duration on restart",
   (status) => {
     const started = row("task.started", { taskId: "watch", taskType: "monitor" }, 10);
     const ended = row("task.progress", { taskId: "watch", status }, 12);
     const late = row("task.progress", { taskId: "watch", summary: "late update" }, 13);
     const duplicate = row("task.completed", { taskId: "watch" }, 14);
-    const task = deriveMonitoringTasks([late, duplicate, ended, started])[0]!;
-    expect(task).toMatchObject({
-      startedAt: started.createdAt,
-      completedAt: ended.createdAt,
-      status,
-    });
-    expect(task.result).toBeUndefined();
-    expect(formatMonitoringDuration(task, Date.parse(late.createdAt))).toBe("2m");
+    expect(deriveMonitoringTasks([late, duplicate, ended, started])).toEqual([]);
     const restarted = row("task.started", { taskId: "watch", taskType: "monitor" }, 15);
     const fresh = deriveMonitoringTasks([started, ended, restarted])[0]!;
     expect(fresh).toMatchObject({
       startedAt: restarted.createdAt,
     });
-    expect(fresh.completedAt).toBeUndefined();
+    expect(formatMonitoringDuration(fresh, Date.parse(row("", {}, 18).createdAt))).toBe("3m");
   },
 );
+
+it("preserves elapsed time on duplicate start notifications", () => {
+  const started = row("task.started", { taskId: "watch", taskType: "monitor" }, 10);
+  const duplicate = row("task.started", { taskId: "watch", taskType: "monitor" }, 12);
+  const task = deriveMonitoringTasks([duplicate, started])[0]!;
+  expect(formatMonitoringDuration(task, Date.parse(row("", {}, 15).createdAt))).toBe("5m");
+});

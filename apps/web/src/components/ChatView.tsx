@@ -6870,7 +6870,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (!activeThread || (activeBackgroundLiveness === null && monitoringTasks.length === 0)) {
+    if (!activeThread || activeBackgroundLiveness === null) {
       return null;
     }
     const working = activeBackgroundLiveness === "working";
