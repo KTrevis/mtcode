@@ -41,12 +41,28 @@ import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+} from "../ui/combobox";
 import { Input } from "../ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectButton,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Toggle } from "../ui/toggle";
 import { toastManager } from "../ui/toast";
 import {
@@ -1132,21 +1148,31 @@ function NewKeybindingCommandSelect({
   className?: string | undefined;
 }) {
   return (
-    <Select
-      value={draft.commandDraft}
-      onValueChange={(value) => draft.setCommandDraft(value as KeybindingCommand)}
+    <Combobox
+      items={commandOptions}
+      itemToStringLabel={commandLabel}
+      autoHighlight
+      value={draft.commandDraft || null}
+      onValueChange={(value) => draft.setCommandDraft(value ?? "")}
     >
-      <SelectTrigger size="sm" className={className}>
-        <SelectValue placeholder="Command" />
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} matchTriggerWidth={false} className="max-h-72">
-        {commandOptions.map((command) => (
-          <SelectItem key={command} value={command} className="w-full">
-            <span className="truncate">{commandLabel(command)}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <ComboboxTrigger
+        aria-label="Command"
+        render={<SelectButton size="sm" className={className} />}
+      >
+        {draft.commandDraft ? commandLabel(draft.commandDraft) : "Command"}
+      </ComboboxTrigger>
+      <ComboboxPopup>
+        <ComboboxSearchInput placeholder="Search commands…" aria-label="Search commands" />
+        <ComboboxEmpty>No commands found.</ComboboxEmpty>
+        <ComboboxList>
+          {(command: KeybindingCommandOption) => (
+            <ComboboxItem key={command} value={command}>
+              <span className="truncate">{commandLabel(command)}</span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
   );
 }
 
