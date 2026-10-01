@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { buildDocJson } from "../../composer-rich-text-doc";
 
 import {
   COMPOSER_MENTION_DRAG_TYPE,
@@ -6,6 +7,7 @@ import {
   composerMentionFromTreePath,
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
+  setComposerThreadDragData,
 } from "./composerMentionDrag.ts";
 
 const makeDragEvent = (options?: { mention?: string; types?: ReadonlyArray<string> }) => {
@@ -38,6 +40,48 @@ const makeHost = (insertResult = true) => {
   };
   return { host, log };
 };
+
+describe("thread title drops", () => {
+  it("inserts a thread chip with its scoped identity and preserves the existing prompt", () => {
+    const data = new Map<string, string>();
+    const transfer = {
+      effectAllowed: "none" as DataTransfer["effectAllowed"],
+      setData: (format: string, value: string) => void data.set(format, value),
+    };
+    setComposerThreadDragData(transfer, {
+      environmentId: "remote/environment",
+      threadId: "thread/123",
+      title: "Fix [composer]",
+    });
+    const mention = data.get(COMPOSER_MENTION_DRAG_TYPE)!;
+    expect(transfer.effectAllowed).toBe("move");
+    expect(data.get("text/plain")).toBe(mention);
+    let prompt = "Continue ";
+    makeComposerMentionDragHandlers({
+      insertMentionAtEnd: (text) => {
+        prompt += text;
+        return true;
+      },
+      setDragActive: () => {},
+      onInsertRejected: () => {},
+    }).onDrop(makeDragEvent({ mention }).event);
+    expect(prompt).toBe(`Continue ${mention} `);
+    const doc = buildDocJson(prompt, (name) => ({ label: name, description: null }));
+    expect(doc.content?.[0]?.content).toEqual([
+      { type: "text", text: "Continue " },
+      {
+        type: "composer-thread",
+        attrs: {
+          environmentId: "remote/environment",
+          threadId: "thread/123",
+          title: "Fix [composer]",
+          source: mention,
+        },
+      },
+      { type: "text", text: " " },
+    ]);
+  });
+});
 
 describe("composerMentionFromTreePath", () => {
   it("serializes a file path into a mention", () => {

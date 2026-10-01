@@ -202,6 +202,7 @@ import {
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
+import { setComposerThreadDragData } from "./chat/composerMentionDrag";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
   ThreadPullRequestBadgeControl,
@@ -1508,6 +1509,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : (
     <span
       aria-hidden
+      draggable
+      // Let mouse drags on the title reach the native composer drop path;
+      // the rest of the row and touch gestures still use sidebar sorting.
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse") event.stopPropagation();
+      }}
+      onDragStart={(event) => {
+        event.stopPropagation();
+        setComposerThreadDragData(event.dataTransfer, {
+          environmentId: thread.environmentId,
+          threadId: thread.id,
+          title: thread.title,
+        });
+      }}
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
