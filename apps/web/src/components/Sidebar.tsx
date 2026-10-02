@@ -1009,6 +1009,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // so references also work on older servers. The distance constraint keeps
   // plain clicks working.
   sortable?: SortableThreadRowBag | undefined;
+  isDragOverlay?: boolean;
   dropVerb: SidebarDropVerb | null;
   // While dragging, the pin marker stays only for a pinned thread still over
   // the pinned section. Any other position shows the verb badge instead, and
@@ -1080,7 +1081,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [thread.environmentId, thread.id],
   );
   const threadKey = scopedThreadKey(threadRef);
-  const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(props.isActive);
+  const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(
+    props.isActive || props.isDragOverlay === true,
+  );
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   // The server watermark wins when the server tracks visits; older servers
@@ -1460,7 +1463,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     // through. The row tint is translucent in dark themes and the pointer
     // keeps the hover color applied, so both the tint and the solid sidebar
     // color are stacked as background images.
-    props.sortable?.isDragging &&
+    (props.sortable?.isDragging || props.isDragOverlay) &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
@@ -1484,7 +1487,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
     : {};
   const dragDestination =
-    sortable?.isDragging && props.dropVerb !== null ? (
+    (sortable?.isDragging || props.isDragOverlay) && props.dropVerb !== null ? (
       <span
         role="status"
         className="pointer-events-none ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-1.5 text-2xs font-medium text-primary"
@@ -1665,7 +1668,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           sortable?.isDragging && "relative z-20",
         )}
       >
-        <Tooltip disabled={sortable?.isDragging}>
+        <Tooltip disabled={sortable?.isDragging || props.isDragOverlay}>
           <TooltipTrigger
             render={
               <div
@@ -1713,7 +1716,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
-            {sortable?.isDragging ? (
+            {dragDestination !== null ? (
               dragDestination
             ) : (
               <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
@@ -1835,7 +1838,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         sortable?.isDragging && "relative z-20",
       )}
     >
-      <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
+      <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging || props.isDragOverlay}>
         <TooltipTrigger
           render={
             <div
@@ -1878,7 +1881,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
                   space without either state overlapping it. */}
-              {sortable?.isDragging ? (
+              {dragDestination !== null ? (
                 dragDestination
               ) : (
                 <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
@@ -3366,8 +3369,6 @@ export default function Sidebar() {
     readonly targetSection: SidebarSection | null;
   } | null>(null);
   const dragTargetSection = dragState?.targetSection ?? null;
-  const dragVerb =
-    dragState === null ? null : resolveSidebarDropVerb(dragState.activeSection, dragTargetSection);
   const [isDragOutsideSidebar, setIsDragOutsideSidebar] = useState(false);
   const dragOutsideRef = useRef(false);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
@@ -5006,6 +5007,7 @@ export default function Sidebar() {
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
                         sortable?: SortableThreadRowBag,
+                        isDragOverlay = false,
                       ) => {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
@@ -5045,6 +5047,7 @@ export default function Sidebar() {
                             }
                             isPinned={thread.pinnedAt != null}
                             sortable={sortable}
+                            isDragOverlay={isDragOverlay}
                             dropVerb={
                               dragState?.activeKey === threadKey
                                 ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
@@ -5244,6 +5247,26 @@ export default function Sidebar() {
                             break;
                         }
                       }
+                      const draggedThread =
+                        dragState === null ? undefined : threadByKey.get(dragState.activeKey);
+                      items.push(
+                        createPortal(
+                          <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
+                            {dragState !== null && draggedThread !== undefined ? (
+                              <ul inert aria-hidden className="pointer-events-none list-none">
+                                {renderThreadRowInner(
+                                  draggedThread,
+                                  dragState.activeSection,
+                                  undefined,
+                                  true,
+                                )}
+                              </ul>
+                            ) : null}
+                          </DragOverlay>,
+                          document.body,
+                          "thread-drag-overlay",
+                        ),
+                      );
                       return items;
                     })()}
                     {settledShelfExpanded && hiddenSettledCount > 0 ? (
@@ -5260,31 +5283,6 @@ export default function Sidebar() {
                     ) : null}
                   </ul>
                 </SortableContext>
-                {createPortal(
-                  <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
-                    {dragState !== null ? (
-                      <div
-                        className={cn(
-                          "pointer-events-none flex flex-col justify-center gap-1 rounded-md bg-sidebar px-3 text-sm text-sidebar-foreground shadow-lg",
-                          (dragTargetSection ?? dragState.activeSection) === "pinned" ||
-                            (dragTargetSection ?? dragState.activeSection) === "active"
-                            ? "h-[78px]"
-                            : "h-9",
-                        )}
-                      >
-                        <span className="truncate font-medium">
-                          {threadByKey.get(dragState.activeKey)?.title}
-                        </span>
-                        {dragVerb !== null ? (
-                          <span className="flex items-center gap-1 text-xs text-primary">
-                            {dropVerbBadge[dragVerb]}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </DragOverlay>,
-                  document.body,
-                )}
               </DndContext>
             </TooltipProvider>
           ) : null}
