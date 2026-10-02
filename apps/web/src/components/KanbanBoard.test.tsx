@@ -254,3 +254,94 @@ it("does not recover board focus while ticket details or other controls own inpu
   await focus(input("TODO"));
   expect((await press("ArrowDown")).defaultPrevented).toBe(false);
 });
+
+async function searchTickets(query: string) {
+  const field = container.querySelector<HTMLInputElement>('[aria-label="Search tickets"]')!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setValue.call(field, query);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  return field;
+}
+
+it("filters titles, descriptions and branches across columns without changing the cards", async () => {
+  await act(async () =>
+    root.render(
+      <Harness
+        key="search"
+        initial={[
+          { id: "a", title: "Fix SEARCH", column: "TODO" },
+          { id: "b", title: "Second", description: "Search the tickets", column: "AI" },
+          { id: "c", title: "Third", branch: "feature/search", column: "Done" },
+          { id: "d", title: "Other ticket", column: "TODO" },
+        ]}
+      />,
+    ),
+  );
+  await searchTickets("  sEaRcH  ");
+  expect(
+    Array.from(container.querySelectorAll("[data-kanban-card]"), (el) =>
+      el.getAttribute("data-kanban-card"),
+    ),
+  ).toEqual(["a", "b", "c"]);
+  for (const column of ["TODO", "AI", "Done"]) {
+    expect(container.querySelector(`[data-kanban-column="${column}"] h2 span`)?.textContent).toBe(
+      "1",
+    );
+  }
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Clear ticket search"]')!.click(),
+  );
+  expect(container.querySelectorAll("[data-kanban-card]")).toHaveLength(4);
+  await searchTickets("   ");
+  expect(container.querySelectorAll("[data-kanban-card]")).toHaveLength(4);
+  expect(onMove).not.toHaveBeenCalled();
+});
+
+it("shows an empty search state and restores all tickets with Escape", async () => {
+  const field = await searchTickets("no matching ticket");
+  expect(container.querySelectorAll("[data-kanban-card]")).toHaveLength(0);
+  expect(container.querySelector('p[role="status"]')?.textContent).toContain("No tickets match");
+  await focus(field);
+  expect((await press("ArrowDown")).defaultPrevented).toBe(false);
+  await press("Escape");
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("");
+  expect(container.querySelectorAll("[data-kanban-card]")).toHaveLength(4);
+  expect(container.querySelector('p[role="status"]')).toBeNull();
+});
+
+it("navigates and reorders matching tickets using their positions in the full column", async () => {
+  await act(async () =>
+    root.render(
+      <Harness
+        key="filtered-navigation"
+        initial={[
+          { id: "a", title: "Match one", column: "TODO" },
+          { id: "b", title: "Hidden", column: "TODO" },
+          { id: "c", title: "Match two", column: "TODO" },
+          { id: "d", title: "Match three", column: "TODO" },
+        ]}
+      />,
+    ),
+  );
+  await focus(card("b"));
+  await searchTickets("match");
+  await focus(container.querySelector<HTMLButtonElement>("button")!);
+  await focus(board());
+  expect(document.activeElement).toBe(card("a"));
+  await press("ArrowDown");
+  expect(document.activeElement).toBe(card("c"));
+  await press("ArrowUp");
+  expect(document.activeElement).toBe(card("a"));
+  await press("ArrowDown", { shiftKey: true });
+  expect(onMove).toHaveBeenLastCalledWith("a", "TODO", 2);
+  expect(document.activeElement).toBe(card("a"));
+  await searchTickets("");
+  expect(
+    Array.from(container.querySelectorAll("[data-kanban-card]"), (el) =>
+      el.getAttribute("data-kanban-card"),
+    ),
+  ).toEqual(["b", "c", "a", "d"]);
+});

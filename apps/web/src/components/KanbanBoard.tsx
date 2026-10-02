@@ -9,7 +9,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { KanbanCard } from "@t3tools/contracts";
-import { GitBranchIcon, MessageSquareIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { GitBranchIcon, MessageSquareIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -235,6 +235,15 @@ export function KanbanBoard({
   detailsOpen?: boolean;
   onMove: (id: string, column: KanbanColumn, index?: number) => Promise<boolean>;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const query = searchQuery.trim().toLowerCase();
+  const visibleCards = query
+    ? cards.filter((card) =>
+        [card.title, card.description, card.branch].some((text) =>
+          text?.toLowerCase().includes(query),
+        ),
+      )
+    : cards;
   const boardRef = useRef<HTMLDivElement>(null);
   const movingCardId = useRef<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -242,9 +251,9 @@ export function KanbanBoard({
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const draggedCard = cards.find((card) => card.id === draggedCardId);
-  const currentCardId = cards.some((card) => card.id === activeCardId)
+  const currentCardId = visibleCards.some((card) => card.id === activeCardId)
     ? activeCardId
-    : (cards[0]?.id ?? null);
+    : (visibleCards[0]?.id ?? null);
 
   const cardElement = (id: string) =>
     Array.from(boardRef.current?.querySelectorAll<HTMLElement>("[data-kanban-card]") ?? []).find(
@@ -334,7 +343,7 @@ export function KanbanBoard({
     const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
     const card = cards.find((candidate) => candidate.id === focusedCardId);
     const column = card?.column ?? activeColumn;
-    const siblings = cards.filter((candidate) => candidate.column === column);
+    const siblings = visibleCards.filter((candidate) => candidate.column === column);
     const index = siblings.findIndex((candidate) => candidate.id === card?.id);
     const destination = horizontal
       ? KANBAN_COLUMNS[KANBAN_COLUMNS.indexOf(column) + direction]
@@ -350,11 +359,14 @@ export function KanbanBoard({
       )
         return;
       movingCardId.current = card.id;
-      void onMove(card.id, destination, horizontal ? Math.max(0, index) : index + direction).then(
-        (moved) => {
-          if (!moved) movingCardId.current = null;
-        },
-      );
+      const moveIndex = horizontal
+        ? Math.max(0, index)
+        : cards
+            .filter((candidate) => candidate.column === column)
+            .findIndex((candidate) => candidate.id === siblings[index + direction]?.id);
+      void onMove(card.id, destination, moveIndex).then((moved) => {
+        if (!moved) movingCardId.current = null;
+      });
       return;
     }
     if (!horizontal) {
@@ -400,62 +412,95 @@ export function KanbanBoard({
       }}
       onDragCancel={() => setDraggedCardId(null)}
     >
-      <div
-        ref={boardRef}
-        role="group"
-        aria-label="Kanban board"
-        tabIndex={0}
-        className="flex h-full min-h-0 gap-4 outline-none"
-        onKeyDown={handleKeyDown}
-        onPointerDown={(event) => {
-          const target = event.target as HTMLElement;
-          if (
-            target.closest(
-              "[data-kanban-card], button, a, input, textarea, select, [contenteditable]",
-            )
-          )
-            return;
-          const column = target.closest<HTMLElement>("[data-kanban-column]")?.dataset
-            .kanbanColumn as KanbanColumn | undefined;
-          const card =
-            cards.find(
-              (candidate) =>
-                candidate.id === currentCardId && (!column || candidate.column === column),
-            ) ?? cards.find((candidate) => !column || candidate.column === column);
-          if (card) focusCard(card.id);
-          else focusColumn(column ?? activeColumn);
-          event.preventDefault();
-        }}
-        onFocusCapture={(event) => {
-          const section = (event.target as HTMLElement).closest<HTMLElement>(
-            "[data-kanban-column]",
-          );
-          if (section) setActiveColumn(section.dataset.kanbanColumn as KanbanColumn);
-        }}
-        onFocus={(event) => {
-          if (
-            event.target !== event.currentTarget ||
-            event.currentTarget.contains(event.relatedTarget as Node | null)
-          )
-            return;
-          if (currentCardId) focusCard(currentCardId);
-          else focusColumn(activeColumn);
-        }}
-      >
-        {KANBAN_COLUMNS.map((column) => (
-          <ColumnView
-            key={column}
-            column={column}
-            cards={cards.filter((card) => card.column === column)}
-            environmentId={environmentId}
-            disabled={disabled}
-            activeCardId={currentCardId}
-            onCardFocus={setActiveCardId}
-            onAdd={onAdd}
-            onOpen={onOpen}
-            onDelete={onDelete}
+      <div className="flex h-full min-h-0 flex-col gap-4">
+        <div className="flex w-full max-w-sm shrink-0 items-center gap-1">
+          <Input
+            nativeInput
+            type="search"
+            aria-label="Search tickets"
+            placeholder="Search tickets…"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setSearchQuery("");
+              }
+            }}
           />
-        ))}
+          {searchQuery ? (
+            <Button
+              variant="ghost-muted"
+              size="icon-sm"
+              aria-label="Clear ticket search"
+              onClick={() => setSearchQuery("")}
+            >
+              <XIcon className="size-4" />
+            </Button>
+          ) : null}
+        </div>
+        {query && visibleCards.length === 0 ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            No tickets match your search.
+          </p>
+        ) : null}
+        <div
+          ref={boardRef}
+          role="group"
+          aria-label="Kanban board"
+          tabIndex={0}
+          className="flex min-h-0 flex-1 gap-4 outline-none"
+          onKeyDown={handleKeyDown}
+          onPointerDown={(event) => {
+            const target = event.target as HTMLElement;
+            if (
+              target.closest(
+                "[data-kanban-card], button, a, input, textarea, select, [contenteditable]",
+              )
+            )
+              return;
+            const column = target.closest<HTMLElement>("[data-kanban-column]")?.dataset
+              .kanbanColumn as KanbanColumn | undefined;
+            const card =
+              visibleCards.find(
+                (candidate) =>
+                  candidate.id === currentCardId && (!column || candidate.column === column),
+              ) ?? visibleCards.find((candidate) => !column || candidate.column === column);
+            if (card) focusCard(card.id);
+            else focusColumn(column ?? activeColumn);
+            event.preventDefault();
+          }}
+          onFocusCapture={(event) => {
+            const section = (event.target as HTMLElement).closest<HTMLElement>(
+              "[data-kanban-column]",
+            );
+            if (section) setActiveColumn(section.dataset.kanbanColumn as KanbanColumn);
+          }}
+          onFocus={(event) => {
+            if (
+              event.target !== event.currentTarget ||
+              event.currentTarget.contains(event.relatedTarget as Node | null)
+            )
+              return;
+            if (currentCardId) focusCard(currentCardId);
+            else focusColumn(activeColumn);
+          }}
+        >
+          {KANBAN_COLUMNS.map((column) => (
+            <ColumnView
+              key={column}
+              column={column}
+              cards={visibleCards.filter((card) => card.column === column)}
+              environmentId={environmentId}
+              disabled={disabled}
+              activeCardId={currentCardId}
+              onCardFocus={setActiveCardId}
+              onAdd={onAdd}
+              onOpen={onOpen}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
       </div>
       {createPortal(
         <DragOverlay zIndex={100}>
