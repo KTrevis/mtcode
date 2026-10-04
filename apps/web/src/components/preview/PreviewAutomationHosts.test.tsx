@@ -29,6 +29,15 @@ import { appAtomRegistry, AppAtomRegistryProvider } from "~/rpc/atomRegistry";
 import { PreviewAutomationHosts } from "./PreviewAutomationHosts";
 
 const mocks = vi.hoisted(() => ({
+  navigate: vi.fn(async (_tabId: string, _url: string, _options: unknown) => {}),
+  status: vi.fn(async () => ({
+    available: true,
+    loading: false,
+    visible: false,
+    tabId: "runtime",
+    url: "about:blank",
+    title: "",
+  })),
   getClientSettings: vi.fn<() => Promise<ClientSettings | null>>(),
   setClientSettings: vi.fn(),
   open: vi.fn(async (_target: { environmentId: EnvironmentId; input: PreviewOpenInput }) =>
@@ -66,7 +75,9 @@ vi.mock("~/state/use-atom-command", () => ({
 vi.mock("~/state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => mocks.list,
 }));
-vi.mock("./previewBridge", () => ({ previewBridge: { automation: {} } }));
+vi.mock("./previewBridge", () => ({
+  previewBridge: { navigate: mocks.navigate, automation: { status: mocks.status } },
+}));
 
 const environmentId = EnvironmentId.make("automation-environment");
 const threadId = ThreadId.make("automation-thread");
@@ -145,11 +156,13 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await act(() => renderer?.unmount());
+  if (vi.isFakeTimers()) await act(() => vi.runOnlyPendingTimersAsync());
   renderer = null;
   resetPreviewStateForTests();
   __resetClientSettingsPersistenceForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("PreviewAutomationHosts open", () => {
@@ -359,5 +372,175 @@ describe("PreviewAutomationHosts ownership", () => {
       ok: true,
       result: { available: false, tabId: snapshot.tabId },
     });
+  });
+});
+
+describe("PreviewAutomationHosts deadlines", () => {
+  it("responds before the broker timeout when settings stall and does not open later", async () => {
+    vi.useFakeTimers();
+    const read = deferred<ClientSettings>();
+    mocks.getClientSettings.mockReturnValueOnce(read.promise);
+    await act(() =>
+      appAtomRegistry.set(
+        requestsAtom,
+        AsyncResult.success({
+          ...requestEvent,
+          request: { ...requestEvent.request, timeoutMs: 100 },
+        }),
+      ),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(80));
+    expect(mocks.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          ok: false,
+          error: expect.objectContaining({ _tag: "PreviewAutomationTimeoutError" }),
+        }),
+      }),
+    );
+    await act(async () => {
+      read.resolve(savedSettings);
+      await read.promise;
+    });
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.respond).toHaveBeenCalledOnce();
+  });
+
+  it("returns a navigation timeout and handles status on the same host connection", async () => {
+    vi.useFakeTimers();
+    const runtimeTabId = previewRuntimeTabId(threadRef, null, snapshot.tabId);
+    Object.assign(document, {
+      querySelectorAll: () => [
+        {
+          getAttribute: () => runtimeTabId,
+          closest: () => ({ getAttribute: () => "active" }),
+          executeJavaScript: async () => ({ width: 1440, height: 900 }),
+        },
+      ],
+    });
+    mocks.navigate.mockImplementationOnce(() => new Promise<void>(() => {}));
+    await act(() => {
+      applyPreviewServerSnapshot(threadRef, snapshot);
+      applyPreviewDesktopState(threadRef, snapshot.tabId, {
+        hasWebContents: true,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        zoomFactor: 1,
+        pictureInPicture: false,
+        colorScheme: "system",
+        audioMuted: false,
+        audible: false,
+        controller: "none",
+        favicon: null,
+      });
+      appAtomRegistry.set(
+        requestsAtom,
+        AsyncResult.success({
+          ...requestEvent,
+          request: {
+            ...requestEvent.request,
+            requestId: "navigate-stalled",
+            operation: "navigate",
+            tabId: snapshot.tabId,
+            timeoutMs: 100,
+            input: { url: "https://example.com", readiness: "domContentLoaded" },
+          },
+        }),
+      );
+    });
+    await act(() => vi.advanceTimersByTimeAsync(80));
+    expect(mocks.navigate).toHaveBeenCalledOnce();
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      runtimeTabId,
+      "https://example.com",
+      expect.objectContaining({ readiness: "domContentLoaded" }),
+    );
+    expect(mocks.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          connectionId: requestEvent.connectionId,
+          requestId: "navigate-stalled",
+          ok: false,
+          error: expect.objectContaining({ _tag: "PreviewAutomationTimeoutError" }),
+        }),
+      }),
+    );
+    await act(() =>
+      appAtomRegistry.set(
+        requestsAtom,
+        AsyncResult.success({
+          ...requestEvent,
+          request: {
+            ...requestEvent.request,
+            requestId: "status-after-timeout",
+            operation: "status",
+            tabId: snapshot.tabId,
+            input: {},
+          },
+        }),
+      ),
+    );
+    expect(mocks.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          connectionId: requestEvent.connectionId,
+          requestId: "status-after-timeout",
+          ok: true,
+          result: expect.objectContaining({ available: true }),
+        }),
+      }),
+    );
+  });
+
+  it("reports status without a viewport when guest JavaScript never settles", async () => {
+    vi.useFakeTimers();
+    const runtimeTabId = previewRuntimeTabId(threadRef, null, snapshot.tabId);
+    const executeJavaScript = vi.fn(() => new Promise<unknown>(() => {}));
+    const webview = {
+      getAttribute: (name: string) => (name === "data-preview-tab" ? runtimeTabId : null),
+      closest: () => ({ getAttribute: () => "active" }),
+      executeJavaScript,
+    };
+    Object.assign(document, { querySelectorAll: () => [webview] });
+    await act(() => {
+      applyPreviewServerSnapshot(threadRef, snapshot);
+      applyPreviewDesktopState(threadRef, snapshot.tabId, {
+        hasWebContents: true,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        zoomFactor: 1,
+        pictureInPicture: false,
+        colorScheme: "system",
+        audioMuted: false,
+        audible: false,
+        controller: "none",
+        favicon: null,
+      });
+      appAtomRegistry.set(
+        requestsAtom,
+        AsyncResult.success({
+          ...requestEvent,
+          request: {
+            ...requestEvent.request,
+            operation: "status",
+            tabId: snapshot.tabId,
+            input: {},
+          },
+        }),
+      );
+    });
+    await act(() => vi.advanceTimersByTimeAsync(250));
+    expect(executeJavaScript).toHaveBeenCalled();
+    expect(mocks.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          ok: true,
+          result: expect.objectContaining({ available: true, tabId: snapshot.tabId }),
+        }),
+      }),
+    );
+    expect(mocks.respond.mock.calls[0]?.[0].input.result).not.toHaveProperty("viewport");
   });
 });

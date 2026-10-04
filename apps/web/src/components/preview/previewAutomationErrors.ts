@@ -23,6 +23,25 @@ export interface PreviewAutomationOperationContext {
   readonly tabId: Exclude<PreviewAutomationRequest["tabId"], undefined> | null;
 }
 
+export class PreviewAutomationHostTimeoutError extends Schema.TaggedError<PreviewAutomationHostTimeoutError>()(
+  "PreviewAutomationHostTimeoutError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    timeoutMs: Schema.Int,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTimeoutError" as const;
+  }
+  override get message(): string {
+    return `Preview automation ${this.operation} exceeded its host budget of ${this.timeoutMs}ms. The action is not replayed.`;
+  }
+}
+
 export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedError<PreviewAutomationOverlayTimeoutError>()(
   "PreviewAutomationOverlayTimeoutError",
   {
@@ -338,6 +357,7 @@ export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationRecordingTooLargeError,
   PreviewAutomationRecordingDeadlineExpiredError,
   PreviewAutomationProfileNotFoundError,
+  PreviewAutomationHostTimeoutError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,

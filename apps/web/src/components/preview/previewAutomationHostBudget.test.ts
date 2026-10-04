@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  awaitHostOperation,
   PREVIEW_HOST_RESPONSE_MARGIN_MS,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
@@ -131,6 +132,35 @@ describe("waitForHostReadiness", () => {
     const isReady = vi.fn().mockRejectedValue(error);
 
     await expect(waitForHostReadiness(800, isReady)).rejects.toBe(error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("awaitHostOperation", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("returns a failure before the broker deadline and never runs the next action", async () => {
+    const action = vi.fn(() => new Promise<void>(() => {}));
+    const next = vi.fn(async () => undefined);
+    const deadline = resolveHostWaitBudgetMs(100);
+    const run = async () => {
+      await awaitHostOperation(deadline, action, () => new Error("host deadline"));
+      await awaitHostOperation(deadline, next, () => new Error("host deadline"));
+    };
+    const assertion = expect(run()).rejects.toThrow("host deadline");
+    await vi.advanceTimersByTimeAsync(deadline);
+    await assertion;
+    expect(Date.now()).toBeLessThan(100);
+    expect(action).toHaveBeenCalledOnce();
+    expect(next).not.toHaveBeenCalled();
+    await expect(awaitHostOperation(deadline, next, () => new Error("expired"))).rejects.toThrow(
+      "expired",
+    );
+    expect(next).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

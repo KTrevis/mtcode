@@ -3,6 +3,26 @@ export const PREVIEW_HOST_RESPONSE_MARGIN_MS = 1_500;
 
 const HOST_RESPONSE_MARGIN_FRACTION = 0.2;
 
+/** Expired work must not start another action; in-flight actions are never replayed. */
+export async function awaitHostOperation<A>(
+  deadlineMs: number,
+  run: () => Promise<A>,
+  onTimeout: () => Error,
+): Promise<A> {
+  if (Date.now() >= deadlineMs) throw onTimeout();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(onTimeout()), Math.max(0, deadlineMs - Date.now()));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function resolveHostWaitBudgetMs(requestTimeoutMs: number): number {
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
     return 0;
