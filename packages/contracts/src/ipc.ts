@@ -1144,9 +1144,16 @@ export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
   webContentsId: Schema.Int.check(Schema.isGreaterThan(0)),
 });
 
+export const DesktopPreviewNavigateOptionsSchema = Schema.Struct({
+  readiness: Schema.optional(Schema.Literals(["load", "domContentLoaded", "none"])),
+  timeoutMs: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+export type DesktopPreviewNavigateOptions = typeof DesktopPreviewNavigateOptionsSchema.Type;
+
 export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   url: Schema.String,
+  options: Schema.optional(DesktopPreviewNavigateOptionsSchema),
 });
 
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
@@ -1427,7 +1434,7 @@ export interface DesktopPreviewBridge {
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
-  navigate: (tabId: string, url: string) => Promise<void>;
+  navigate: (tabId: string, url: string, options?: DesktopPreviewNavigateOptions) => Promise<void>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;
