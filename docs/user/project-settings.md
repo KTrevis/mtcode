@@ -40,8 +40,13 @@ and other phone-only settings ignore the filter.
 
 ## Defaults and inheritance
 
-General contains the model and workspace for new threads. Integrations controls agent browser
-access. Source Control contains automatic pull, the default pull request merge method and text
+General contains the model and workspace for new threads. Select a project to choose **Workspace**
+for its new threads: **New worktree** or **Current checkout**. Set **Default branch** to choose the
+base of new worktrees, or leave it blank to use the repository's default branch. You can choose a
+different base in a new-thread draft. Current checkout keeps its active branch. Kanban threads use
+the ticket's branch when one is attached, then this default; they always use a worktree.
+
+Integrations controls agent browser access. Source Control contains automatic pull, the default pull request merge method and text
 generation. The same rows edit environment defaults or project overrides depending on the
 project crumb.
 

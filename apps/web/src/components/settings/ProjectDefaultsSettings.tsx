@@ -25,6 +25,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
+import { DraftInput } from "../ui/draft-input";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -75,6 +76,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
+  const mixedBranch = useScopedSettingsMixed(["defaultThreadBranch"]);
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
@@ -247,6 +249,37 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const branchRow = (
+    <SettingsRow
+      serverScoped
+      settingKeys={["defaultThreadBranch"]}
+      mixed={mixedBranch}
+      {...searchableSetting("default-thread-branch")}
+      description="Base branch for new worktrees. Leave blank to use the repository default. Current checkout keeps its active branch."
+      resetAction={
+        !isProjectScope && settings.defaultThreadBranch !== "" ? (
+          <SettingResetButton
+            label="default branch"
+            onClick={() => updateSettings({ defaultThreadBranch: "" })}
+          />
+        ) : null
+      }
+      control={
+        <div className="w-full sm:w-44">
+          <DraftInput
+            size="sm"
+            value={mixedBranch ? "" : settings.defaultThreadBranch}
+            placeholder={mixedBranch ? "Mixed" : "Repository default"}
+            disabled={unavailable}
+            spellCheck={false}
+            aria-label="Default branch"
+            onCommit={(value) => updateSettings({ defaultThreadBranch: value.trim() })}
+          />
+        </div>
+      }
+    />
+  );
+
   return (
     <SettingsSection
       id={
@@ -268,6 +301,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           {modelRow}
           {workspaceRow}
+          {branchRow}
         </>
       ) : category === "general" ? (
         <>
@@ -334,6 +368,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
           {workspaceRow}
+          {branchRow}
           <SettingsRow
             serverScoped
             settingKeys={["worktreeSubmodules"]}

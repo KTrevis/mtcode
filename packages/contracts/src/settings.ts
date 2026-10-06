@@ -1260,6 +1260,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultModelSelection",
   "defaultRuntimeMode",
   "defaultThreadEnvMode",
+  "defaultThreadBranch",
   "newWorktreesStartFromOrigin",
   "worktreeSubmodules",
   "defaultAutoPull",
@@ -1289,6 +1290,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  defaultThreadBranch: Schema.optionalKey(TrimmedString),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
@@ -1494,6 +1496,7 @@ export const ServerSettings = Schema.Struct({
    * so older clients, which require a literal here, keep decoding.
    */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
+  defaultThreadBranch: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   providerRuntimeModeDefaults: Schema.Record(ProviderInstanceId, RuntimeMode).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -1849,6 +1852,7 @@ export const ServerSettingsPatch = Schema.Struct({
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
+  defaultThreadBranch: Schema.optionalKey(TrimmedString),
   providerRuntimeModeDefaults: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, Schema.NullOr(RuntimeMode)),
   ),

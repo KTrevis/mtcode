@@ -17,7 +17,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { persistServerRuntimeState } from "../../../serverRuntimeState.ts";
-import { layerTest as SettingsLayer } from "../../../serverSettings.ts";
+import { ServerSettingsService, layerTest as SettingsLayer } from "../../../serverSettings.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -654,6 +654,12 @@ it.effect(
           startedAt: "2026-09-16T00:00:00.000Z",
         },
       });
+      const settings = yield* ServerSettingsService;
+      yield* settings.updateSettings({
+        projectSettingsOverrides: {
+          [targetProjectId]: { defaultThreadBranch: "develop" },
+        },
+      });
       const ticket = yield* createTicket({
         projectId: targetProjectId,
         title: "Launch",
@@ -716,11 +722,11 @@ it.effect(
         kanbanExpectedUpdatedAt: beforeRestart.updatedAt,
         kanbanCards: beforeRestart.kanbanCards!.map((card) => ({ ...card, branch: null })),
       });
-      expectedBaseBranch = "HEAD";
+      expectedBaseBranch = "develop";
       expect((yield* runMove("AI")).isError).toBe(false);
       expect(launches.at(-1)).toMatchObject({
         message: {
-          text: `Implement this Kanban ticket in the project.\n\n# Launch\n\nDetails\n\nThe kanban-image references in the description correspond to the attached images, in the same order.\n\n## Coordination context\n\nTicket ID: ${ticket.ticketId}\nCoordinator thread ID: ${threadId}\nBase branch: HEAD`,
+          text: `Implement this Kanban ticket in the project.\n\n# Launch\n\nDetails\n\nThe kanban-image references in the description correspond to the attached images, in the same order.\n\n## Coordination context\n\nTicket ID: ${ticket.ticketId}\nCoordinator thread ID: ${threadId}\nBase branch: develop`,
         },
       });
       expect((yield* readProject()).kanbanCards![0]!.agentThreadId).not.toBe(firstThread);
