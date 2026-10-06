@@ -20,6 +20,33 @@ const projectId = ProjectId.make("project-a");
 const otherProjectId = ProjectId.make("project-b");
 
 describe("resolveProjectSettings", () => {
+  it("resolves and resets each project's workspace and base branch independently", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      defaultThreadBranch: "main",
+      projectSettingsOverrides: {
+        [projectId]: { defaultThreadEnvMode: "worktree", defaultThreadBranch: "develop" },
+        [otherProjectId]: { defaultThreadEnvMode: "local", defaultThreadBranch: "" },
+      },
+    });
+    expect(resolveProjectSettings(settings, projectId).settings).toMatchObject({
+      defaultThreadEnvMode: "worktree",
+      defaultThreadBranch: "develop",
+    });
+    expect(resolveProjectSettings(settings, otherProjectId).settings).toMatchObject({
+      defaultThreadEnvMode: "local",
+      defaultThreadBranch: "",
+    });
+    const reset = applyServerSettingsPatch(settings, {
+      projectSettingsOverrides: {
+        [projectId]: clearProjectSettingsOverrides(settings, projectId, ["defaultThreadBranch"]),
+      },
+    });
+    expect(resolveProjectSettings(reset, projectId).settings).toMatchObject({
+      defaultThreadEnvMode: "worktree",
+      defaultThreadBranch: "main",
+    });
+  });
+
   it("inherits every scopable key when the project has no overrides", () => {
     const resolved = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId);
     expect(resolved.settings).toBe(DEFAULT_SERVER_SETTINGS);

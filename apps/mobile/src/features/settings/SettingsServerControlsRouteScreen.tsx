@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { SettingsRow } from "./components/SettingsRow";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput } from "../../components/AppText";
 import {
   type ResponseStreamingMode,
   type ServerSettings,
@@ -36,6 +36,35 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 
+function DefaultBranchField(props: {
+  readonly value: string;
+  readonly mixed: boolean;
+  readonly disabled: boolean;
+  readonly onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    if (!props.disabled) props.onCommit(draft.trim());
+    setDraft(null);
+  };
+  return (
+    <AppTextInput
+      className="min-h-11 w-40 rounded-xl bg-card px-3 text-base text-foreground"
+      value={draft ?? (props.mixed ? "" : props.value)}
+      placeholder={props.mixed ? "Mixed" : "Repository default"}
+      accessibilityLabel="Default branch"
+      autoCapitalize="none"
+      autoCorrect={false}
+      returnKeyType="done"
+      editable={!props.disabled}
+      onChangeText={setDraft}
+      onBlur={commit}
+      onSubmitEditing={commit}
+    />
+  );
+}
+
 type SettingsPage = "new-threads" | "source-control" | "agent-behavior" | "maintenance";
 
 const PAGE_TITLES: Record<SettingsPage, string> = {
@@ -46,7 +75,12 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
 };
 
 const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
-  "new-threads": ["defaultThreadEnvMode", "worktreeSubmodules", "defaultRuntimeMode"],
+  "new-threads": [
+    "defaultThreadEnvMode",
+    "defaultThreadBranch",
+    "worktreeSubmodules",
+    "defaultRuntimeMode",
+  ],
   "source-control": ["defaultAutoPull", "newWorktreesStartFromOrigin"],
   "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess"],
   maintenance: ["continueThreadsAfterServerUpdate"],
@@ -274,6 +308,22 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                         onPress={() => write({ defaultThreadEnvMode: choice.mode })}
                       />
                     ))}
+                  </SettingsSection>
+                  <SettingsSection title="Default branch">
+                    <SettingsControlRow
+                      icon="arrow.triangle.branch"
+                      label="Base branch"
+                      subtitle="For new worktrees. Current checkout keeps its active branch."
+                      disabled={disabledFor("defaultThreadBranch")}
+                    >
+                      <DefaultBranchField
+                        key={`${selectedProject?.label ?? "all"}:${reference?.environment.environmentId ?? "all"}`}
+                        value={uniform("defaultThreadBranch") ?? ""}
+                        mixed={isMixed("defaultThreadBranch")}
+                        disabled={disabledFor("defaultThreadBranch")}
+                        onCommit={(value) => write({ defaultThreadBranch: value })}
+                      />
+                    </SettingsControlRow>
                   </SettingsSection>
                   <SettingsSection
                     title="Worktree submodules"

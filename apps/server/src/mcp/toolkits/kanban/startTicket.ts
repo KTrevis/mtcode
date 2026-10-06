@@ -36,7 +36,14 @@ const isKanbanTicketMoveError = Schema.is(KanbanTicketMoveError);
 export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
   function* (project: OrchestrationProjectShell, card: KanbanCard, instructions?: string) {
     const scope = yield* McpInvocationContext;
-    const baseBranch = card.branch ?? "HEAD";
+    const settingsService = yield* ServerSettingsService;
+    const registry = yield* ProviderRegistry;
+    const settings = resolveProjectSettings(
+      yield* settingsService.getSettings,
+      project.id,
+      project,
+    ).settings;
+    const baseBranch = card.branch ?? (settings.defaultThreadBranch || "HEAD");
     const agentInstructions = instructions?.replace(
       /\$(ticketId|currThreadId|baseBranch)\b/g,
       (placeholder) =>
@@ -46,13 +53,6 @@ export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
             ? scope.threadId
             : baseBranch,
     );
-    const settingsService = yield* ServerSettingsService;
-    const registry = yield* ProviderRegistry;
-    const settings = resolveProjectSettings(
-      yield* settingsService.getSettings,
-      project.id,
-      project,
-    ).settings;
     const providers = yield* registry.getProviders;
     const selectable = providers.filter(
       (provider) => provider.enabled && provider.availability !== "unavailable",
@@ -142,7 +142,7 @@ export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
                 modelSelection,
                 runtimeMode,
                 interactionMode: "default",
-                branch: card.branch ?? null,
+                branch: card.branch ?? (settings.defaultThreadBranch || null),
                 worktreePath: null,
                 createdAt,
               },

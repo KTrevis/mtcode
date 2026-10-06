@@ -317,7 +317,10 @@ export function useNewThreadHandler() {
               return null;
             }
             workspaceContext = {
-              branch: null,
+              branch:
+                defaultEnvMode === "worktree"
+                  ? projectSettings.settings.defaultThreadBranch || null
+                  : null,
               worktreePath: null,
               envMode: defaultEnvMode,
               startFromOrigin: resolveNewDraftStartFromOrigin({
@@ -475,7 +478,12 @@ export function useNewThreadHandler() {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
           createdAt,
-          branch: workspaceOptions?.branch ?? null,
+          branch:
+            workspaceOptions?.branch !== undefined
+              ? workspaceOptions.branch
+              : initialEnvMode === "worktree"
+                ? projectSettings.settings.defaultThreadBranch || null
+                : null,
           worktreePath: workspaceOptions?.worktreePath ?? null,
           envMode: initialEnvMode,
           startFromOrigin:

@@ -1,3 +1,7 @@
+import { useAtomValue } from "@effect/atom-react";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import { environmentServerConfigsAtom } from "../state/server";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -159,6 +163,12 @@ export function BranchToolbarBranchSelector({
   const activeWorktreePath = forceNewWorktree
     ? null
     : (serverThread?.worktreePath ?? draftThread?.worktreePath ?? null);
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const configuredBaseBranch = resolveProjectSettings(
+    serverConfigs.get(environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS,
+    activeProject?.id ?? null,
+    activeProject,
+  ).settings.defaultThreadBranch;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const branchCwd = activeWorktreePath ?? activeProjectCwd;
   const hasServerThread = serverThread !== null;
@@ -509,15 +519,15 @@ export function BranchToolbarBranchSelector({
     });
   };
 
-  // Default the worktree base to the repo default branch (origin/HEAD), only
-  // falling back to the checked-out branch when no default is known.
+  // Use the configured worktree base, then the repository default (origin/HEAD),
+  // then the checked-out branch when neither default is known.
   const defaultBranchName = useMemo(
     () => refs.find((refName) => refName.isDefault)?.name ?? null,
     [refs],
   );
   const worktreeBaseBranchCandidate = isInitialBranchesLoadPending
     ? null
-    : (defaultBranchName ?? currentGitBranch);
+    : configuredBaseBranch || defaultBranchName || currentGitBranch;
 
   useEffect(() => {
     if (

@@ -6,6 +6,7 @@ const testState = vi.hoisted(() => {
   let projectFileRead = Promise.resolve<null>(null);
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree",
+    defaultThreadBranch: "",
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
@@ -62,6 +63,7 @@ const testState = vi.hoisted(() => {
       storedDraft = nextStoredDraft;
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
+        defaultThreadBranch: "",
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
         defaultModelSelection: null,
         defaultRuntimeMode: "full-access",
@@ -285,6 +287,38 @@ describe.each([
       expect.objectContaining({ runtimeMode: "full-access" }),
     );
   });
+  it.each(["local", "worktree"] as const)(
+    "uses the configured base branch only in %s workspaces",
+    async (envMode) => {
+      testState.reset(draft, { envMode, startFromOrigin: false });
+      testState.targetSettings.defaultThreadBranch = "develop";
+      const projectRef = {
+        environmentId: "environment-ssh",
+        projectId: "project-remote",
+      } as never;
+      const opened = await useNewThreadHandler()(projectRef);
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+        "remote-project",
+        projectRef,
+        opened!.draftId,
+        expect.objectContaining({ branch: envMode === "worktree" ? "develop" : null }),
+      );
+    },
+  );
+
+  it("preserves an explicit branch over the configured default", async () => {
+    testState.reset(draft, { envMode: "worktree", startFromOrigin: false });
+    testState.targetSettings.defaultThreadBranch = "develop";
+    const projectRef = { environmentId: "environment-ssh", projectId: "project-remote" } as never;
+    const opened = await useNewThreadHandler()(projectRef, { branch: "release" });
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      projectRef,
+      opened!.draftId,
+      expect.objectContaining({ branch: "release" }),
+    );
+  });
+
   it.each([true, false])(
     "uses the target environment's start-from-origin default of %s",
     async (startFromOrigin) => {

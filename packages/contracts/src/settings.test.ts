@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { ProjectId } from "./baseSchemas.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
@@ -19,6 +20,20 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
+describe("new-thread branch settings", () => {
+  it("defaults to repository detection and trims saved branches", () => {
+    expect(decodeServerSettings({}).defaultThreadBranch).toBe("");
+    expect(decodeServerSettingsPatch({ defaultThreadBranch: " develop " })).toEqual({
+      defaultThreadBranch: "develop",
+    });
+    expect(
+      decodeServerSettings({
+        projectSettingsOverrides: { project: { defaultThreadBranch: " release " } },
+      }).projectSettingsOverrides[ProjectId.make("project")]?.defaultThreadBranch,
+    ).toBe("release");
+  });
+});
 
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {

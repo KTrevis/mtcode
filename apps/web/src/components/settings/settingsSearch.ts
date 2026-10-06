@@ -444,6 +444,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["default workspace mode draft local worktree"],
   },
   {
+    id: "default-thread-branch",
+    title: "Default branch",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["git base branch main master new thread worktree"],
+  },
+  {
     id: "worktree-submodules",
     title: "Submodules",
     to: "/settings/general",

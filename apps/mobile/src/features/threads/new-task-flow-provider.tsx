@@ -463,7 +463,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     projectSettings.sources.defaultThreadEnvMode !== "environment" ||
     !t3ProjectFileQuery.isPending;
   const workspaceMode = selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode;
-  const selectedBranchName = selectedProjectDraft.workspaceSelection?.branch ?? null;
+  const selectedBranchName =
+    selectedProjectDraft.workspaceSelection?.branch ??
+    (workspaceMode === "worktree" ? projectSettings.settings.defaultThreadBranch || null : null);
   const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null;
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
@@ -1030,7 +1032,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           // guess would pin a stale label to a thread that ran somewhere else.
           branch: resolveProjectThreadCreationBranch({
             workspaceMode: mode,
-            selectedBranch: workspaceSelection?.branch ?? null,
+            selectedBranch:
+              workspaceSelection?.branch ??
+              (mode === "worktree" ? projectSettings.settings.defaultThreadBranch || null : null),
             currentCheckoutBranch: options?.currentCheckoutBranch ?? null,
           }),
           worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
