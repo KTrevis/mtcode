@@ -10,6 +10,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { GitCommandError, SourceControlProviderError } from "@t3tools/contracts";
 
+import * as ServerSettings from "../serverSettings.ts";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
@@ -276,6 +277,7 @@ it.effect.each(["--bare", "source.git"])(
               prefix: "t3-clone-options-config-",
             }),
           ),
+          Layer.provide(ServerSettings.layerTest()),
           Layer.provideMerge(NodeServices.layer),
         ),
       ),
