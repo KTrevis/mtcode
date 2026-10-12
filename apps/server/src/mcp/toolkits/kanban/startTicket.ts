@@ -1,3 +1,4 @@
+import { unfinishedKanbanDependencies } from "@t3tools/shared/kanban";
 import {
   AuthOrchestrationOperateScope,
   CommandId,
@@ -35,6 +36,12 @@ const isKanbanTicketMoveError = Schema.is(KanbanTicketMoveError);
 
 export const startTicket = Effect.fn("KanbanToolkit.startTicket")(
   function* (project: OrchestrationProjectShell, card: KanbanCard, instructions?: string) {
+    if (unfinishedKanbanDependencies(card, project.kanbanCards ?? []).length) {
+      return yield* new KanbanTicketMoveError({
+        detail: "Complete ticket dependencies before starting an agent.",
+        cause: null,
+      });
+    }
     const scope = yield* McpInvocationContext;
     const settingsService = yield* ServerSettingsService;
     const registry = yield* ProviderRegistry;

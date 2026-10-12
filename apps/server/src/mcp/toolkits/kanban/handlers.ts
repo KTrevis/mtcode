@@ -31,6 +31,7 @@ const make = Effect.gen(function* () {
       title?: string | undefined;
       description?: string | undefined;
       tagIds?: readonly string[] | undefined;
+      dependsOn?: readonly string[] | undefined;
     },
   ) {
     const scope = yield* requireMcpCapability("kanban");
@@ -48,6 +49,7 @@ const make = Effect.gen(function* () {
         ticketId: input.ticketId,
         ...(type === "project.kanban-ticket.update"
           ? {
+              ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
               ...(input.title !== undefined ? { title: input.title } : {}),
               ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
               ...(input.description !== undefined ? { description: input.description } : {}),

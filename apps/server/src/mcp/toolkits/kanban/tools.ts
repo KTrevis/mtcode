@@ -147,12 +147,13 @@ const TicketMutationParameters = Schema.Struct({
 
 const UpdateTicketTool = Tool.make("kanban_update_ticket", {
   description:
-    "Update a Kanban ticket's title, description and/or tagIds in the specified project on this environment. Requires exact projectId and ticketId. Omitted fields stay unchanged; an empty description clears it and an empty tagIds array removes all tags. Title is limited to 200 characters and description to 4000. Preserves column, images, branch and agent thread. Reuse clientRequestId for retries within this provider session to return the original command receipt.",
+    "Update a Kanban ticket's title, description, tagIds or dependencies in the specified project on this environment. Requires exact projectId and ticketId. dependsOn is a list of ticket IDs in this project; an empty list clears dependencies. Cycles are rejected. Omitted fields stay unchanged; an empty description clears it and an empty tagIds array removes all tags. Title is limited to 200 characters and description to 4000. Preserves column, images, branch and agent thread. Reuse clientRequestId for retries within this provider session to return the original command receipt.",
   parameters: Schema.Struct({
     ...TicketMutationParameters.fields,
     title: Schema.optional(KanbanCard.fields.title),
     description: KanbanCard.fields.description,
     tagIds: KanbanCard.fields.tagIds,
+    dependsOn: KanbanCard.fields.dependsOn,
   }),
   success: KanbanTicketCreateResult,
   failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMutationError]),

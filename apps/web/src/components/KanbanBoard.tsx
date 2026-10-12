@@ -1,3 +1,5 @@
+import { unfinishedKanbanDependencies } from "@t3tools/shared/kanban";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import { Link } from "@tanstack/react-router";
 import {
   DndContext,
@@ -10,6 +12,8 @@ import {
 } from "@dnd-kit/core";
 import type { KanbanCard, KanbanTag } from "@t3tools/contracts";
 import {
+  CheckIcon,
+  LockKeyholeIcon,
   ChevronDownIcon,
   GitBranchIcon,
   ListFilterIcon,
@@ -30,16 +34,7 @@ import {
 import { createPortal } from "react-dom";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Checkbox } from "./ui/checkbox";
-import {
-  Combobox,
-  ComboboxTrigger,
-  ComboboxPopup,
-  ComboboxSearchInput,
-  ComboboxList,
-  ComboboxItem,
-  ComboboxEmpty,
-} from "./ui/combobox";
+import { CheckboxCombobox } from "./ui/checkbox-combobox";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 
@@ -48,6 +43,7 @@ export type KanbanColumn = (typeof KANBAN_COLUMNS)[number];
 
 function Card({
   card,
+  blockers,
   tags,
   environmentId,
   disabled,
@@ -57,6 +53,7 @@ function Card({
   onFocus,
 }: {
   card: KanbanCard;
+  blockers: readonly KanbanCard[];
   tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
@@ -70,6 +67,10 @@ function Card({
     disabled,
   });
 
+  const dependencyStatus = blockers.length
+    ? `Blocked by: ${blockers.map((dependency) => dependency.title).join(", ")}`
+    : "All dependencies are done";
+
   return (
     <div
       ref={setNodeRef}
@@ -80,7 +81,7 @@ function Card({
       data-kanban-card={card.id}
       tabIndex={active ? 0 : -1}
       onFocus={onFocus}
-      aria-label={`${card.title}, ${card.column}`}
+      aria-label={`${card.title}, ${card.column}${card.dependsOn?.length ? `, ${dependencyStatus}` : ""}`}
       onClick={(event) => {
         if (!isDragging) {
           event.currentTarget.focus();
@@ -97,6 +98,32 @@ function Card({
     >
       <div className="min-w-0">
         <span className="break-words">{card.title}</span>
+        {card.dependsOn?.length ? (
+          <div className="mt-1 flex">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={active ? 0 : -1}
+                    role="img"
+                    aria-label={dependencyStatus}
+                    className="inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                {blockers.length ? (
+                  <>
+                    <LockKeyholeIcon aria-hidden="true" className="size-3" />
+                    <span aria-hidden="true">{blockers.length}</span>
+                  </>
+                ) : (
+                  <CheckIcon aria-hidden="true" className="size-3" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup>{dependencyStatus}</TooltipPopup>
+            </Tooltip>
+          </div>
+        ) : null}
         {card.tagIds?.length ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {card.tagIds.map((id) => (
@@ -150,6 +177,7 @@ function Card({
 function ColumnView({
   column,
   cards,
+  allCards,
   tags,
   environmentId,
   disabled,
@@ -161,6 +189,7 @@ function ColumnView({
 }: {
   column: KanbanColumn;
   cards: readonly KanbanCard[];
+  allCards: readonly KanbanCard[];
   tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
@@ -217,6 +246,7 @@ function ColumnView({
           <Card
             key={card.id}
             card={card}
+            blockers={unfinishedKanbanDependencies(card, allCards)}
             tags={tags}
             environmentId={environmentId}
             disabled={disabled}
@@ -275,7 +305,6 @@ export function KanbanBoard({
   const [searchQuery, setSearchQuery] = useState("");
   const query = searchQuery.trim().toLowerCase();
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const filterAnchorRef = useRef<HTMLDivElement>(null);
   const cards = allCards.filter(
     (card) =>
       (!selectedTagIds.length || card.tagIds?.some((id) => selectedTagIds.includes(id))) &&
@@ -483,43 +512,21 @@ export function KanbanBoard({
           role="group"
           aria-label="Filter by tag"
         >
-          <div ref={filterAnchorRef}>
-            <Combobox
-              multiple
-              items={tags}
-              value={tags.filter((tag) => selectedTagIds.includes(tag.id))}
-              onValueChange={(selected) => setSelectedTagIds(selected.map((tag) => tag.id))}
-              itemToStringLabel={(tag: KanbanTag) => tag.name}
-              isItemEqualToValue={(a, b) => a.id === b.id}
-            >
-              <ComboboxTrigger
-                render={<Button size="sm" variant="outline" aria-label="Filter by tags" />}
-              >
+          <CheckboxCombobox
+            items={tags.map((tag) => ({ id: tag.id, label: tag.name }))}
+            selectedIds={selectedTagIds}
+            onChange={setSelectedTagIds}
+            ariaLabel="Filter by tags"
+            searchPlaceholder="Search tags…"
+            emptyMessage="No tags found."
+            triggerLabel={
+              <>
                 <ListFilterIcon className="size-4" />
                 {selectedTagIds.length ? `Tags · ${selectedTagIds.length}` : "All tags"}
                 <ChevronDownIcon className="size-3" />
-              </ComboboxTrigger>
-              <ComboboxPopup anchor={filterAnchorRef}>
-                <ComboboxSearchInput aria-label="Search tags" placeholder="Search tags…" />
-                <ComboboxList>
-                  {(tag: KanbanTag) => (
-                    <ComboboxItem key={tag.id} value={tag}>
-                      <span className="pointer-events-none flex items-center">
-                        <Checkbox
-                          checked={selectedTagIds.includes(tag.id)}
-                          readOnly
-                          tabIndex={-1}
-                          aria-hidden="true"
-                        />
-                      </span>
-                      {tag.name}
-                    </ComboboxItem>
-                  )}
-                </ComboboxList>
-                <ComboboxEmpty>No tags found.</ComboboxEmpty>
-              </ComboboxPopup>
-            </Combobox>
-          </div>
+              </>
+            }
+          />
           {selectedTagIds.length ? (
             <Button
               size="xs"
@@ -601,6 +608,7 @@ export function KanbanBoard({
               column={column}
               tags={tags}
               cards={cards.filter((card) => card.column === column)}
+              allCards={allCards}
               environmentId={environmentId}
               disabled={disabled}
               activeCardId={currentCardId}
