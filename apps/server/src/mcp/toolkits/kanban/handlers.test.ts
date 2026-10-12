@@ -873,3 +873,43 @@ it.effect(
       expect(yield* engine.latestSequence).toBe(after);
     }).pipe(Effect.provide(TestLayer)),
 );
+
+it.effect("updates and clears dependencies through MCP and cleans links on deletion", () =>
+  Effect.gen(function* () {
+    const { call, createTicket, readProject } = yield* makeHarness;
+    const base = yield* createTicket({ projectId: targetProjectId, title: "Base" });
+    const child = yield* createTicket({ projectId: targetProjectId, title: "Child" });
+    const input = { projectId: targetProjectId, ticketId: child.ticketId };
+    expect(
+      (yield* call({ ...input, dependsOn: [base.ticketId] }, invocation, "kanban_update_ticket"))
+        .isError,
+    ).toBe(false);
+    expect(
+      (yield* readProject()).kanbanCards?.find((card) => card.id === child.ticketId)?.dependsOn,
+    ).toEqual([base.ticketId]);
+    expect(
+      (yield* call(
+        { projectId: targetProjectId, ticketId: base.ticketId, dependsOn: [child.ticketId] },
+        invocation,
+        "kanban_update_ticket",
+      )).isError,
+    ).toBe(true);
+    expect(
+      (yield* call({ ...input, dependsOn: [] }, invocation, "kanban_update_ticket")).isError,
+    ).toBe(false);
+    expect(
+      (yield* readProject()).kanbanCards?.find((card) => card.id === child.ticketId)?.dependsOn,
+    ).toEqual([]);
+    yield* call({ ...input, dependsOn: [base.ticketId] }, invocation, "kanban_update_ticket");
+    expect(
+      (yield* call(
+        { projectId: targetProjectId, ticketId: base.ticketId },
+        invocation,
+        "kanban_delete_ticket",
+      )).isError,
+    ).toBe(false);
+    expect((yield* readProject()).kanbanCards).toEqual([
+      { id: child.ticketId, title: "Child", column: "TODO", dependsOn: [] },
+    ]);
+  }).pipe(Effect.provide(TestLayer)),
+);

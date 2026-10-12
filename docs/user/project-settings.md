@@ -152,3 +152,12 @@ its ticket, or use the Kanban icon beside the thread to open that ticket directl
 
 In the ticket details, attach an existing project branch to track the related work. You can
 change or detach it later. This association does not switch the checkout or an agent thread.
+
+In ticket details, select **Depends on** to link tickets from the same project. All linked
+tickets must be **Done** before this ticket can start an agent. Remove a dependency by
+unchecking it; deleting a ticket removes its dependency links. Circular dependencies are prevented.
+
+Switch the Kanban to **Graph** to connect tickets visually. Drag from the right connector of
+prerequisite A to the left connector of ticket B: B now depends on A. Click a ticket title to
+edit it. Select a connection and choose **Remove dependency**, or press Delete, to unlink it.
+Use **Arrange** to restore the dependency layout and the zoom controls to fit the graph.

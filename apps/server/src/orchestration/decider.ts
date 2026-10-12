@@ -1,4 +1,9 @@
 import {
+  kanbanDependencyError,
+  unfinishedKanbanDependencies,
+  removeKanbanCard,
+} from "@t3tools/shared/kanban";
+import {
   buildThreadMessageCorrectionProviderText,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
@@ -479,6 +484,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Kanban card IDs must be unique.",
         });
       }
+      if (command.kanbanCards !== undefined) {
+        const error = kanbanDependencyError(command.kanbanCards);
+        const blockedLaunch = command.kanbanCards.some(
+          (card) =>
+            card.column === "AI" &&
+            project.kanbanCards?.find((previous) => previous.id === card.id)?.column !== "AI" &&
+            unfinishedKanbanDependencies(card, command.kanbanCards!).length > 0,
+        );
+        if (error || blockedLaunch) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error ?? "Complete ticket dependencies before starting an agent.",
+          });
+        }
+      }
       if (
         command.kanbanCards?.some(
           (card) =>
@@ -611,6 +631,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Kanban changed since it was loaded. Refresh and try again.",
         });
       }
+      if (
+        command.column === "AI" &&
+        card.column !== "AI" &&
+        unfinishedKanbanDependencies(card, cards).length
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Complete ticket dependencies before starting an agent.",
+        });
+      }
       if (command.column === "AI" && card.column !== "AI" && !command.agentThreadId) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -673,12 +703,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command.type === "project.kanban-ticket.update" &&
         command.title === undefined &&
         command.description === undefined &&
-        command.tagIds === undefined
+        command.tagIds === undefined &&
+        command.dependsOn === undefined
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Provide a title, description or tags to update.",
+          detail: "Provide a title, description, tags or dependencies to update.",
         });
+      }
+      if (command.type === "project.kanban-ticket.update" && command.dependsOn !== undefined) {
+        const error = kanbanDependencyError(
+          cards.map((card) =>
+            card.id === command.ticketId ? { ...card, dependsOn: command.dependsOn } : card,
+          ),
+        );
+        if (error)
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error,
+          });
       }
       const occurredAt = yield* nowIso;
       return {
@@ -693,11 +736,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           kanbanCards:
             command.type === "project.kanban-ticket.delete"
-              ? cards.filter((card) => card.id !== command.ticketId)
+              ? removeKanbanCard(cards, command.ticketId)
               : cards.map((card) =>
                   card.id === command.ticketId
                     ? {
                         ...card,
+                        ...(command.dependsOn !== undefined
+                          ? { dependsOn: command.dependsOn }
+                          : {}),
                         ...(command.title !== undefined ? { title: command.title } : {}),
                         ...(command.tagIds !== undefined ? { tagIds: command.tagIds } : {}),
                         ...(command.description !== undefined

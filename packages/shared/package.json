@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./kanban": {
+      "types": "./src/kanban.ts",
+      "import": "./src/kanban.ts"
+    },
     "./munimComputerUse": {
       "types": "./src/munimComputerUse.ts",
       "import": "./src/munimComputerUse.ts"

@@ -1,3 +1,8 @@
+import {
+  kanbanDependencyError,
+  unfinishedKanbanDependencies,
+  removeKanbanCard,
+} from "@t3tools/shared/kanban";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -13,8 +18,10 @@ import { runAttachmentUploadCycle } from "@t3tools/client-runtime/state/attachme
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
-import { GitBranchIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { GitBranchIcon, LayoutDashboardIcon, NetworkIcon, Trash2Icon, XIcon } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState, lazy, Suspense } from "react";
+
+import { ToggleGroup, Toggle } from "../components/ui/toggle-group";
 
 import { KanbanTagsEditor } from "../components/KanbanTagsEditor";
 import { KanbanBoard, reorderKanbanCard, type KanbanColumn } from "../components/KanbanBoard";
@@ -55,7 +62,15 @@ import {
 } from "../components/chat/ExpandedImagePreview";
 import { useAssetUrls } from "../assets/assetUrls";
 import { Button } from "../components/ui/button";
+import { CheckboxCombobox } from "../components/ui/checkbox-combobox";
 import { Input } from "../components/ui/input";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectPopup,
+  SelectItem,
+} from "../components/ui/select";
 import { SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
@@ -67,6 +82,10 @@ import {
   WorkspaceBreadcrumbText,
 } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+
+const KanbanGraph = lazy(() =>
+  import("../components/KanbanGraph").then((module) => ({ default: module.KanbanGraph })),
+);
 
 function CardBranchPicker({
   environmentId,
@@ -164,6 +183,7 @@ function CardBranchPicker({
 
 function CardDetails({
   card,
+  cards,
   environmentId,
   workspaceRoot,
   availableTags,
@@ -174,8 +194,13 @@ function CardDetails({
   onCancelClose,
   onSave,
   onAddImage,
+  onOpenDependency,
+  moving,
+  onMove,
+  onDelete,
 }: {
   card: KanbanCard;
+  cards: readonly KanbanCard[];
   environmentId: EnvironmentId;
   workspaceRoot: string;
   availableTags: readonly KanbanTag[];
@@ -191,9 +216,16 @@ function CardDetails({
     branch: string | null,
     tagIds: readonly string[],
     tags: readonly KanbanTag[],
+    dependsOn: readonly string[],
   ) => Promise<boolean>;
   onAddImage: (file: File) => Promise<KanbanImage | null>;
+  onOpenDependency: (id: string) => void;
+  moving: boolean;
+  onMove: (column: KanbanColumn) => Promise<boolean>;
+  onDelete: () => Promise<void>;
 }) {
+  const [dependsOn, setDependsOn] = useState(card.dependsOn ?? []);
+  const dependencyCandidates = cards.filter((candidate) => candidate.id !== card.id);
   const [title, setTitle] = useState(card.title);
   const [tagIds, setTagIds] = useState<readonly string[]>(card.tagIds ?? []);
   const [addedTags, setAddedTags] = useState<readonly KanbanTag[]>([]);
@@ -225,6 +257,7 @@ function CardDetails({
   const changed =
     tags.length !== availableTags.length ||
     JSON.stringify(tagIds) !== JSON.stringify(card.tagIds ?? []) ||
+    JSON.stringify(dependsOn) !== JSON.stringify(card.dependsOn ?? []) ||
     branch !== (card.branch ?? null) ||
     title.trim() !== card.title ||
     description !== (card.description ?? "") ||
@@ -237,6 +270,7 @@ function CardDetails({
     description,
     branch,
     images.map((image) => image.id),
+    dependsOn,
   ]);
   const imageResources = useMemo<AssetResource[]>(
     () =>
@@ -266,12 +300,14 @@ function CardDetails({
     }
     const timer = setTimeout(
       () => {
-        void onSave(title.trim(), description, images, branch, tagIds, tags).then((saved) => {
-          if (!saved) {
-            setFailedDraftKey(draftKey);
-            if (closeRequested) onCancelClose();
-          }
-        });
+        void onSave(title.trim(), description, images, branch, tagIds, tags, dependsOn).then(
+          (saved) => {
+            if (!saved) {
+              setFailedDraftKey(draftKey);
+              if (closeRequested) onCancelClose();
+            }
+          },
+        );
       },
       closeRequested ? 0 : 600,
     );
@@ -286,6 +322,7 @@ function CardDetails({
     title,
     description,
     branch,
+    dependsOn,
     images,
     draftKey,
     failedDraftKey,
@@ -328,12 +365,15 @@ function CardDetails({
       .finally(() => setUploading(false));
   };
 
-  const removeImage = useCallback((id: string) => {
-    setDescription((current) =>
-      current.replace(new RegExp(`!\\[[^\\]]*\\]\\(kanban-image:${id}\\)`, "g"), ""),
-    );
-    setRemovedImageIds((current) => [...current, id]);
-  }, []);
+  const removeImage = useCallback(
+    (id: string) => {
+      setDescription((current) =>
+        current.replace(new RegExp(`!\\[[^\\]]*\\]\\(kanban-image:${id}\\)`, "g"), ""),
+      );
+      setRemovedImageIds((current) => [...current, id]);
+    },
+    [setDescription, setRemovedImageIds],
+  );
 
   const openImage = (id: string) => {
     const available = images.flatMap((image, index) => {
@@ -393,12 +433,73 @@ function CardDetails({
             );
           }}
         />
+        <div className="flex flex-col gap-2">
+          <label htmlFor="kanban-card-column" className="text-sm font-medium">
+            Column
+          </label>
+          <Select<KanbanColumn>
+            value={card.column}
+            disabled={saving || changed || uploading || closeRequested || moving}
+            onValueChange={(column) => {
+              if (column && column !== card.column) void onMove(column);
+            }}
+          >
+            <SelectTrigger id="kanban-card-column" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {(["TODO", "AI", "Done"] as const).map((column) => (
+                <SelectItem key={column} value={column}>
+                  {column}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          {moving ? <span className="text-xs text-muted-foreground">Starting agent…</span> : null}
+        </div>
         <CardBranchPicker
           environmentId={environmentId}
           workspaceRoot={workspaceRoot}
           branch={branch}
           onChange={setBranch}
         />
+        <section className="flex flex-col gap-2" aria-label="Ticket dependencies">
+          <h3 className="text-sm font-medium">Depends on</h3>
+          <p className="text-xs text-muted-foreground">
+            These tickets must be Done before starting an agent.
+          </p>
+          <CheckboxCombobox
+            items={dependencyCandidates.map((candidate) => {
+              const wouldCycle =
+                !dependsOn.includes(candidate.id) &&
+                kanbanDependencyError(
+                  cards.map((item) =>
+                    item.id === card.id
+                      ? { ...item, dependsOn: [...dependsOn, candidate.id] }
+                      : item,
+                  ),
+                ) !== null;
+              return {
+                id: candidate.id,
+                label: candidate.title,
+                disabled: wouldCycle,
+                description: wouldCycle ? "Would create a cycle" : candidate.column,
+              };
+            })}
+            selectedIds={dependsOn}
+            onChange={setDependsOn}
+            triggerLabel={`Select dependencies${dependsOn.length ? ` (${dependsOn.length})` : ""}`}
+            ariaLabel="Select ticket dependencies"
+            searchPlaceholder="Search dependencies"
+            emptyMessage={
+              dependencyCandidates.length
+                ? "No tickets found."
+                : "Add another ticket to link a dependency."
+            }
+            onOpenItem={onOpenDependency}
+            openingDisabled={uploading || closeRequested}
+          />
+        </section>
         <div className="flex flex-col gap-3">
           <label htmlFor="kanban-card-description" className="text-sm font-medium">
             Description
@@ -473,6 +574,18 @@ function CardDetails({
           ) : null}
         </div>
       </div>
+      <div className="flex shrink-0 justify-start border-t px-6 py-3">
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive-outline"
+          disabled={saving || uploading || moving || closeRequested}
+          onClick={() => void onDelete()}
+        >
+          <Trash2Icon className="size-3.5" />
+          Delete ticket
+        </Button>
+      </div>
       {saving || changed ? (
         <div className="flex items-center justify-between border-t px-6 py-3 text-xs text-muted-foreground">
           <span>
@@ -526,6 +639,8 @@ function KanbanPage() {
   } | null>(null);
   const [launchingCardId, setLaunchingCardId] = useState<string | null>(null);
   const [closeRequested, setCloseRequested] = useState(false);
+  const [nextCardId, setNextCardId] = useState<string | null>(null);
+  const [view, setView] = useState<"board" | "graph">("board");
   const saving =
     pending !== null &&
     project !== undefined &&
@@ -636,6 +751,17 @@ function KanbanPage() {
       return save(reorderKanbanCard(cards, id, column, index));
     }
 
+    const blockers = unfinishedKanbanDependencies(card, cards);
+    if (blockers.length) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Ticket blocked",
+          description: `Complete first: ${blockers.map((dependency) => dependency.title).join(", ")}`,
+        }),
+      );
+      return false;
+    }
     const config = serverConfigs.get(project.environmentId);
     const settings =
       config && resolveProjectSettings(config.settings, project.id, project).settings;
@@ -736,6 +862,16 @@ function KanbanPage() {
     return moved;
   };
 
+  const openCard = (id: string) => {
+    if (selectedCard && selectedCard.id !== id) {
+      setNextCardId(id);
+      setCloseRequested(true);
+    } else {
+      setCloseRequested(false);
+      void navigate({ search: { cardId: id } });
+    }
+  };
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <WorkspacePageHeader electron={isElectron} className="relative bg-background">
@@ -764,58 +900,116 @@ function KanbanPage() {
             <WorkspaceBreadcrumbText>Kanban</WorkspaceBreadcrumbText>
           </WorkspaceBreadcrumbItem>
         </WorkspaceBreadcrumb>
+        <div>
+          <ToggleGroup
+            aria-label="Ticket view"
+            value={[view]}
+            onValueChange={(next) => {
+              if (next[0] === "board" || next[0] === "graph") setView(next[0]);
+            }}
+          >
+            <Toggle value="board">
+              <LayoutDashboardIcon className="size-3.5" />
+              Board
+            </Toggle>
+            <Toggle value="graph">
+              <NetworkIcon className="size-3.5" />
+              Graph
+            </Toggle>
+          </ToggleGroup>
+        </div>
       </WorkspacePageHeader>
       <main className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-6">
-        <KanbanBoard
-          key={`${environmentId}:${projectId}`}
-          cards={cards.map((card) =>
-            card.id === launchingCardId ? { ...card, column: "AI" as const } : card,
-          )}
-          tags={projectTags}
-          environmentId={environmentId}
-          disabled={saving || launchingCardId !== null || !project}
-          detailsOpen={selectedCard !== undefined}
-          onAdd={async (title, column, tagIds) => {
-            const id = randomUUID();
-            const saved = await save([
-              ...cards,
-              { id, title, column, ...(tagIds?.length ? { tagIds } : {}) },
-            ]);
-            if (saved) {
-              setCloseRequested(false);
-              void navigate({ search: { cardId: id } });
-            }
-            return saved;
-          }}
-          onOpen={(id) => {
-            setCloseRequested(false);
-            void navigate({ search: { cardId: id } });
-          }}
-          onDelete={(id) => void save(cards.filter((card) => card.id !== id))}
-          onMove={move}
-        />
+        {view === "graph" ? (
+          <Suspense fallback={<p className="text-sm text-muted-foreground">Loading graph…</p>}>
+            <KanbanGraph
+              key={`${environmentId}:${projectId}`}
+              cards={cards}
+              selectedCardId={cardId}
+              disabled={saving || launchingCardId !== null || !project}
+              onOpen={openCard}
+              onChange={save}
+              onAdd={async (title) => {
+                const id = randomUUID();
+                const saved = await save([...cards, { id, title, column: "TODO" }]);
+                if (saved) openCard(id);
+                return saved;
+              }}
+            />
+          </Suspense>
+        ) : (
+          <KanbanBoard
+            key={`${environmentId}:${projectId}`}
+            cards={cards.map((card) =>
+              card.id === launchingCardId ? { ...card, column: "AI" as const } : card,
+            )}
+            tags={projectTags}
+            environmentId={environmentId}
+            disabled={saving || launchingCardId !== null || !project}
+            detailsOpen={selectedCard !== undefined}
+            onAdd={async (title, column, tagIds) => {
+              const id = randomUUID();
+              const saved = await save([
+                ...cards,
+                { id, title, column, ...(tagIds?.length ? { tagIds } : {}) },
+              ]);
+              if (saved) {
+                setCloseRequested(false);
+                void navigate({ search: { cardId: id } });
+              }
+              return saved;
+            }}
+            onOpen={openCard}
+            onDelete={(id) => void save(removeKanbanCard(cards, id))}
+            onMove={move}
+          />
+        )}
       </main>
       <RightPanelSheet
         open={selectedCard !== undefined}
-        onClose={() => setCloseRequested(true)}
+        onClose={() => {
+          setNextCardId(null);
+          setCloseRequested(true);
+        }}
         animationDurationMs={200}
       >
         {selectedCard ? (
           <CardDetails
             key={selectedCard.id}
             card={selectedCard}
+            cards={cards}
             environmentId={project!.environmentId}
             workspaceRoot={project!.workspaceRoot}
             availableTags={projectTags}
             saving={saving}
-            closeRequested={closeRequested}
-            onRequestClose={() => setCloseRequested(true)}
-            onClosed={() => {
-              void navigate({ search: {}, replace: true });
-              setCloseRequested(false);
+            moving={launchingCardId !== null}
+            onMove={(column) => move(selectedCard.id, column)}
+            onDelete={async () => {
+              if (await save(removeKanbanCard(cards, selectedCard.id))) {
+                setNextCardId(null);
+                setCloseRequested(false);
+                void navigate({ search: {}, replace: true });
+              }
             }}
-            onCancelClose={() => setCloseRequested(false)}
-            onSave={(title, description, images, branch, tagIds, tags) =>
+            closeRequested={closeRequested}
+            onRequestClose={() => {
+              setNextCardId(null);
+              setCloseRequested(true);
+            }}
+            onClosed={() => {
+              void navigate({ search: nextCardId ? { cardId: nextCardId } : {}, replace: true });
+              setCloseRequested(false);
+              setNextCardId(null);
+            }}
+            onCancelClose={() => {
+              setCloseRequested(false);
+              setNextCardId(null);
+            }}
+            onOpenDependency={(id) => {
+              setNextCardId(id);
+              setCloseRequested(true);
+            }}
+            onSave={(title, description, images, branch, tagIds, tags, dependsOn) =>
               save(
                 cards.map((card) =>
                   card.id === selectedCard.id
@@ -826,6 +1020,7 @@ function KanbanPage() {
                         images: [...images],
                         branch,
                         tagIds: [...tagIds],
+                        dependsOn: [...dependsOn],
                       }
                     : card,
                 ),

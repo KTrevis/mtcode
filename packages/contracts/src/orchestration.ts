@@ -521,6 +521,7 @@ export const KanbanCard = Schema.Struct({
   description: Schema.optional(Schema.String.check(Schema.isMaxLength(4_000))),
   images: Schema.optional(Schema.Array(KanbanImage).check(Schema.isMaxLength(10))),
   tagIds: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(10))),
+  dependsOn: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(199))),
   agentThreadId: Schema.optional(ThreadId),
   column: Schema.Literals(["TODO", "AI", "Done"]),
 });
@@ -1269,6 +1270,7 @@ const ProjectKanbanTicketUpdateCommand = Schema.Struct({
   title: Schema.optional(KanbanCard.fields.title),
   description: KanbanCard.fields.description,
   tagIds: KanbanCard.fields.tagIds,
+  dependsOn: KanbanCard.fields.dependsOn,
 });
 
 const ProjectKanbanTicketDeleteCommand = Schema.Struct({

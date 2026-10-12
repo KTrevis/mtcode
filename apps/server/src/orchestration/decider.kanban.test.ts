@@ -117,6 +117,125 @@ it.layer(NodeServices.layer)("project Kanban", (it) => {
       );
       expect(cleared.projects[0]?.kanbanCards).toEqual([{ ...cards[0]!, tagIds: [] }]);
 
+      const dependencyCards = [
+        { id: "base", title: "Base", column: "TODO" as const },
+        { id: "child", title: "Child", column: "TODO" as const, dependsOn: ["base"] },
+      ];
+      const dependencyEvent = yield* decideOrchestrationCommand({
+        readModel: updated,
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.make("dependencies"),
+          projectId,
+          kanbanCards: dependencyCards,
+          kanbanExpectedUpdatedAt: updated.projects[0]!.updatedAt,
+        },
+      });
+      const linked = yield* projectEvent(
+        updated,
+        Array.isArray(dependencyEvent) ? dependencyEvent[0]! : dependencyEvent,
+      );
+      expect(linked.projects[0]!.kanbanCards).toEqual(dependencyCards);
+      for (const dependsOn of [["child"], ["missing"], ["base", "base"]]) {
+        const invalid = yield* Effect.result(
+          decideOrchestrationCommand({
+            readModel: linked,
+            command: {
+              type: "project.kanban-ticket.update",
+              commandId: CommandId.make("invalid-dependency"),
+              projectId,
+              ticketId: "child",
+              dependsOn,
+            },
+          }),
+        );
+        expect(invalid._tag).toBe("Failure");
+      }
+      const cycle = yield* Effect.result(
+        decideOrchestrationCommand({
+          readModel: linked,
+          command: {
+            type: "project.kanban-ticket.update",
+            commandId: CommandId.make("cycle"),
+            projectId,
+            ticketId: "base",
+            dependsOn: ["child"],
+          },
+        }),
+      );
+      expect(cycle._tag).toBe("Failure");
+      const blocked = yield* Effect.result(
+        decideOrchestrationCommand({
+          readModel: linked,
+          command: {
+            type: "project.kanban-ticket.move",
+            commandId: CommandId.make("blocked"),
+            projectId,
+            ticketId: "child",
+            column: "AI",
+            agentThreadId: "agent" as never,
+          },
+        }),
+      );
+      expect(blocked._tag).toBe("Failure");
+      const blockedBulk = yield* Effect.result(
+        decideOrchestrationCommand({
+          readModel: linked,
+          command: {
+            type: "project.meta.update",
+            commandId: CommandId.make("blocked-bulk"),
+            projectId,
+            kanbanCards: dependencyCards.map((card) =>
+              card.id === "child" ? { ...card, column: "AI" as const } : card,
+            ),
+            kanbanExpectedUpdatedAt: linked.projects[0]!.updatedAt,
+          },
+        }),
+      );
+      expect(blockedBulk._tag).toBe("Failure");
+      const doneEvent = yield* decideOrchestrationCommand({
+        readModel: linked,
+        command: {
+          type: "project.kanban-ticket.move",
+          commandId: CommandId.make("done"),
+          projectId,
+          ticketId: "base",
+          column: "Done",
+        },
+      });
+      const done = yield* projectEvent(
+        linked,
+        Array.isArray(doneEvent) ? doneEvent[0]! : doneEvent,
+      );
+      const ready = yield* Effect.result(
+        decideOrchestrationCommand({
+          readModel: done,
+          command: {
+            type: "project.kanban-ticket.move",
+            commandId: CommandId.make("ready"),
+            projectId,
+            ticketId: "child",
+            column: "AI",
+            agentThreadId: "agent" as never,
+          },
+        }),
+      );
+      expect(ready._tag).toBe("Success");
+      const deletedEvent = yield* decideOrchestrationCommand({
+        readModel: linked,
+        command: {
+          type: "project.kanban-ticket.delete",
+          commandId: CommandId.make("delete-base"),
+          projectId,
+          ticketId: "base",
+        },
+      });
+      const deleted = yield* projectEvent(
+        linked,
+        Array.isArray(deletedEvent) ? deletedEvent[0]! : deletedEvent,
+      );
+      expect(deleted.projects[0]!.kanbanCards).toEqual([{ ...dependencyCards[1], dependsOn: [] }]);
+
       const stale = yield* Effect.result(
         decideOrchestrationCommand({
           readModel: updated,
