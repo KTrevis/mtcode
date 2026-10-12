@@ -411,6 +411,7 @@ export function projectEvent(
             projectIcon: payload.projectIcon ?? null,
             scripts: payload.scripts,
             kanbanCards: [],
+            kanbanTags: [],
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -456,6 +457,7 @@ export function projectEvent(
                   ...(payload.kanbanCards !== undefined
                     ? { kanbanCards: payload.kanbanCards }
                     : {}),
+                  ...(payload.kanbanTags !== undefined ? { kanbanTags: payload.kanbanTags } : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,

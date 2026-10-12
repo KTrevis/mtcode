@@ -9,6 +9,7 @@
 import {
   IsoDateTime,
   KanbanCard,
+  KanbanTag,
   ModelSelection,
   ProjectIconOverride,
   ProjectId,
@@ -33,6 +34,7 @@ export const ProjectionProject = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
   kanbanCards: Schema.Array(KanbanCard),
+  kanbanTags: Schema.optional(Schema.Array(KanbanTag)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

@@ -8,8 +8,16 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { KanbanCard } from "@t3tools/contracts";
-import { GitBranchIcon, MessageSquareIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import type { KanbanCard, KanbanTag } from "@t3tools/contracts";
+import {
+  ChevronDownIcon,
+  GitBranchIcon,
+  ListFilterIcon,
+  MessageSquareIcon,
+  PlusIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -22,6 +30,16 @@ import {
 import { createPortal } from "react-dom";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
+import {
+  Combobox,
+  ComboboxTrigger,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxList,
+  ComboboxItem,
+  ComboboxEmpty,
+} from "./ui/combobox";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 
@@ -30,6 +48,7 @@ export type KanbanColumn = (typeof KANBAN_COLUMNS)[number];
 
 function Card({
   card,
+  tags,
   environmentId,
   disabled,
   onOpen,
@@ -38,6 +57,7 @@ function Card({
   onFocus,
 }: {
   card: KanbanCard;
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
   onOpen: (id: string) => void;
@@ -77,6 +97,18 @@ function Card({
     >
       <div className="min-w-0">
         <span className="break-words">{card.title}</span>
+        {card.tagIds?.length ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {card.tagIds.map((id) => (
+              <span
+                key={id}
+                className="max-w-full truncate rounded bg-accent px-1.5 py-0.5 text-xs text-muted-foreground"
+              >
+                {tags.find((tag) => tag.id === id)?.name ?? id}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {card.branch ? (
           <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
             <GitBranchIcon className="size-3 shrink-0" />
@@ -118,6 +150,7 @@ function Card({
 function ColumnView({
   column,
   cards,
+  tags,
   environmentId,
   disabled,
   onAdd,
@@ -128,9 +161,10 @@ function ColumnView({
 }: {
   column: KanbanColumn;
   cards: readonly KanbanCard[];
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
-  onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
+  onAdd: (title: string, column: KanbanColumn, tagIds?: string[]) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   activeCardId: string | null;
@@ -183,6 +217,7 @@ function ColumnView({
           <Card
             key={card.id}
             card={card}
+            tags={tags}
             environmentId={environmentId}
             disabled={disabled}
             onOpen={onOpen}
@@ -217,7 +252,8 @@ export function reorderKanbanCard(
 }
 
 export function KanbanBoard({
-  cards,
+  cards: allCards,
+  tags,
   environmentId,
   disabled,
   detailsOpen = false,
@@ -227,9 +263,10 @@ export function KanbanBoard({
   onMove,
 }: {
   cards: readonly KanbanCard[];
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
-  onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
+  onAdd: (title: string, column: KanbanColumn, tagIds?: string[]) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   detailsOpen?: boolean;
@@ -237,13 +274,16 @@ export function KanbanBoard({
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const query = searchQuery.trim().toLowerCase();
-  const visibleCards = query
-    ? cards.filter((card) =>
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const filterAnchorRef = useRef<HTMLDivElement>(null);
+  const cards = allCards.filter(
+    (card) =>
+      (!selectedTagIds.length || card.tagIds?.some((id) => selectedTagIds.includes(id))) &&
+      (!query ||
         [card.title, card.description, card.branch].some((text) =>
           text?.toLowerCase().includes(query),
-        ),
-      )
-    : cards;
+        )),
+  );
   const boardRef = useRef<HTMLDivElement>(null);
   const movingCardId = useRef<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -251,9 +291,9 @@ export function KanbanBoard({
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const draggedCard = cards.find((card) => card.id === draggedCardId);
-  const currentCardId = visibleCards.some((card) => card.id === activeCardId)
+  const currentCardId = cards.some((card) => card.id === activeCardId)
     ? activeCardId
-    : (visibleCards[0]?.id ?? null);
+    : (cards[0]?.id ?? null);
 
   const cardElement = (id: string) =>
     Array.from(boardRef.current?.querySelectorAll<HTMLElement>("[data-kanban-card]") ?? []).find(
@@ -343,7 +383,7 @@ export function KanbanBoard({
     const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
     const card = cards.find((candidate) => candidate.id === focusedCardId);
     const column = card?.column ?? activeColumn;
-    const siblings = visibleCards.filter((candidate) => candidate.column === column);
+    const siblings = cards.filter((candidate) => candidate.column === column);
     const index = siblings.findIndex((candidate) => candidate.id === card?.id);
     const destination = horizontal
       ? KANBAN_COLUMNS[KANBAN_COLUMNS.indexOf(column) + direction]
@@ -359,12 +399,20 @@ export function KanbanBoard({
       )
         return;
       movingCardId.current = card.id;
-      const moveIndex = horizontal
-        ? Math.max(0, index)
-        : cards
-            .filter((candidate) => candidate.column === column)
-            .findIndex((candidate) => candidate.id === siblings[index + direction]?.id);
-      void onMove(card.id, destination, moveIndex).then((moved) => {
+      const visibleIndex = horizontal ? Math.max(0, index) : index + direction;
+      const before = cards.filter(
+        (candidate) => candidate.id !== card.id && candidate.column === destination,
+      )[visibleIndex];
+      const remaining = allCards.filter(
+        (candidate) => candidate.id !== card.id && candidate.column === destination,
+      );
+      const destinationIndex =
+        query || selectedTagIds.length
+          ? before
+            ? remaining.findIndex((candidate) => candidate.id === before.id)
+            : remaining.length
+          : visibleIndex;
+      void onMove(card.id, destination, destinationIndex).then((moved) => {
         if (!moved) movingCardId.current = null;
       });
       return;
@@ -396,54 +444,115 @@ export function KanbanBoard({
   };
 
   return (
-    <DndContext
-      sensors={sensors}
-      accessibility={{
-        screenReaderInstructions: {
-          draggable:
-            "Use arrow keys to navigate tickets, Enter to open, Shift and arrow keys to move, and N to add a ticket.",
-        },
-      }}
-      onDragStart={({ active }) => setDraggedCardId(String(active.id))}
-      onDragEnd={({ active, over }) => {
-        setDraggedCardId(null);
-        if (over && KANBAN_COLUMNS.includes(over.id as KanbanColumn))
-          void onMove(String(active.id), over.id as KanbanColumn);
-      }}
-      onDragCancel={() => setDraggedCardId(null)}
-    >
-      <div className="flex h-full min-h-0 flex-col gap-4">
-        <div className="flex w-full max-w-sm shrink-0 items-center gap-1">
-          <Input
-            nativeInput
-            type="search"
-            aria-label="Search tickets"
-            placeholder="Search tickets…"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.stopPropagation();
-                setSearchQuery("");
-              }
-            }}
-          />
-          {searchQuery ? (
-            <Button
-              variant="ghost-muted"
-              size="icon-sm"
-              aria-label="Clear ticket search"
-              onClick={() => setSearchQuery("")}
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex w-full max-w-sm shrink-0 items-center gap-1">
+        <Input
+          nativeInput
+          type="search"
+          aria-label="Search tickets"
+          placeholder="Search tickets…"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              setSearchQuery("");
+            }
+          }}
+        />
+        {searchQuery ? (
+          <Button
+            variant="ghost-muted"
+            size="icon-sm"
+            aria-label="Clear ticket search"
+            onClick={() => setSearchQuery("")}
+          >
+            <XIcon className="size-4" />
+          </Button>
+        ) : null}
+      </div>
+      {query && cards.length === 0 ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          No tickets match your search.
+        </p>
+      ) : null}
+
+      {tags.length > 0 || selectedTagIds.length > 0 ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Filter by tag"
+        >
+          <div ref={filterAnchorRef}>
+            <Combobox
+              multiple
+              items={tags}
+              value={tags.filter((tag) => selectedTagIds.includes(tag.id))}
+              onValueChange={(selected) => setSelectedTagIds(selected.map((tag) => tag.id))}
+              itemToStringLabel={(tag: KanbanTag) => tag.name}
+              isItemEqualToValue={(a, b) => a.id === b.id}
             >
-              <XIcon className="size-4" />
+              <ComboboxTrigger
+                render={<Button size="sm" variant="outline" aria-label="Filter by tags" />}
+              >
+                <ListFilterIcon className="size-4" />
+                {selectedTagIds.length ? `Tags · ${selectedTagIds.length}` : "All tags"}
+                <ChevronDownIcon className="size-3" />
+              </ComboboxTrigger>
+              <ComboboxPopup anchor={filterAnchorRef}>
+                <ComboboxSearchInput aria-label="Search tags" placeholder="Search tags…" />
+                <ComboboxList>
+                  {(tag: KanbanTag) => (
+                    <ComboboxItem key={tag.id} value={tag}>
+                      <span className="pointer-events-none flex items-center">
+                        <Checkbox
+                          checked={selectedTagIds.includes(tag.id)}
+                          readOnly
+                          tabIndex={-1}
+                          aria-hidden="true"
+                        />
+                      </span>
+                      {tag.name}
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+                <ComboboxEmpty>No tags found.</ComboboxEmpty>
+              </ComboboxPopup>
+            </Combobox>
+          </div>
+          {selectedTagIds.length ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-label="Clear tag filter"
+              onClick={() => setSelectedTagIds([])}
+            >
+              Clear
             </Button>
           ) : null}
         </div>
-        {query && visibleCards.length === 0 ? (
-          <p role="status" className="text-sm text-muted-foreground">
-            No tickets match your search.
-          </p>
-        ) : null}
+      ) : null}
+      {!query && selectedTagIds.length > 0 && cards.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No tickets with these tags. Choose other tags or clear the filter.
+        </p>
+      ) : null}
+      <DndContext
+        sensors={sensors}
+        accessibility={{
+          screenReaderInstructions: {
+            draggable:
+              "Use arrow keys to navigate tickets, Enter to open, Shift and arrow keys to move, and N to add a ticket.",
+          },
+        }}
+        onDragStart={({ active }) => setDraggedCardId(String(active.id))}
+        onDragEnd={({ active, over }) => {
+          setDraggedCardId(null);
+          if (over && KANBAN_COLUMNS.includes(over.id as KanbanColumn))
+            void onMove(String(active.id), over.id as KanbanColumn);
+        }}
+        onDragCancel={() => setDraggedCardId(null)}
+      >
         <div
           ref={boardRef}
           role="group"
@@ -462,10 +571,10 @@ export function KanbanBoard({
             const column = target.closest<HTMLElement>("[data-kanban-column]")?.dataset
               .kanbanColumn as KanbanColumn | undefined;
             const card =
-              visibleCards.find(
+              cards.find(
                 (candidate) =>
                   candidate.id === currentCardId && (!column || candidate.column === column),
-              ) ?? visibleCards.find((candidate) => !column || candidate.column === column);
+              ) ?? cards.find((candidate) => !column || candidate.column === column);
             if (card) focusCard(card.id);
             else focusColumn(column ?? activeColumn);
             event.preventDefault();
@@ -490,28 +599,35 @@ export function KanbanBoard({
             <ColumnView
               key={column}
               column={column}
-              cards={visibleCards.filter((card) => card.column === column)}
+              tags={tags}
+              cards={cards.filter((card) => card.column === column)}
               environmentId={environmentId}
               disabled={disabled}
               activeCardId={currentCardId}
               onCardFocus={setActiveCardId}
-              onAdd={onAdd}
+              onAdd={(title, column) =>
+                onAdd(
+                  title,
+                  column,
+                  selectedTagIds.length ? selectedTagIds.slice(0, 10) : undefined,
+                )
+              }
               onOpen={onOpen}
               onDelete={onDelete}
             />
           ))}
         </div>
-      </div>
-      {createPortal(
-        <DragOverlay zIndex={100}>
-          {draggedCard ? (
-            <div className="w-full cursor-grabbing rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
-              <span className="break-words">{draggedCard.title}</span>
-            </div>
-          ) : null}
-        </DragOverlay>,
-        document.body,
-      )}
-    </DndContext>
+        {createPortal(
+          <DragOverlay zIndex={100}>
+            {draggedCard ? (
+              <div className="w-full cursor-grabbing rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
+                <span className="break-words">{draggedCard.title}</span>
+              </div>
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
+      </DndContext>
+    </div>
   );
 }

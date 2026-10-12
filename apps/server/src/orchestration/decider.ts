@@ -448,6 +448,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           }
         }
       }
+      const tags = command.kanbanTags ?? project.kanbanTags ?? [];
+      if (
+        new Set(tags.map((tag) => tag.id)).size !== tags.length ||
+        new Set(tags.map((tag) => tag.name.toLowerCase())).size !== tags.length
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Kanban tag IDs and names must be unique.",
+        });
+      }
+      if (
+        (command.kanbanCards ?? project.kanbanCards ?? []).some(
+          (card) =>
+            (card.tagIds ?? []).some((id) => !tags.some((tag) => tag.id === id)) ||
+            new Set(card.tagIds ?? []).size !== (card.tagIds?.length ?? 0),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Tickets must reference existing tags without duplicates.",
+        });
+      }
       if (
         command.kanbanCards !== undefined &&
         new Set(command.kanbanCards.map((card) => card.id)).size !== command.kanbanCards.length
@@ -470,7 +492,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (
-        command.kanbanCards !== undefined &&
+        (command.kanbanCards !== undefined || command.kanbanTags !== undefined) &&
         command.kanbanExpectedUpdatedAt !== project.updatedAt
       ) {
         return yield* new OrchestrationCommandInvariantError({
@@ -510,6 +532,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.projectIcon !== undefined ? { projectIcon: command.projectIcon } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           ...(command.kanbanCards !== undefined ? { kanbanCards: command.kanbanCards } : {}),
+          ...(command.kanbanTags !== undefined ? { kanbanTags: command.kanbanTags } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -521,6 +544,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "Cannot create tickets in a deleted project.",
+        });
+      }
+      if (
+        command.tagIds &&
+        (new Set(command.tagIds).size !== command.tagIds.length ||
+          command.tagIds.some((id) => !(project.kanbanTags ?? []).some((tag) => tag.id === id)))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Tickets must reference existing tags without duplicates.",
         });
       }
       const cards = project.kanbanCards ?? [];
@@ -550,6 +583,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               id: command.ticketId,
               title: command.title,
               ...(command.description !== undefined ? { description: command.description } : {}),
+              ...(command.tagIds !== undefined ? { tagIds: command.tagIds } : {}),
               column: "TODO",
             },
           ],
@@ -617,6 +651,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Cannot modify tickets in a deleted project.",
         });
       }
+      if (
+        command.type === "project.kanban-ticket.update" &&
+        command.tagIds &&
+        (new Set(command.tagIds).size !== command.tagIds.length ||
+          command.tagIds.some((id) => !(project.kanbanTags ?? []).some((tag) => tag.id === id)))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Tickets must reference existing tags without duplicates.",
+        });
+      }
       const cards = project.kanbanCards ?? [];
       if (!cards.some((card) => card.id === command.ticketId)) {
         return yield* new OrchestrationCommandInvariantError({
@@ -627,11 +672,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (
         command.type === "project.kanban-ticket.update" &&
         command.title === undefined &&
-        command.description === undefined
+        command.description === undefined &&
+        command.tagIds === undefined
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Provide a title or description to update.",
+          detail: "Provide a title, description or tags to update.",
         });
       }
       const occurredAt = yield* nowIso;
@@ -653,6 +699,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                     ? {
                         ...card,
                         ...(command.title !== undefined ? { title: command.title } : {}),
+                        ...(command.tagIds !== undefined ? { tagIds: command.tagIds } : {}),
                         ...(command.description !== undefined
                           ? { description: command.description }
                           : {}),

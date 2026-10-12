@@ -73,7 +73,9 @@ it.effect("reads project shells without loading threads or resolving excluded pr
       ('p1', 'First', '/first', '[]', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
       ('p2', 'Second', '/second', '[]', '2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z', NULL),
       ('p3', 'Deleted', '/deleted', '[]', '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z', '2026-09-04T00:00:00Z')`;
+    yield* sql`UPDATE projection_projects SET kanban_tags_json = '[{"id":"tag-ux","name":"UX"}]' WHERE project_id = 'p1'`;
     const expected = (yield* query.getShellSnapshot()).projects;
+    assert.deepStrictEqual(expected[0]?.kanbanTags, [{ id: "tag-ux", name: "UX" }]);
     resolved.length = 0;
     yield* sql`INSERT INTO projection_threads
       (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
