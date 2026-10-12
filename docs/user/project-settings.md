@@ -130,6 +130,11 @@ existing destination folders are never overwritten, and subsequent changes do no
 
 ## Project Kanban
 
+Choose an existing tag or create one in a ticket’s details to group related work. Tags belong to the
+project and remain available after removing them from a ticket. Open the tag filter above the board and check the tags to keep visible. Tickets matching any checked
+tag appear; uncheck all tags or clear the filter to show every ticket. Tickets created while filtering
+inherit the selected tags (up to 10).
+
 On web and desktop, choose **Open Kanban boards** in the command palette to see every project's
 board, or open a project's menu in the sidebar and choose **Kanban**. Each project has its own
 board with **TODO**, **AI**, and **Done** columns. Add a card under a column, drag it to

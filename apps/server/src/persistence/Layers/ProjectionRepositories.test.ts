@@ -36,13 +36,14 @@ const projectionRepositoriesLayer = it.layer(
 );
 
 projectionRepositoriesLayer("Projection repositories", (it) => {
-  it.effect("persists Kanban cards with their columns", () =>
+  it.effect("persists Kanban cards with their columns and tag catalog", () =>
     Effect.gen(function* () {
       const projects = yield* ProjectionProjectRepository;
       const projectId = ProjectId.make("project-kanban-cards");
       const card = {
         id: "card-1",
         title: "Review change",
+        tagIds: ["tag-review"],
         branch: "feature/kanban",
         description: "![Screenshot](kanban-image:image-1)",
         column: "AI" as const,
@@ -69,6 +70,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         autoPull: false,
         scripts: [],
         kanbanCards: [card],
+        kanbanTags: [{ id: "tag-review", name: "Review" }],
         createdAt: "2026-09-29T00:00:00.000Z",
         updatedAt: "2026-09-29T00:00:00.000Z",
         deletedAt: null,
@@ -76,6 +78,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
       const persisted = yield* projects.getById({ projectId });
       assert.deepStrictEqual(Option.getOrThrow(persisted).kanbanCards, [card]);
+      assert.deepStrictEqual(Option.getOrThrow(persisted).kanbanTags, [
+        { id: "tag-review", name: "Review" },
+      ]);
       yield* projects.upsert({
         ...Option.getOrThrow(persisted),
         kanbanCards: [{ ...card, branch: null }],

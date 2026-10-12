@@ -1,6 +1,7 @@
 import {
   CommandId,
   KanbanCard,
+  KanbanTag,
   McpCapabilityUnavailableError,
   NonNegativeInt,
   ProjectId,
@@ -48,9 +49,13 @@ export class KanbanTicketListError extends Schema.TaggedError<KanbanTicketListEr
 
 const ListTicketsTool = Tool.make("kanban_list_tickets", {
   description:
-    "Read all Kanban tickets in board order from an active project on this environment. Omit projectId to use the calling thread's project. Returns projectId and tickets with their IDs, titles, descriptions, columns, images, branches, and linked agent thread IDs when present. An empty board returns an empty tickets array. Does not move tickets or start agents.",
+    "Read all Kanban tickets in board order from an active project on this environment. Omit projectId to use the calling thread's project. Returns projectId and tickets with their IDs, titles, descriptions, columns, tagIds, images, branches, and linked agent thread IDs when present. Also returns the project tag catalog as tags with stable IDs and names. An empty board returns an empty tickets array. Does not move tickets or start agents.",
   parameters: Schema.Struct({ projectId: Schema.optional(ProjectId) }),
-  success: Schema.Struct({ projectId: ProjectId, tickets: Schema.Array(KanbanCard) }),
+  success: Schema.Struct({
+    projectId: ProjectId,
+    tickets: Schema.Array(KanbanCard),
+    tags: Schema.Array(KanbanTag),
+  }),
   failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketListError]),
   dependencies: [McpInvocationContext, ProjectionSnapshotQuery],
 })
@@ -62,11 +67,12 @@ const ListTicketsTool = Tool.make("kanban_list_tickets", {
 
 const CreateTicketTool = Tool.make("kanban_create_ticket", {
   description:
-    "Create a Kanban ticket in the specified project on this environment. Requires the project's exact projectId, a title (maximum 200 characters), and optionally a description (maximum 4000 characters). Appends to TODO without starting an agent. Boards support at most 200 tickets. Reuse clientRequestId for retries within this provider session to avoid duplicate tickets; retries return the original ticket ID and command receipt.",
+    "Create a Kanban ticket in the specified project on this environment. Requires the project's exact projectId, a title (maximum 200 characters), and optionally a description (maximum 4000 characters) and tagIds (up to 10 IDs from the project tag catalog returned by kanban_list_tickets). Appends to TODO without starting an agent. Boards support at most 200 tickets. Reuse clientRequestId for retries within this provider session to avoid duplicate tickets; retries return the original ticket ID and command receipt.",
   parameters: Schema.Struct({
     projectId: ProjectId,
     title: KanbanCard.fields.title,
     description: KanbanCard.fields.description,
+    tagIds: KanbanCard.fields.tagIds,
     clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
   }),
   success: KanbanTicketCreateResult,
@@ -141,11 +147,12 @@ const TicketMutationParameters = Schema.Struct({
 
 const UpdateTicketTool = Tool.make("kanban_update_ticket", {
   description:
-    "Update a Kanban ticket's title and/or description in the specified project on this environment. Requires exact projectId and ticketId. Omitted fields stay unchanged; an empty description clears it. Title is limited to 200 characters and description to 4000. Preserves column, images, branch and agent thread. Reuse clientRequestId for retries within this provider session to return the original command receipt.",
+    "Update a Kanban ticket's title, description and/or tagIds in the specified project on this environment. Requires exact projectId and ticketId. Omitted fields stay unchanged; an empty description clears it and an empty tagIds array removes all tags. Title is limited to 200 characters and description to 4000. Preserves column, images, branch and agent thread. Reuse clientRequestId for retries within this provider session to return the original command receipt.",
   parameters: Schema.Struct({
     ...TicketMutationParameters.fields,
     title: Schema.optional(KanbanCard.fields.title),
     description: KanbanCard.fields.description,
+    tagIds: KanbanCard.fields.tagIds,
   }),
   success: KanbanTicketCreateResult,
   failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMutationError]),

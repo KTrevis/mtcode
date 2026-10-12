@@ -33,6 +33,10 @@ function Harness({
       <button>Before board</button>
       <KanbanBoard
         cards={cards}
+        tags={[
+          { id: "bug-id", name: "bug" },
+          { id: "feature-id", name: "feature" },
+        ]}
         environmentId="remote"
         disabled={boardDisabled}
         detailsOpen={selected !== null}
@@ -253,4 +257,86 @@ it("does not recover board focus while ticket details or other controls own inpu
   expect((await press("ArrowDown")).defaultPrevented).toBe(false);
   await focus(input("TODO"));
   expect((await press("ArrowDown")).defaultPrevented).toBe(false);
+});
+
+it("filters tickets and navigates only visible cards while preserving hidden order", async () => {
+  await act(async () =>
+    root.render(
+      <Harness
+        key="tagged"
+        initial={[
+          { ...initialCards[0]!, tagIds: ["bug-id"] },
+          initialCards[1]!,
+          { id: "e", title: "Fifth", column: "TODO", tagIds: ["bug-id"] },
+          { ...initialCards[2]!, tagIds: ["feature-id"] },
+        ]}
+      />,
+    ),
+  );
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Filter by tags"]')!.click(),
+  );
+  const option = (name: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
+      (element) => element.textContent === name,
+    )!;
+  await act(async () => option("bug").click());
+  expect(card("b")).toBeNull();
+  expect(card("c")).toBeNull();
+  await press("Escape");
+  await focus(board());
+  expect(document.activeElement).toBe(card("a"));
+  await press("ArrowDown");
+  expect(document.activeElement).toBe(card("e"));
+  await press("ArrowUp", { shiftKey: true });
+  expect(onMove).toHaveBeenLastCalledWith("e", "TODO", 0);
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Clear tag filter"]')!.click(),
+  );
+  expect(
+    Array.from(
+      container.querySelectorAll('[data-kanban-column="TODO"] [data-kanban-card]'),
+      (element) => (element as HTMLElement).dataset.kanbanCard,
+    ),
+  ).toEqual(["e", "a", "b"]);
+});
+
+it("keeps tickets matching any checked tag and restores all tickets when unchecked", async () => {
+  await act(async () =>
+    root.render(
+      <Harness
+        key="multi-tags"
+        initial={[
+          { ...initialCards[0]!, tagIds: ["bug-id", "feature-id"] },
+          { ...initialCards[1]!, tagIds: ["bug-id"] },
+          { ...initialCards[2]!, tagIds: ["feature-id"] },
+          initialCards[3]!,
+        ]}
+      />,
+    ),
+  );
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Filter by tags"]')!.click(),
+  );
+  const option = (name: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
+      (element) => element.textContent === name,
+    )!;
+  await act(async () => option("bug").click());
+  expect(card("a")).not.toBeNull();
+  expect(card("b")).not.toBeNull();
+  expect(card("c")).toBeNull();
+  expect(card("d")).toBeNull();
+  expect(option("bug").getAttribute("aria-selected")).toBe("true");
+  await act(async () => option("feature").click());
+  expect(card("c")).not.toBeNull();
+  expect(container.querySelectorAll('[data-kanban-card="a"]')).toHaveLength(1);
+  expect(card("d")).toBeNull();
+  await act(async () => option("bug").click());
+  expect(card("a")).not.toBeNull();
+  expect(card("b")).toBeNull();
+  expect(card("c")).not.toBeNull();
+  await act(async () => option("feature").click());
+  expect(card("d")).not.toBeNull();
+  expect(container.querySelector('[aria-label="Clear tag filter"]')).toBeNull();
 });

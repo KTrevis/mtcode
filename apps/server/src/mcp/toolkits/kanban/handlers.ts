@@ -30,6 +30,7 @@ const make = Effect.gen(function* () {
       clientRequestId?: string | undefined;
       title?: string | undefined;
       description?: string | undefined;
+      tagIds?: readonly string[] | undefined;
     },
   ) {
     const scope = yield* requireMcpCapability("kanban");
@@ -48,6 +49,7 @@ const make = Effect.gen(function* () {
         ...(type === "project.kanban-ticket.update"
           ? {
               ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
               ...(input.description !== undefined ? { description: input.description } : {}),
             }
           : {}),
@@ -85,7 +87,11 @@ const make = Effect.gen(function* () {
           cause: null,
         });
       }
-      return { projectId, tickets: project.value.kanbanCards ?? [] };
+      return {
+        projectId,
+        tickets: project.value.kanbanCards ?? [],
+        tags: project.value.kanbanTags ?? [],
+      };
     }),
     kanban_update_ticket: (input) => mutateTicket("project.kanban-ticket.update", input),
     kanban_delete_ticket: (input) => mutateTicket("project.kanban-ticket.delete", input),
@@ -178,6 +184,7 @@ const make = Effect.gen(function* () {
           ticketId,
           title: input.title,
           ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
         })
         .pipe(
           Effect.mapError((cause) => new KanbanTicketCreateError({ detail: cause.message, cause })),

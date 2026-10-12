@@ -285,10 +285,14 @@ it.effect(
         "kanban_list_tickets",
       );
       expect(explicit.isError).toBe(false);
-      expect(explicit.structuredContent).toEqual({ projectId: targetProjectId, tickets: cards });
+      expect(explicit.structuredContent).toEqual({
+        projectId: targetProjectId,
+        tickets: cards,
+        tags: [],
+      });
       const implicit = yield* call({}, invocation, "kanban_list_tickets");
       expect(implicit.isError).toBe(false);
-      expect(implicit.structuredContent).toEqual({ projectId, tickets: [] });
+      expect(implicit.structuredContent).toEqual({ projectId, tickets: [], tags: [] });
       expect(yield* engine.latestSequence).toBe(before);
     }).pipe(Effect.provide(TestLayer)),
 );

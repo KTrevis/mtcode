@@ -5,6 +5,7 @@ import {
   type AssetResource,
   type EnvironmentId,
   type KanbanCard,
+  type KanbanTag,
   type KanbanImage,
 } from "@t3tools/contracts";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
@@ -15,6 +16,7 @@ import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { GitBranchIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 
+import { KanbanTagsEditor } from "../components/KanbanTagsEditor";
 import { KanbanBoard, reorderKanbanCard, type KanbanColumn } from "../components/KanbanBoard";
 
 import { isElectron } from "../env";
@@ -164,6 +166,7 @@ function CardDetails({
   card,
   environmentId,
   workspaceRoot,
+  availableTags,
   saving,
   closeRequested,
   onRequestClose,
@@ -175,6 +178,7 @@ function CardDetails({
   card: KanbanCard;
   environmentId: EnvironmentId;
   workspaceRoot: string;
+  availableTags: readonly KanbanTag[];
   saving: boolean;
   closeRequested: boolean;
   onRequestClose: () => void;
@@ -185,10 +189,21 @@ function CardDetails({
     description: string,
     images: readonly KanbanImage[],
     branch: string | null,
+    tagIds: readonly string[],
+    tags: readonly KanbanTag[],
   ) => Promise<boolean>;
   onAddImage: (file: File) => Promise<KanbanImage | null>;
 }) {
   const [title, setTitle] = useState(card.title);
+  const [tagIds, setTagIds] = useState<readonly string[]>(card.tagIds ?? []);
+  const [addedTags, setAddedTags] = useState<readonly KanbanTag[]>([]);
+  const tags = useMemo(
+    () => [
+      ...availableTags,
+      ...addedTags.filter((tag) => !availableTags.some((existing) => existing.id === tag.id)),
+    ],
+    [availableTags, addedTags],
+  );
   const [branch, setBranch] = useState(card.branch ?? null);
   const [description, setDescription] = useState(card.description ?? "");
   const [uploading, setUploading] = useState(false);
@@ -208,6 +223,8 @@ function CardDetails({
     [card.images, addedImages, removedImageIds],
   );
   const changed =
+    tags.length !== availableTags.length ||
+    JSON.stringify(tagIds) !== JSON.stringify(card.tagIds ?? []) ||
     branch !== (card.branch ?? null) ||
     title.trim() !== card.title ||
     description !== (card.description ?? "") ||
@@ -215,6 +232,8 @@ function CardDetails({
     images.some((image, index) => image.id !== card.images?.[index]?.id);
   const draftKey = JSON.stringify([
     title.trim(),
+    tagIds,
+    tags,
     description,
     branch,
     images.map((image) => image.id),
@@ -247,7 +266,7 @@ function CardDetails({
     }
     const timer = setTimeout(
       () => {
-        void onSave(title.trim(), description, images, branch).then((saved) => {
+        void onSave(title.trim(), description, images, branch, tagIds, tags).then((saved) => {
           if (!saved) {
             setFailedDraftKey(draftKey);
             if (closeRequested) onCancelClose();
@@ -261,6 +280,8 @@ function CardDetails({
     saving,
     uploading,
     changed,
+    tagIds,
+    tags,
     closeRequested,
     title,
     description,
@@ -362,6 +383,16 @@ function CardDetails({
             onChange={(event) => setTitle(event.target.value)}
           />
         </label>
+        <KanbanTagsEditor
+          tagIds={tagIds}
+          tags={tags}
+          onChange={(ids, nextTags) => {
+            setTagIds(ids);
+            setAddedTags(
+              nextTags.filter((tag) => !availableTags.some((existing) => existing.id === tag.id)),
+            );
+          }}
+        />
         <CardBranchPicker
           environmentId={environmentId}
           workspaceRoot={workspaceRoot}
@@ -490,6 +521,7 @@ function KanbanPage() {
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const [pending, setPending] = useState<{
     cards: readonly KanbanCard[];
+    tags: readonly KanbanTag[];
     baseUpdatedAt: string;
   } | null>(null);
   const [launchingCardId, setLaunchingCardId] = useState<string | null>(null);
@@ -498,18 +530,24 @@ function KanbanPage() {
     pending !== null &&
     project !== undefined &&
     project.updatedAt === pending.baseUpdatedAt &&
-    JSON.stringify(project.kanbanCards ?? []) !== JSON.stringify(pending.cards);
+    (JSON.stringify(project.kanbanCards ?? []) !== JSON.stringify(pending.cards) ||
+      JSON.stringify(project.kanbanTags ?? []) !== JSON.stringify(pending.tags));
   const cards = saving ? pending.cards : (project?.kanbanCards ?? []);
+  const projectTags = saving ? pending.tags : (project?.kanbanTags ?? []);
   const selectedCard = cards.find((card) => card.id === cardId);
 
-  const save = async (next: readonly KanbanCard[]) => {
+  const save = async (
+    next: readonly KanbanCard[],
+    tags: readonly KanbanTag[] = project?.kanbanTags ?? [],
+  ) => {
     if (!project || saving) return false;
-    setPending({ cards: next, baseUpdatedAt: project.updatedAt });
+    setPending({ cards: next, tags, baseUpdatedAt: project.updatedAt });
     const result = await updateProject({
       environmentId: project.environmentId,
       input: {
         projectId: project.id,
         kanbanCards: [...next],
+        kanbanTags: [...tags],
         kanbanExpectedUpdatedAt: project.updatedAt,
       },
     });
@@ -733,12 +771,16 @@ function KanbanPage() {
           cards={cards.map((card) =>
             card.id === launchingCardId ? { ...card, column: "AI" as const } : card,
           )}
+          tags={projectTags}
           environmentId={environmentId}
           disabled={saving || launchingCardId !== null || !project}
           detailsOpen={selectedCard !== undefined}
-          onAdd={async (title, column) => {
+          onAdd={async (title, column, tagIds) => {
             const id = randomUUID();
-            const saved = await save([...cards, { id, title, column }]);
+            const saved = await save([
+              ...cards,
+              { id, title, column, ...(tagIds?.length ? { tagIds } : {}) },
+            ]);
             if (saved) {
               setCloseRequested(false);
               void navigate({ search: { cardId: id } });
@@ -764,6 +806,7 @@ function KanbanPage() {
             card={selectedCard}
             environmentId={project!.environmentId}
             workspaceRoot={project!.workspaceRoot}
+            availableTags={projectTags}
             saving={saving}
             closeRequested={closeRequested}
             onRequestClose={() => setCloseRequested(true)}
@@ -772,13 +815,21 @@ function KanbanPage() {
               setCloseRequested(false);
             }}
             onCancelClose={() => setCloseRequested(false)}
-            onSave={(title, description, images, branch) =>
+            onSave={(title, description, images, branch, tagIds, tags) =>
               save(
                 cards.map((card) =>
                   card.id === selectedCard.id
-                    ? { ...card, title, description, images: [...images], branch }
+                    ? {
+                        ...card,
+                        title,
+                        description,
+                        images: [...images],
+                        branch,
+                        tagIds: [...tagIds],
+                      }
                     : card,
                 ),
+                tags,
               )
             }
             onAddImage={addImage}

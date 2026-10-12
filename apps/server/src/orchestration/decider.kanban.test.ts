@@ -36,6 +36,7 @@ it.layer(NodeServices.layer)("project Kanban", (it) => {
         {
           id: "card-1",
           title: "Ship it",
+          tagIds: ["bug", "frontend"],
           description: "![Screenshot](kanban-image:image-1)",
           column: "AI" as const,
           agentThreadId: "agent-thread-1" as never,
@@ -60,11 +61,61 @@ it.layer(NodeServices.layer)("project Kanban", (it) => {
           commandId: CommandId.make("kanban-update"),
           projectId,
           kanbanCards: cards,
+          kanbanTags: [
+            { id: "bug", name: "Bug" },
+            { id: "frontend", name: "Frontend" },
+            { id: "release", name: "Release" },
+          ],
           kanbanExpectedUpdatedAt: now,
         },
       });
       const updated = yield* projectEvent(model, Array.isArray(event) ? event[0]! : event);
       expect(updated.projects[0]?.kanbanCards).toEqual(cards);
+      expect(updated.projects[0]?.kanbanTags).toHaveLength(3);
+      const invalid = yield* Effect.result(
+        decideOrchestrationCommand({
+          readModel: updated,
+          command: {
+            type: "project.kanban-ticket.update",
+            commandId: CommandId.make("invalid-tag"),
+            projectId,
+            ticketId: "card-1",
+            tagIds: ["unknown"],
+          },
+        }),
+      );
+      expect(invalid._tag).toBe("Failure");
+
+      const retaggedEvent = yield* decideOrchestrationCommand({
+        readModel: updated,
+        command: {
+          type: "project.kanban-ticket.update",
+          commandId: CommandId.make("kanban-retag"),
+          projectId,
+          ticketId: "card-1",
+          tagIds: ["release"],
+        },
+      });
+      const retagged = yield* projectEvent(
+        updated,
+        Array.isArray(retaggedEvent) ? retaggedEvent[0]! : retaggedEvent,
+      );
+      expect(retagged.projects[0]?.kanbanCards).toEqual([{ ...cards[0]!, tagIds: ["release"] }]);
+      const clearedEvent = yield* decideOrchestrationCommand({
+        readModel: retagged,
+        command: {
+          type: "project.kanban-ticket.update",
+          commandId: CommandId.make("kanban-clear-tags"),
+          projectId,
+          ticketId: "card-1",
+          tagIds: [],
+        },
+      });
+      const cleared = yield* projectEvent(
+        retagged,
+        Array.isArray(clearedEvent) ? clearedEvent[0]! : clearedEvent,
+      );
+      expect(cleared.projects[0]?.kanbanCards).toEqual([{ ...cards[0]!, tagIds: [] }]);
 
       const stale = yield* Effect.result(
         decideOrchestrationCommand({

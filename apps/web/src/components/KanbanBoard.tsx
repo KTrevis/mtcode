@@ -8,8 +8,15 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { KanbanCard } from "@t3tools/contracts";
-import { GitBranchIcon, MessageSquareIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import type { KanbanCard, KanbanTag } from "@t3tools/contracts";
+import {
+  ChevronDownIcon,
+  GitBranchIcon,
+  ListFilterIcon,
+  MessageSquareIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -22,6 +29,16 @@ import {
 import { createPortal } from "react-dom";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
+import {
+  Combobox,
+  ComboboxTrigger,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxList,
+  ComboboxItem,
+  ComboboxEmpty,
+} from "./ui/combobox";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 
@@ -30,6 +47,7 @@ export type KanbanColumn = (typeof KANBAN_COLUMNS)[number];
 
 function Card({
   card,
+  tags,
   environmentId,
   disabled,
   onOpen,
@@ -38,6 +56,7 @@ function Card({
   onFocus,
 }: {
   card: KanbanCard;
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
   onOpen: (id: string) => void;
@@ -77,6 +96,18 @@ function Card({
     >
       <div className="min-w-0">
         <span className="break-words">{card.title}</span>
+        {card.tagIds?.length ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {card.tagIds.map((id) => (
+              <span
+                key={id}
+                className="max-w-full truncate rounded bg-accent px-1.5 py-0.5 text-xs text-muted-foreground"
+              >
+                {tags.find((tag) => tag.id === id)?.name ?? id}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {card.branch ? (
           <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
             <GitBranchIcon className="size-3 shrink-0" />
@@ -118,6 +149,7 @@ function Card({
 function ColumnView({
   column,
   cards,
+  tags,
   environmentId,
   disabled,
   onAdd,
@@ -128,9 +160,10 @@ function ColumnView({
 }: {
   column: KanbanColumn;
   cards: readonly KanbanCard[];
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
-  onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
+  onAdd: (title: string, column: KanbanColumn, tagIds?: string[]) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   activeCardId: string | null;
@@ -183,6 +216,7 @@ function ColumnView({
           <Card
             key={card.id}
             card={card}
+            tags={tags}
             environmentId={environmentId}
             disabled={disabled}
             onOpen={onOpen}
@@ -217,7 +251,8 @@ export function reorderKanbanCard(
 }
 
 export function KanbanBoard({
-  cards,
+  cards: allCards,
+  tags,
   environmentId,
   disabled,
   detailsOpen = false,
@@ -227,14 +262,20 @@ export function KanbanBoard({
   onMove,
 }: {
   cards: readonly KanbanCard[];
+  tags: readonly KanbanTag[];
   environmentId: string;
   disabled: boolean;
-  onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
+  onAdd: (title: string, column: KanbanColumn, tagIds?: string[]) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   detailsOpen?: boolean;
   onMove: (id: string, column: KanbanColumn, index?: number) => Promise<boolean>;
 }) {
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const filterAnchorRef = useRef<HTMLDivElement>(null);
+  const cards = selectedTagIds.length
+    ? allCards.filter((card) => card.tagIds?.some((id) => selectedTagIds.includes(id)))
+    : allCards;
   const boardRef = useRef<HTMLDivElement>(null);
   const movingCardId = useRef<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -350,11 +391,21 @@ export function KanbanBoard({
       )
         return;
       movingCardId.current = card.id;
-      void onMove(card.id, destination, horizontal ? Math.max(0, index) : index + direction).then(
-        (moved) => {
-          if (!moved) movingCardId.current = null;
-        },
+      const visibleIndex = horizontal ? Math.max(0, index) : index + direction;
+      const before = cards.filter(
+        (candidate) => candidate.id !== card.id && candidate.column === destination,
+      )[visibleIndex];
+      const remaining = allCards.filter(
+        (candidate) => candidate.id !== card.id && candidate.column === destination,
       );
+      const destinationIndex = selectedTagIds.length
+        ? before
+          ? remaining.findIndex((candidate) => candidate.id === before.id)
+          : remaining.length
+        : visibleIndex;
+      void onMove(card.id, destination, destinationIndex).then((moved) => {
+        if (!moved) movingCardId.current = null;
+      });
       return;
     }
     if (!horizontal) {
@@ -384,89 +435,158 @@ export function KanbanBoard({
   };
 
   return (
-    <DndContext
-      sensors={sensors}
-      accessibility={{
-        screenReaderInstructions: {
-          draggable:
-            "Use arrow keys to navigate tickets, Enter to open, Shift and arrow keys to move, and N to add a ticket.",
-        },
-      }}
-      onDragStart={({ active }) => setDraggedCardId(String(active.id))}
-      onDragEnd={({ active, over }) => {
-        setDraggedCardId(null);
-        if (over && KANBAN_COLUMNS.includes(over.id as KanbanColumn))
-          void onMove(String(active.id), over.id as KanbanColumn);
-      }}
-      onDragCancel={() => setDraggedCardId(null)}
-    >
-      <div
-        ref={boardRef}
-        role="group"
-        aria-label="Kanban board"
-        tabIndex={0}
-        className="flex h-full min-h-0 gap-4 outline-none"
-        onKeyDown={handleKeyDown}
-        onPointerDown={(event) => {
-          const target = event.target as HTMLElement;
-          if (
-            target.closest(
-              "[data-kanban-card], button, a, input, textarea, select, [contenteditable]",
-            )
-          )
-            return;
-          const column = target.closest<HTMLElement>("[data-kanban-column]")?.dataset
-            .kanbanColumn as KanbanColumn | undefined;
-          const card =
-            cards.find(
-              (candidate) =>
-                candidate.id === currentCardId && (!column || candidate.column === column),
-            ) ?? cards.find((candidate) => !column || candidate.column === column);
-          if (card) focusCard(card.id);
-          else focusColumn(column ?? activeColumn);
-          event.preventDefault();
-        }}
-        onFocusCapture={(event) => {
-          const section = (event.target as HTMLElement).closest<HTMLElement>(
-            "[data-kanban-column]",
-          );
-          if (section) setActiveColumn(section.dataset.kanbanColumn as KanbanColumn);
-        }}
-        onFocus={(event) => {
-          if (
-            event.target !== event.currentTarget ||
-            event.currentTarget.contains(event.relatedTarget as Node | null)
-          )
-            return;
-          if (currentCardId) focusCard(currentCardId);
-          else focusColumn(activeColumn);
-        }}
-      >
-        {KANBAN_COLUMNS.map((column) => (
-          <ColumnView
-            key={column}
-            column={column}
-            cards={cards.filter((card) => card.column === column)}
-            environmentId={environmentId}
-            disabled={disabled}
-            activeCardId={currentCardId}
-            onCardFocus={setActiveCardId}
-            onAdd={onAdd}
-            onOpen={onOpen}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
-      {createPortal(
-        <DragOverlay zIndex={100}>
-          {draggedCard ? (
-            <div className="w-full cursor-grabbing rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
-              <span className="break-words">{draggedCard.title}</span>
-            </div>
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {tags.length > 0 || selectedTagIds.length > 0 ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Filter by tag"
+        >
+          <div ref={filterAnchorRef}>
+            <Combobox
+              multiple
+              items={tags}
+              value={tags.filter((tag) => selectedTagIds.includes(tag.id))}
+              onValueChange={(selected) => setSelectedTagIds(selected.map((tag) => tag.id))}
+              itemToStringLabel={(tag: KanbanTag) => tag.name}
+              isItemEqualToValue={(a, b) => a.id === b.id}
+            >
+              <ComboboxTrigger
+                render={<Button size="sm" variant="outline" aria-label="Filter by tags" />}
+              >
+                <ListFilterIcon className="size-4" />
+                {selectedTagIds.length ? `Tags · ${selectedTagIds.length}` : "All tags"}
+                <ChevronDownIcon className="size-3" />
+              </ComboboxTrigger>
+              <ComboboxPopup anchor={filterAnchorRef}>
+                <ComboboxSearchInput aria-label="Search tags" placeholder="Search tags…" />
+                <ComboboxList>
+                  {(tag: KanbanTag) => (
+                    <ComboboxItem key={tag.id} value={tag}>
+                      <span className="pointer-events-none flex items-center">
+                        <Checkbox
+                          checked={selectedTagIds.includes(tag.id)}
+                          readOnly
+                          tabIndex={-1}
+                          aria-hidden="true"
+                        />
+                      </span>
+                      {tag.name}
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+                <ComboboxEmpty>No tags found.</ComboboxEmpty>
+              </ComboboxPopup>
+            </Combobox>
+          </div>
+          {selectedTagIds.length ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-label="Clear tag filter"
+              onClick={() => setSelectedTagIds([])}
+            >
+              Clear
+            </Button>
           ) : null}
-        </DragOverlay>,
-        document.body,
-      )}
-    </DndContext>
+        </div>
+      ) : null}
+      {selectedTagIds.length > 0 && cards.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No tickets with these tags. Choose other tags or clear the filter.
+        </p>
+      ) : null}
+      <DndContext
+        sensors={sensors}
+        accessibility={{
+          screenReaderInstructions: {
+            draggable:
+              "Use arrow keys to navigate tickets, Enter to open, Shift and arrow keys to move, and N to add a ticket.",
+          },
+        }}
+        onDragStart={({ active }) => setDraggedCardId(String(active.id))}
+        onDragEnd={({ active, over }) => {
+          setDraggedCardId(null);
+          if (over && KANBAN_COLUMNS.includes(over.id as KanbanColumn))
+            void onMove(String(active.id), over.id as KanbanColumn);
+        }}
+        onDragCancel={() => setDraggedCardId(null)}
+      >
+        <div
+          ref={boardRef}
+          role="group"
+          aria-label="Kanban board"
+          tabIndex={0}
+          className="flex min-h-0 flex-1 gap-4 outline-none"
+          onKeyDown={handleKeyDown}
+          onPointerDown={(event) => {
+            const target = event.target as HTMLElement;
+            if (
+              target.closest(
+                "[data-kanban-card], button, a, input, textarea, select, [contenteditable]",
+              )
+            )
+              return;
+            const column = target.closest<HTMLElement>("[data-kanban-column]")?.dataset
+              .kanbanColumn as KanbanColumn | undefined;
+            const card =
+              cards.find(
+                (candidate) =>
+                  candidate.id === currentCardId && (!column || candidate.column === column),
+              ) ?? cards.find((candidate) => !column || candidate.column === column);
+            if (card) focusCard(card.id);
+            else focusColumn(column ?? activeColumn);
+            event.preventDefault();
+          }}
+          onFocusCapture={(event) => {
+            const section = (event.target as HTMLElement).closest<HTMLElement>(
+              "[data-kanban-column]",
+            );
+            if (section) setActiveColumn(section.dataset.kanbanColumn as KanbanColumn);
+          }}
+          onFocus={(event) => {
+            if (
+              event.target !== event.currentTarget ||
+              event.currentTarget.contains(event.relatedTarget as Node | null)
+            )
+              return;
+            if (currentCardId) focusCard(currentCardId);
+            else focusColumn(activeColumn);
+          }}
+        >
+          {KANBAN_COLUMNS.map((column) => (
+            <ColumnView
+              key={column}
+              column={column}
+              tags={tags}
+              cards={cards.filter((card) => card.column === column)}
+              environmentId={environmentId}
+              disabled={disabled}
+              activeCardId={currentCardId}
+              onCardFocus={setActiveCardId}
+              onAdd={(title, column) =>
+                onAdd(
+                  title,
+                  column,
+                  selectedTagIds.length ? selectedTagIds.slice(0, 10) : undefined,
+                )
+              }
+              onOpen={onOpen}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+        {createPortal(
+          <DragOverlay zIndex={100}>
+            {draggedCard ? (
+              <div className="w-full cursor-grabbing rounded-lg bg-muted px-2 py-2 text-sm shadow-lg">
+                <span className="break-words">{draggedCard.title}</span>
+              </div>
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
+      </DndContext>
+    </div>
   );
 }

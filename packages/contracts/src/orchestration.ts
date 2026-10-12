@@ -507,12 +507,20 @@ export const KanbanImage = Schema.Struct({
 });
 export type KanbanImage = typeof KanbanImage.Type;
 
+export const KanbanTag = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+});
+export type KanbanTag = typeof KanbanTag.Type;
+const KanbanTags = Schema.Array(KanbanTag).check(Schema.isMaxLength(200));
+
 export const KanbanCard = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   id: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   description: Schema.optional(Schema.String.check(Schema.isMaxLength(4_000))),
   images: Schema.optional(Schema.Array(KanbanImage).check(Schema.isMaxLength(10))),
+  tagIds: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(10))),
   agentThreadId: Schema.optional(ThreadId),
   column: Schema.Literals(["TODO", "AI", "Done"]),
 });
@@ -537,6 +545,7 @@ export const OrchestrationProject = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
   kanbanCards: Schema.optional(KanbanCards),
+  kanbanTags: Schema.optional(KanbanTags),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -981,6 +990,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
   kanbanCards: Schema.optional(KanbanCards),
+  kanbanTags: Schema.optional(KanbanTags),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1227,6 +1237,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   kanbanCards: Schema.optional(KanbanCards),
+  kanbanTags: Schema.optional(KanbanTags),
   kanbanExpectedUpdatedAt: Schema.optional(IsoDateTime),
 });
 
@@ -1237,6 +1248,7 @@ const ProjectKanbanTicketCreateCommand = Schema.Struct({
   ticketId: TrimmedNonEmptyString,
   title: KanbanCard.fields.title,
   description: KanbanCard.fields.description,
+  tagIds: KanbanCard.fields.tagIds,
 });
 
 const ProjectKanbanTicketMoveCommand = Schema.Struct({
@@ -1256,6 +1268,7 @@ const ProjectKanbanTicketUpdateCommand = Schema.Struct({
   ticketId: TrimmedNonEmptyString,
   title: Schema.optional(KanbanCard.fields.title),
   description: KanbanCard.fields.description,
+  tagIds: KanbanCard.fields.tagIds,
 });
 
 const ProjectKanbanTicketDeleteCommand = Schema.Struct({
@@ -2165,6 +2178,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   kanbanCards: Schema.optional(KanbanCards),
+  kanbanTags: Schema.optional(KanbanTags),
   updatedAt: IsoDateTime,
 });
 

@@ -583,6 +583,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectIcon: event.payload.projectIcon ?? null,
             scripts: event.payload.scripts,
             kanbanCards: [],
+            kanbanTags: [],
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -618,6 +619,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
             ...(event.payload.kanbanCards !== undefined
               ? { kanbanCards: event.payload.kanbanCards }
+              : {}),
+            ...(event.payload.kanbanTags !== undefined
+              ? { kanbanTags: event.payload.kanbanTags }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

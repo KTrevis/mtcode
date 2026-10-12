@@ -19,6 +19,7 @@ import {
   OrchestrationThreadGoal,
   ProjectScript,
   KanbanCard,
+  KanbanTag,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -113,6 +114,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     kanbanCards: Schema.fromJsonString(Schema.Array(KanbanCard)),
+    kanbanTags: Schema.fromJsonString(Schema.Array(KanbanTag)),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = Schema.Struct({
@@ -444,6 +446,7 @@ function mapProjectShellRow(
     projectIcon: row.projectIcon ?? null,
     scripts: row.scripts,
     kanbanCards: row.kanbanCards,
+    kanbanTags: row.kanbanTags,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -587,6 +590,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
           kanban_cards_json AS "kanbanCards",
+          kanban_tags_json AS "kanbanTags",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1355,6 +1359,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
           kanban_cards_json AS "kanbanCards",
+          kanban_tags_json AS "kanbanTags",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1382,6 +1387,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
           kanban_cards_json AS "kanbanCards",
+          kanban_tags_json AS "kanbanTags",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -2637,6 +2643,7 @@ pending_approval_requests AS (
                 projectIcon: row.projectIcon ?? null,
                 scripts: row.scripts,
                 kanbanCards: row.kanbanCards,
+                kanbanTags: row.kanbanTags,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2820,6 +2827,7 @@ pending_approval_requests AS (
                   projectIcon: row.projectIcon ?? null,
                   scripts: row.scripts,
                   kanbanCards: row.kanbanCards,
+                  kanbanTags: row.kanbanTags,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -3435,6 +3443,7 @@ pending_approval_requests AS (
                     projectIcon: option.value.projectIcon ?? null,
                     scripts: option.value.scripts,
                     kanbanCards: option.value.kanbanCards,
+                    kanbanTags: option.value.kanbanTags,
                     createdAt: option.value.createdAt,
                     updatedAt: option.value.updatedAt,
                     deletedAt: option.value.deletedAt,
