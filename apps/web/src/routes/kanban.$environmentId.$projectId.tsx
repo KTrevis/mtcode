@@ -946,6 +946,7 @@ function KanbanPage() {
             tags={projectTags}
             environmentId={environmentId}
             disabled={saving || launchingCardId !== null || !project}
+            moveDisabled={!project}
             detailsOpen={selectedCard !== undefined}
             onAdd={async (title, column, tagIds) => {
               const id = randomUUID();
