@@ -24,6 +24,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { useKanbanMoves } from "../hooks/useKanbanMoves";
 
 const KANBAN_COLUMNS = ["TODO", "AI", "Done"] as const;
 export type KanbanColumn = (typeof KANBAN_COLUMNS)[number];
@@ -32,6 +33,7 @@ function Card({
   card,
   environmentId,
   disabled,
+  moveDisabled,
   onOpen,
   onDelete,
   active,
@@ -40,6 +42,7 @@ function Card({
   card: KanbanCard;
   environmentId: string;
   disabled: boolean;
+  moveDisabled: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   active: boolean;
@@ -47,7 +50,7 @@ function Card({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card.id,
-    disabled,
+    disabled: moveDisabled,
   });
 
   return (
@@ -120,6 +123,7 @@ function ColumnView({
   cards,
   environmentId,
   disabled,
+  moveDisabled,
   onAdd,
   onOpen,
   onDelete,
@@ -130,6 +134,7 @@ function ColumnView({
   cards: readonly KanbanCard[];
   environmentId: string;
   disabled: boolean;
+  moveDisabled: boolean;
   onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
@@ -185,6 +190,7 @@ function ColumnView({
             card={card}
             environmentId={environmentId}
             disabled={disabled}
+            moveDisabled={moveDisabled}
             onOpen={onOpen}
             onDelete={onDelete}
             active={activeCardId === card.id}
@@ -217,24 +223,31 @@ export function reorderKanbanCard(
 }
 
 export function KanbanBoard({
-  cards,
+  cards: savedCards,
   environmentId,
   disabled,
+  moveDisabled = disabled,
   detailsOpen = false,
   onAdd,
   onOpen,
   onDelete,
-  onMove,
+  onMove: persistMove,
 }: {
   cards: readonly KanbanCard[];
   environmentId: string;
   disabled: boolean;
+  moveDisabled?: boolean;
   onAdd: (title: string, column: KanbanColumn) => Promise<boolean>;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   detailsOpen?: boolean;
   onMove: (id: string, column: KanbanColumn, index?: number) => Promise<boolean>;
 }) {
+  const { moves, enqueue: onMove } = useKanbanMoves(disabled, persistMove);
+  const cards = moves.reduce(
+    (current, move) => reorderKanbanCard(current, move.id, move.column, move.index),
+    savedCards,
+  );
   const boardRef = useRef<HTMLDivElement>(null);
   const movingCardId = useRef<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -344,7 +357,7 @@ export function KanbanBoard({
     if (event.shiftKey) {
       if (
         !card ||
-        disabled ||
+        moveDisabled ||
         event.repeat ||
         (!horizontal && (index + direction < 0 || index + direction >= siblings.length))
       )
@@ -395,7 +408,11 @@ export function KanbanBoard({
       onDragStart={({ active }) => setDraggedCardId(String(active.id))}
       onDragEnd={({ active, over }) => {
         setDraggedCardId(null);
-        if (over && KANBAN_COLUMNS.includes(over.id as KanbanColumn))
+        if (
+          over &&
+          over.id !== draggedCard?.column &&
+          KANBAN_COLUMNS.includes(over.id as KanbanColumn)
+        )
           void onMove(String(active.id), over.id as KanbanColumn);
       }}
       onDragCancel={() => setDraggedCardId(null)}
@@ -449,6 +466,7 @@ export function KanbanBoard({
             cards={cards.filter((card) => card.column === column)}
             environmentId={environmentId}
             disabled={disabled}
+            moveDisabled={moveDisabled}
             activeCardId={currentCardId}
             onCardFocus={setActiveCardId}
             onAdd={onAdd}

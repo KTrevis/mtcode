@@ -19,14 +19,25 @@ const onMove = vi.fn();
 const onOpen = vi.fn();
 const onAdd = vi.fn(async () => true);
 
+function deferredMove() {
+  let resolve!: (moved: boolean) => void;
+  const promise = new Promise<boolean>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 function Harness({
   initial = initialCards,
   boardDisabled = false,
+  persistMove,
 }: {
   initial?: KanbanCard[];
   boardDisabled?: boolean;
+  persistMove?: (id: string) => Promise<boolean>;
 }) {
   const [cards, setCards] = useState(initial);
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   return (
     <>
@@ -34,7 +45,8 @@ function Harness({
       <KanbanBoard
         cards={cards}
         environmentId="remote"
-        disabled={boardDisabled}
+        disabled={boardDisabled || saving}
+        moveDisabled={boardDisabled}
         detailsOpen={selected !== null}
         onAdd={onAdd}
         onDelete={(id) => setCards((current) => current.filter((card) => card.id !== id))}
@@ -44,6 +56,12 @@ function Harness({
         }}
         onMove={async (id, column, index) => {
           onMove(id, column, index);
+          if (persistMove) {
+            setSaving(true);
+            const moved = await persistMove(id);
+            setSaving(false);
+            if (!moved) return false;
+          }
           setCards((current) => reorderKanbanCard(current, id, column, index));
           return true;
         }}
@@ -154,6 +172,82 @@ it("handles empty columns and focuses their add field with N", async () => {
   expect((await press("ArrowLeft", { shiftKey: true })).defaultPrevented).toBe(false);
   expect((await press("n")).defaultPrevented).toBe(false);
   expect(onMove).not.toHaveBeenCalled();
+});
+
+it("keeps rapid moves visible and saves the second card after the first finishes", async () => {
+  const first = deferredMove();
+  const second = deferredMove();
+  const persistMove = vi.fn((id: string) => (id === "a" ? first.promise : second.promise));
+  await act(async () => root.render(<Harness persistMove={persistMove} />));
+  await focus(card("a"));
+  await press("ArrowRight", { shiftKey: true });
+  await focus(card("b"));
+  await press("ArrowRight", { shiftKey: true });
+  expect(persistMove.mock.calls).toEqual([["a"]]);
+  for (const id of ["a", "b"]) {
+    expect(card(id).closest("[data-kanban-column]")?.getAttribute("data-kanban-column")).toBe("AI");
+    expect(card(id).getAttribute("aria-disabled")).toBe("false");
+  }
+  await act(async () => first.resolve(true));
+  expect(persistMove.mock.calls).toEqual([["a"], ["b"]]);
+  await act(async () => second.resolve(true));
+  for (const id of ["a", "b"]) {
+    expect(card(id).closest("[data-kanban-column]")?.getAttribute("data-kanban-column")).toBe("AI");
+  }
+});
+
+it("continues queued moves after a failed save and rolls back only the failed move", async () => {
+  const first = deferredMove();
+  const persistMove = vi.fn((id: string) => (id === "a" ? first.promise : Promise.resolve(true)));
+  await act(async () => root.render(<Harness persistMove={persistMove} />));
+  await focus(card("a"));
+  await press("ArrowRight", { shiftKey: true });
+  await focus(card("b"));
+  await press("ArrowRight", { shiftKey: true });
+  await act(async () => first.resolve(false));
+  expect(persistMove.mock.calls).toEqual([["a"], ["b"]]);
+  expect(card("a").closest("[data-kanban-column]")?.getAttribute("data-kanban-column")).toBe(
+    "TODO",
+  );
+  expect(card("b").closest("[data-kanban-column]")?.getAttribute("data-kanban-column")).toBe("AI");
+});
+
+it("waits for the project update and uses its latest cards for the next move", async () => {
+  const first = deferredMove();
+  const persist = vi
+    .fn<(cards: KanbanCard[]) => Promise<boolean>>()
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValue(true);
+  const render = async (cards: KanbanCard[], busy: boolean) => {
+    await act(async () =>
+      root.render(
+        <KanbanBoard
+          cards={cards}
+          environmentId="remote"
+          disabled={busy}
+          moveDisabled={false}
+          onAdd={onAdd}
+          onOpen={onOpen}
+          onDelete={() => {}}
+          onMove={(id, column, index) => persist(reorderKanbanCard(cards, id, column, index))}
+        />,
+      ),
+    );
+  };
+  await render(initialCards, false);
+  await focus(card("a"));
+  await press("ArrowRight", { shiftKey: true });
+  await render(initialCards, true);
+  await focus(card("b"));
+  await press("ArrowRight", { shiftKey: true });
+  await act(async () => first.resolve(true));
+  expect(persist).toHaveBeenCalledTimes(1);
+  const updated = reorderKanbanCard(initialCards, "a", "AI", 0);
+  await render(updated, false);
+  expect(persist).toHaveBeenCalledTimes(2);
+  expect(
+    persist.mock.calls[1]?.[0].filter((card) => card.column === "AI").map((card) => card.id),
+  ).toEqual(["b", "a", "c", "d"]);
 });
 
 it("leaves global shortcuts alone and prevents moving while saving or on repeat", async () => {
