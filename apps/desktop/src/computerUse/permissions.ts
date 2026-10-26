@@ -19,8 +19,8 @@ import * as Electron from "electron";
 import { resolveChromeExtensionDirSync } from "../computerHistory/resolveBinary.ts";
 import { ensureChromeNativeHostRegistered } from "./nativeHost.ts";
 
-function platformTag(): DesktopComputerUsePermissionsState["platform"] {
-  switch (process.platform) {
+function platformTag(platform: NodeJS.Platform): DesktopComputerUsePermissionsState["platform"] {
+  switch (platform) {
     case "darwin":
       return "darwin";
     case "win32":
@@ -59,9 +59,9 @@ function accessibilityStatus(): DesktopComputerUsePermission["status"] {
   }
 }
 
-function chromeProfileRoots(): string[] {
+function chromeProfileRoots(platform: NodeJS.Platform): string[] {
   const home = NodeOS.homedir();
-  switch (process.platform) {
+  switch (platform) {
     case "darwin":
       return [
         NodePath.join(home, "Library/Application Support/Google/Chrome"),
@@ -175,14 +175,14 @@ function nativeHostRegisteredWindows(): boolean {
   return anyHostManifest(NodePath.join(local, MTCODE_DESKTOP_PROFILE.name));
 }
 
-function resolveChromeExtensionStatus(): {
+function resolveChromeExtensionStatus(platform: NodeJS.Platform): {
   status: DesktopChromeExtensionStatus;
   detail: string;
 } {
   let sawChrome = false;
-  let hostRegistered = process.platform === "win32" && nativeHostRegisteredWindows();
+  let hostRegistered = platform === "win32" && nativeHostRegisteredWindows();
 
-  for (const root of chromeProfileRoots()) {
+  for (const root of chromeProfileRoots(platform)) {
     try {
       if (!NodeFS.statSync(root).isDirectory()) continue;
     } catch {
@@ -218,8 +218,8 @@ function resolveChromeExtensionStatus(): {
     return {
       status: "missing",
       detail: extensionDir
-        ? `Native host registered — load the unpacked extension from ${extensionDir} in chrome://extensions`
-        : "Native host registered — load the unpacked extension in chrome://extensions",
+        ? `Native host registered. load the unpacked extension from ${extensionDir} in chrome://extensions`
+        : "Native host registered. load the unpacked extension in chrome://extensions",
     };
   }
   return {
@@ -228,12 +228,14 @@ function resolveChromeExtensionStatus(): {
   };
 }
 
-export function readComputerUsePermissions(): DesktopComputerUsePermissionsState {
+export function readComputerUsePermissions(
+  hostPlatform: NodeJS.Platform,
+): DesktopComputerUsePermissionsState {
   // Opening Computer Use settings is where the extension gets set up, so make
   // sure the host it needs is registered (a no-op once done this launch).
   void ensureChromeNativeHostRegistered();
-  const platform = platformTag();
-  const chromeExtension = resolveChromeExtensionStatus();
+  const platform = platformTag(hostPlatform);
+  const chromeExtension = resolveChromeExtensionStatus(hostPlatform);
 
   if (platform !== "darwin") {
     return {
@@ -309,17 +311,13 @@ function privacySettingsUrl(pane: DesktopComputerUsePrivacyPane): string {
 
 export async function openComputerUsePrivacySettings(
   pane: DesktopComputerUsePrivacyPane,
+  platform: NodeJS.Platform,
 ): Promise<boolean> {
-  if (process.platform !== "darwin") {
+  if (platform !== "darwin") {
     return false;
   }
 
-  // A TCC row can outlive the signature it was granted to: after the app is
-  // re-signed, System Settings still shows it enabled while tccd logs "Failed
-  // to match existing code requirement" and refuses every call. The user then
-  // toggles a checkbox that is already on and nothing changes. Clearing the
-  // stale row first means the prompt below re-creates it against the signature
-  // running now.
+  // A TCC row can outlive the signature it was granted to: after the app is re-signed, System Settings still shows it enabled while tccd logs "Failed to match existing code requirement" and refuses every call.
   if (permissionStatusFor(pane) === "denied") {
     try {
       NodeChildProcess.spawnSync("tccutil", ["reset", tccServiceFor(pane), bundleIdentifier()], {
@@ -340,7 +338,7 @@ export async function openComputerUsePrivacySettings(
   }
 
   // Screen Recording has no prompt API, and macOS only lists an app once it has
-  // actually asked to capture — so an app that never asks can never be toggled
+  // actually asked to capture. so an app that never asks can never be toggled
   // on. Requesting one tiny source registers this app with TCC first.
   if (pane === "screenRecording") {
     try {

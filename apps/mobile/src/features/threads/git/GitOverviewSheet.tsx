@@ -115,7 +115,6 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const isRepo = gitStatus.data?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
-  const isGitHub = gitStatus.data?.sourceControlProvider?.kind === "github";
   const headerStatus = currentStatusSummary;
 
   const menuItems = isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : [];

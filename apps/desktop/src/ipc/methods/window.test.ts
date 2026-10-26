@@ -1,4 +1,3 @@
-import * as DesktopIpc from "../DesktopIpc.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -30,10 +29,6 @@ import {
   pickProjectFavicon,
   probeRemoteEditors,
 } from "./window.ts";
-
-const invokeEvent = (id: number): DesktopIpc.DesktopIpcInvokeEvent => ({
-  sender: { id, isDestroyed: () => false, send: () => {}, once: () => {} },
-});
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",

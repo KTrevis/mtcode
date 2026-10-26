@@ -14,10 +14,10 @@ export type { GoalChipAction };
 
 function goalStatusClass(status: string): string {
   if (status === "blocked") {
-    return "text-red-600 dark:text-red-400";
+    return "text-danger-foreground";
   }
   if (status === "usage_limited") {
-    return "text-amber-700 dark:text-amber-400";
+    return "text-warning-foreground";
   }
   return "text-foreground-muted";
 }
@@ -58,7 +58,7 @@ export function GoalChip({
                 <Text
                   className={
                     action === "clear"
-                      ? "text-xs text-red-600 dark:text-red-400"
+                      ? "text-xs text-danger-foreground"
                       : "text-xs text-foreground"
                   }
                 >

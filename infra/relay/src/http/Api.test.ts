@@ -526,6 +526,7 @@ function layerRelayUnlinkTest(input?: {
     Layer.succeed(
       EnvironmentLinks.EnvironmentLinks,
       EnvironmentLinks.EnvironmentLinks.of({
+        updateLabel: () => Effect.die("unused updateLabel"),
         upsert: () => Effect.die("unused upsert"),
         listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
         listForUser: () => Effect.die("unused listForUser"),
@@ -1356,6 +1357,81 @@ describe("relay request tracing", () => {
 });
 
 describe("relay routing fallback", () => {
+  it.effect("updates only the authenticated environment's linked label", () =>
+    Effect.gen(function* () {
+      const updated: Array<
+        Parameters<EnvironmentLinks.EnvironmentLinks["Service"]["updateLabel"]>[0]
+      > = [];
+      const layerAuth = Layer.succeed(RelayEnvironmentAuth, {
+        environmentBearer: (effect) =>
+          effect.pipe(
+            Effect.provideService(RelayEnvironmentPrincipal, {
+              environmentId: "environment-1",
+              environmentPublicKey: "environment-public-key",
+            }),
+          ),
+      });
+      const layerLinks = Layer.mock(EnvironmentLinks.EnvironmentLinks, {
+        updateLabel: (input) =>
+          Effect.sync(() => {
+            updated.push(input);
+          }),
+      });
+      const layerRoutes = HttpApiBuilder.layer(
+        HttpApi.make("RelayApi").add(RelayApi.groups.server),
+      ).pipe(
+        Layer.provide(
+          RelayHttpApi.layerServerApi.pipe(
+            HttpRouter.provideRequest(
+              Layer.mergeAll(
+                layerLinks,
+                Layer.succeed(RelayConfiguration.RelayConfiguration, relaySettings),
+                Layer.mock(ManagedEndpointAllocations.ManagedEndpointAllocations, {}),
+                Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
+              ),
+            ),
+            Layer.provide([
+              layerLinks,
+              Layer.mock(AgentActivityPublisher.AgentActivityPublisher, {}),
+              Layer.mock(EnvironmentPublishSignatures.EnvironmentPublishSignatures, {}),
+              Layer.mock(HeldHooks.HeldHooks, {}),
+            ]),
+          ),
+        ),
+        Layer.provide(layerAuth),
+        Layer.provide([NodeServices.layer, NodeHttpPlatform.layer, Etag.layerWeak]),
+      );
+      const httpEffect = yield* HttpRouter.toHttpEffect(layerRoutes).pipe(
+        Effect.provideService(HttpRouter.RouterConfig, RELAY_HTTP_ROUTER_CONFIG),
+      );
+      for (const [environmentId, status] of [
+        ["environment-1", 200],
+        ["environment-2", 401],
+      ] as const) {
+        const response = yield* httpEffect.pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromWeb(
+              new Request(`https://relay.test/v1/environments/${environmentId}/label`, {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: '{"label":"Updated workstation"}',
+              }),
+            ),
+          ),
+        );
+        expect(response.status).toBe(status);
+      }
+      expect(updated).toEqual([
+        {
+          environmentId: "environment-1",
+          environmentPublicKey: "environment-public-key",
+          label: "Updated workstation",
+        },
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("publishes activity for escaped delegated thread IDs longer than 100 characters", () =>
     Effect.gen(function* () {
       const environmentId = "environment-1";
@@ -1408,7 +1484,12 @@ describe("relay routing fallback", () => {
                 Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
               ),
             ),
-            Layer.provide([layerPublisher, layerSignatures, Layer.mock(HeldHooks.HeldHooks, {})]),
+            Layer.provide([
+              layerPublisher,
+              layerSignatures,
+              Layer.mock(HeldHooks.HeldHooks, {}),
+              Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
+            ]),
           ),
         ),
         Layer.provide(layerAuth),

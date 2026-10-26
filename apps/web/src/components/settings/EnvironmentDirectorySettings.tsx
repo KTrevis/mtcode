@@ -1,10 +1,7 @@
-import { ChevronRightIcon } from "lucide-react";
-
 import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentOperateAccess } from "../../hooks/useEnvironmentOperateAccess";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import type { EnvironmentPresentation } from "../../state/environments";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
 
@@ -94,33 +91,5 @@ export function EnvironmentDirectoryRows({
         }
       />
     </>
-  );
-}
-
-/** The same rows folded into a remote environment's card. */
-export function EnvironmentDirectoryDisclosure({
-  environment,
-}: {
-  environment: EnvironmentPresentation;
-}) {
-  return (
-    <div className="mt-3">
-      <Collapsible>
-        <CollapsibleTrigger
-          className="group flex min-h-8 w-full min-w-0 items-center gap-2 text-left"
-          aria-label={`Default directories for ${environment.label}`}
-        >
-          <span className="shrink-0 text-xs text-foreground/70 transition-colors group-hover:text-foreground">
-            Default directories
-          </span>
-          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <div className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
-            <EnvironmentDirectoryRows environment={environment} />
-          </div>
-        </CollapsiblePanel>
-      </Collapsible>
-    </div>
   );
 }

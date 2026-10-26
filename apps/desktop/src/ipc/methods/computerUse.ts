@@ -1,3 +1,4 @@
+import { Platform as HostProcessPlatform } from "@t3tools/shared/HostProcess";
 import {
   DesktopComputerUsePermissionsStateSchema,
   DesktopComputerUsePrivacyPaneSchema,
@@ -17,7 +18,7 @@ export const getComputerUsePermissions = DesktopIpc.makeIpcMethod({
   payload: Schema.Undefined,
   result: DesktopComputerUsePermissionsStateSchema,
   handler: Effect.fn("desktop.ipc.computerUse.getComputerUsePermissions")(function* () {
-    return readComputerUsePermissions();
+    return readComputerUsePermissions(yield* HostProcessPlatform);
   }),
 });
 
@@ -26,6 +27,7 @@ export const openComputerUsePrivacySettings = DesktopIpc.makeIpcMethod({
   payload: DesktopComputerUsePrivacyPaneSchema,
   result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.computerUse.openComputerUsePrivacySettings")(function* (pane) {
-    return yield* Effect.promise(() => openPrivacySettings(pane));
+    const platform = yield* HostProcessPlatform;
+    return yield* Effect.promise(() => openPrivacySettings(pane, platform));
   }),
 });

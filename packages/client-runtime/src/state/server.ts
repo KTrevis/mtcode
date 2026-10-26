@@ -97,7 +97,7 @@ export class EnvironmentLabelUpdateUnsupportedError extends Schema.TaggedError<E
   }
 }
 
-export function verifyEnvironmentLabelUpdate(
+function verifyEnvironmentLabelUpdate(
   requestedLabel: string,
   settings: { readonly environmentLabel: string },
 ): Effect.Effect<void, EnvironmentLabelUpdateUnsupportedError> {

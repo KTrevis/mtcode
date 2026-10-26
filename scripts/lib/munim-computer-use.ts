@@ -1,14 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalFetch:off - release fetch/verify/extract is plain file work, run outside any Effect runtime.
-/**
- * Fetch, verify and stage munim-computer-use, the desktop-control MCP server
- * MT Code ships (github.com/munimtechnologies/munim-computer-use).
- *
- * MT Code does not build it. The desktop build downloads the release pinned
- * by version + sha256 in `native/munim-computer-use.json`, unpacks it into a
- * cache shared by every checkout, and copies the platform binary plus the
- * Chrome extension into the app's Resources. `node scripts/fetch-munim-computer-use.ts`
- * does the fetch alone so a dev checkout can run Computer Use too.
- */
+// Fetch, verify and stage munim-computer-use, the desktop-control MCP server   MT Code ships (github.com/munimtechnologies/munim-computer-use).
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -74,11 +65,7 @@ export interface FetchOptions {
   readonly log?: (message: string) => void;
 }
 
-/**
- * Make the pinned asset for `key` available unpacked in the cache and return
- * its directory. Refuses an unfilled pin, and any archive whose sha256 does
- * not match it.
- */
+// Make the pinned asset for `key` available unpacked in the cache and return   its directory.
 export async function fetchPinnedAsset(options: FetchOptions): Promise<string> {
   const { manifest, key } = options;
   const problems = munimComputerUsePinProblems(manifest, [key]);
@@ -222,13 +209,7 @@ export async function stageMunimComputerUse(options: StageOptions): Promise<stri
   return stagedBinary;
 }
 
-/**
- * The agent pointer needs a real .app for AppKit to put its window up. The MCP
- * server stays a bare executable so it inherits MT Code's TCC grants; only the
- * overlay gets a bundle, named by MT's identity (the server looks for
- * `<agentCursorName>.app` beside itself and would otherwise materialise one
- * under Application Support). Same binary, different launch path.
- */
+// The cursor overlay needs an AppKit bundle beside the bare MCP executable, which inherits MT Code TCC grants.
 async function stageAgentCursorApp(binary: string, destination: string) {
   const contents = NodePath.join(destination, `${MTCODE_AGENT_CURSOR_NAME}.app`, "Contents");
   const macOS = NodePath.join(contents, "MacOS");

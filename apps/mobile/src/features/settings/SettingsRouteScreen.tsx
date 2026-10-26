@@ -27,11 +27,6 @@ import { useCompactWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import { deriveProjectGroupLabel } from "@t3tools/client-runtime/state/project-grouping";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  getSelfHostedNotificationStatus,
-  requestSelfHostedNotificationPermission,
-  subscribeSelfHostedNotificationStatus,
-} from "../agent-awareness/selfHostedNotifications";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";

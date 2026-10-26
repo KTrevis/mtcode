@@ -1,10 +1,3 @@
-export {
-  formatScheduledSendLabel,
-  formatScheduledSendRepeatLabel,
-  nextScheduledSendOccurrence,
-  resolveScheduledSendInstant,
-} from "@t3tools/shared/scheduledSend";
-
 const padDatePart = (value: number): string => String(value).padStart(2, "0");
 
 /** `datetime-local` input value in the browser's local time zone. */

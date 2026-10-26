@@ -733,11 +733,6 @@ export function resolveSelectedEnvironmentId<Id extends string>(
 // What a section is ordered by.
 export type PullRequestSortOrder = "updated" | "useful";
 
-export const PULL_REQUEST_SORT_ORDERS = ["updated", "useful"] as const;
-
-export const isPullRequestSortOrder = (value: unknown): value is PullRequestSortOrder =>
-  value === "updated" || value === "useful";
-
 // Rows in the asked-for order, keyed by `pullRequestEntryKey` where scores are involved.
 export function sortPullRequestEntries<Entry extends PullRequestListEntry>(
   entries: ReadonlyArray<Entry>,

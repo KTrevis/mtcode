@@ -1166,6 +1166,7 @@ export const layerServerApi = HttpApiBuilder.group(
   RelayApi,
   "server",
   Effect.fnUntraced(function* (handlers) {
+    const links = yield* EnvironmentLinks.EnvironmentLinks;
     const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;
     const publishSignatures = yield* EnvironmentPublishSignatures.EnvironmentPublishSignatures;
     const heldHooks = yield* HeldHooks.HeldHooks;

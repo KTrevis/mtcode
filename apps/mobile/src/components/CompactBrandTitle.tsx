@@ -6,7 +6,6 @@ import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./ui/AppText";
 import { BrandWordmark } from "./BrandWordmark";
-import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { getBrandLabel, getProductName } from "../lib/branding";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
@@ -29,7 +28,6 @@ export function CompactBrandTitle(
   const titleOffset = brandTitleOffset();
   const productName = getProductName();
   const brandLabel = getBrandLabel();
-  const iconColor = useUniwindTheme()["--color-icon"];
   const { scale } = useAndroidControlSizing();
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   // Measured only while the badge shows, so hiding it does not make it look like it fits.
@@ -53,7 +51,7 @@ export function CompactBrandTitle(
         props.fit && { flexShrink: 0 },
       ]}
     >
-      <BrandWordmark color={iconColor} height={Math.round(15 * scale)} />
+      <BrandWordmark colorClassName="accent-icon" height={Math.round(15 * scale)} />
       <Text
         allowFontScaling={props.allowFontScaling}
         className="font-t3-medium text-foreground-muted"

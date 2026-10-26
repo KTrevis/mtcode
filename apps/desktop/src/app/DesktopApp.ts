@@ -44,6 +44,8 @@ import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts"
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { desktopAppDisplayName } from "./desktopDistro.ts";
 
+const decodeServerSettings = Schema.decodeEffect(Schema.fromJsonString(ServerSettings));
+
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
@@ -253,7 +255,7 @@ const bootstrap = Effect.gen(function* () {
     const raw = yield* fileSystem
       .readFileString(environment.serverSettingsPath)
       .pipe(Effect.orElseSucceed(() => "{}"));
-    const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(ServerSettings))(raw).pipe(
+    const decoded = yield* decodeServerSettings(raw).pipe(
       Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
     );
     // ensureDaemon keeps ComputerHistoryOperationError in the error channel so
@@ -388,11 +390,7 @@ const scopedProgram = Effect.scoped(
         // receives SIGTERM instead of surviving or being hard-killed.
         const history = yield* ComputerHistoryManager.ComputerHistoryManager;
         yield* history.stopDaemon().pipe(Effect.ignore);
-        // Stop every backend in the pool, not just the primary. The
-        // electronApp.quit() path can race ahead of the layer-scope
-        // cascade, so leaving the WSL instance for its parent scope
-        // finalizer means it gets hard-killed by the OS instead of
-        // receiving SIGTERM + grace. Upstream's helper also bounds the wait.
+        // Stop every backend in the pool, not just the primary.
         yield* stopAllPoolInstances();
       }).pipe(Effect.ensuring(rendererHistory.shutdown), Effect.ensuring(shutdown.markComplete)),
     );

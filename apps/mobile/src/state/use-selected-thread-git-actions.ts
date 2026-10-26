@@ -1,4 +1,4 @@
-import { useAtomValue, useAtomMount } from "@effect/atom-react";
+import { useAtomMount } from "@effect/atom-react";
 import { useCallback, useMemo } from "react";
 
 import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -33,8 +33,7 @@ import {
   setPendingConnectionError,
 } from "./use-remote-environment-registry";
 import { useAtomCommand } from "./use-atom-command";
-import { useEnvironmentQuery } from "./query";
-import { serverEnvironment } from "./server";
+
 import { sshPasswordPromptBroker } from "../components/sshPasswordPromptBroker";
 import { showGitActionResult } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
@@ -76,9 +75,7 @@ export function useSelectedThreadGitActions() {
   );
   const canChangeThreadBranch = canWriteSourceControl && canOperateThread;
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
-  const serverConfig = useAtomValue(
-    serverEnvironment.configValueAtom(selectedThread?.environmentId ?? null),
-  );
+
   const runStackedAction = useAtomCommand(
     vcsActionManager.runStackedAction({
       environmentId: selectedThread?.environmentId ?? null,
@@ -383,7 +380,7 @@ export function useSelectedThreadGitActions() {
         return result;
       },
     );
-  }, [pull, refreshSelectedThreadGitStatus, runSelectedThreadGitMutation]);
+  }, [refreshSelectedThreadGitStatus, runSelectedThreadGitMutation]);
 
   const onRunSelectedThreadGitAction = useCallback(
     async (input: GitActionRequestInput): Promise<GitRunStackedActionResult | null> => {
@@ -440,7 +437,6 @@ export function useSelectedThreadGitActions() {
       );
     },
     [
-      runStackedAction,
       refreshSelectedThreadGitStatus,
       runSelectedThreadGitMutation,
       selectedThreadWorktreePath,

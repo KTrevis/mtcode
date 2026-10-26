@@ -29,18 +29,6 @@ const SHOWCASE_REPO_URL = IS_MUNIM_SHOWCASE
   : "https://github.com/pingdotgg/t3code.git";
 const SHOWCASE_REPO_PATH = IS_MUNIM_SHOWCASE ? "~/Code/mtcode" : "~/Code/t3code";
 
-const PROJECTOR_NAMES = [
-  "projection.projects",
-  "projection.threads",
-  "projection.thread-messages",
-  "projection.thread-proposed-plans",
-  "projection.thread-activities",
-  "projection.thread-sessions",
-  "projection.thread-turns",
-  "projection.checkpoints",
-  "projection.pending-approvals",
-] as const;
-
 const MODEL_SELECTION = JSON.stringify({ instanceId: "codex", model: "gpt-5.4" });
 const PROJECT_SCRIPTS = JSON.stringify([
   {

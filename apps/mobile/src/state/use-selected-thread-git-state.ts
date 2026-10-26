@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { useAtomValue } from "@effect/atom-react";
 
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 
@@ -9,14 +8,10 @@ import { sourceControlEnvironment } from "./sourceControl";
 import { useVcsActionState } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
-import { serverEnvironment } from "./server";
 
 export function useSelectedThreadGitState() {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
   const { selectedThreadCwd } = useSelectedThreadWorktree();
-  const serverConfig = useAtomValue(
-    serverEnvironment.configValueAtom(selectedThread?.environmentId ?? null),
-  );
 
   const selectedThreadGitTarget = useMemo(
     () => ({

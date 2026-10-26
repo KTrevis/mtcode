@@ -56,10 +56,7 @@ import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitatio
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref, resolveThreadLinkRef } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
-import {
-  formatScheduledSendLabel,
-  formatScheduledSendRepeatLabel,
-} from "@t3tools/shared/scheduledSend";
+
 import {
   parseComposerContextHref,
   collectComposerContextReferences,

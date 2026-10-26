@@ -1,3 +1,4 @@
+import { withUniwind } from "uniwind";
 import { Image, type ColorValue } from "react-native";
 
 import { getBrandMark } from "../lib/branding";
@@ -8,7 +9,7 @@ import { AppText as Text } from "./ui/AppText";
  * Wordmark for navigation headers: the T3 SVG, or plain text for any other
  * first-word mark.
  */
-export function BrandWordmark(props: { readonly height: number; readonly color: ColorValue }) {
+function BrandWordmarkImpl(props: { readonly height: number; readonly color?: ColorValue }) {
   const mark = getBrandMark();
   if (mark === "KT") {
     return (
@@ -37,3 +38,7 @@ export function BrandWordmark(props: { readonly height: number; readonly color: 
   }
   return <T3Wordmark color={props.color} height={props.height} />;
 }
+
+export const BrandWordmark = withUniwind(BrandWordmarkImpl, {
+  color: { fromClassName: "colorClassName", styleProperty: "accentColor" },
+});

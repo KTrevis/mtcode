@@ -1,11 +1,10 @@
 import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { useThemeColor } from "../../lib/useThemeColor";
 import {
   MOBILE_VOICE_TRANSCRIPTION_PROVIDERS,
   mobileVoiceTranscriptionProviderConfig,
@@ -35,21 +34,17 @@ export function SettingsVoiceDictationRouteScreen() {
   const [draftProviders, setDraftProviders] =
     useState<MobileVoiceTranscriptionProviderSettingsMap>(EMPTY_PROVIDER_SETTINGS);
   const [draftInitialized, setDraftInitialized] = useState(false);
-  const foreground = useThemeColor("--color-foreground");
-  const placeholder = useThemeColor("--color-foreground-muted");
-  const checkmarkColor = useThemeColor("--color-icon");
   const providerConfig = mobileVoiceTranscriptionProviderConfig(draftProvider);
   const providerSettings = draftProviders[draftProvider];
 
-  useEffect(() => {
-    if (!settings.loaded || draftInitialized) return;
+  if (settings.loaded && !draftInitialized) {
     setDraftProvider(settings.provider);
     setDraftProviders({
       openai: { ...settings.providers.openai },
       groq: { ...settings.providers.groq },
     });
     setDraftInitialized(true);
-  }, [draftInitialized, settings.loaded, settings.provider, settings.providers]);
+  }
 
   const updateSelectedProvider = (
     patch: Partial<MobileVoiceTranscriptionProviderSettingsMap[VoiceTranscriptionProvider]>,
@@ -119,7 +114,7 @@ export function SettingsVoiceDictationRouteScreen() {
                 <SymbolView
                   name="checkmark"
                   size={18}
-                  tintColor={checkmarkColor}
+                  tintColorClassName="accent-icon"
                   type="monochrome"
                   weight="semibold"
                 />
@@ -135,12 +130,11 @@ export function SettingsVoiceDictationRouteScreen() {
               autoCorrect={false}
               editable={settings.loaded && !settings.saving}
               placeholder={draftProvider === "openai" ? "sk-…" : "gsk_…"}
-              placeholderTextColor={placeholder}
+              placeholderTextColorClassName="accent-placeholder"
               secureTextEntry
               value={providerSettings.apiKey}
               onChangeText={(apiKey) => updateSelectedProvider({ apiKey })}
-              className="rounded-xl bg-subtle px-4 py-3 text-base"
-              style={{ color: foreground }}
+              className="rounded-xl bg-subtle px-4 py-3 text-base text-foreground"
               accessibilityLabel={`${providerConfig.label} API key for voice dictation`}
             />
           </View>
@@ -156,11 +150,10 @@ export function SettingsVoiceDictationRouteScreen() {
               autoCorrect={false}
               editable={settings.loaded && !settings.saving}
               placeholder={providerConfig.defaultModel}
-              placeholderTextColor={placeholder}
+              placeholderTextColorClassName="accent-placeholder"
               value={providerSettings.model}
               onChangeText={(model) => updateSelectedProvider({ model })}
-              className="rounded-xl bg-subtle px-4 py-3 text-base"
-              style={{ color: foreground }}
+              className="rounded-xl bg-subtle px-4 py-3 text-base text-foreground"
               accessibilityLabel="Voice transcription model ID"
             />
           </View>
@@ -184,7 +177,7 @@ export function SettingsVoiceDictationRouteScreen() {
                 <SymbolView
                   name="checkmark"
                   size={18}
-                  tintColor={checkmarkColor}
+                  tintColorClassName="accent-icon"
                   type="monochrome"
                   weight="semibold"
                 />

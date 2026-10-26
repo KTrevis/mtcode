@@ -449,4 +449,4 @@ function tail(text: string, maxChars = 8_000): string {
   return text.length <= maxChars ? text : text.slice(-maxChars);
 }
 
-export { PLAYWRIGHT_OUTPUT_DIR, REPO_ROOT };
+export { PLAYWRIGHT_OUTPUT_DIR };

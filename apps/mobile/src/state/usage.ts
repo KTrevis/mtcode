@@ -1,17 +1,8 @@
 import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { AuthDiagnosticsReadScope } from "@t3tools/contracts";
 import { environmentSession, readEnvironmentScope } from "./session";
-/**
- * Multi-environment usage state.
- *
- * Connected environments answer the typed usage query. Connection state
- * determines whether a waiting query contributes to loading coverage, so one
- * unreachable machine can never hold the dashboard open.
- *
- * Mirror of web usage state over mobile's atom registry.
- *
- * @module state/usage
- */
+// Query connected environments independently so an unreachable machine cannot hold usage loading open.
+
 import { useAtomValue } from "@effect/atom-react";
 import {
   USAGE_CONTRACT_VERSION,
@@ -177,12 +168,7 @@ export function useUsage(
     [environments, selectedEnvironmentIds],
   );
 
-  // Refreshing only the derived atom would re-read the per-environment SWR
-  // queries within their stale window and change nothing. The shared helper
-  // refetches model pricing, then rescans each environment's query.
-  //
-  // Only connected environments rescan: an unreachable environment has nothing
-  // to answer, and the helper already aborts a scan whose environment drops.
+  // Rescan pricing and connected-environment queries instead of rereading their stale-window caches.
   const refresh = useCallback(
     (nextInput?: UsageSummaryInput) =>
       refreshUsage({

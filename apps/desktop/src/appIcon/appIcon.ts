@@ -1,15 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - resolves icon files on disk from the Electron main process, outside any Effect runtime.
-/**
- * Runtime app icon.
- *
- * The installed bundle's icon cannot be rewritten without breaking the code
- * signature — and a broken signature takes every macOS permission grant with
- * it (see the TCC repair in computerUse/permissions). So the icon the user
- * picks is applied to the *running* app instead: the Dock tile on macOS, the
- * window icon elsewhere.
- *
- * @module appIcon/appIcon
- */
+// Runtime app icon.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -52,10 +42,13 @@ function resolveBuiltInIconPath(id: string): string | null {
  * icon; otherwise `id` names a built-in. Returns whether anything was applied,
  * so a caller can leave the shipped icon alone rather than clearing it.
  */
-export function applyAppIcon(input: {
-  readonly id: string;
-  readonly image?: string | undefined;
-}): boolean {
+export function applyAppIcon(
+  input: {
+    readonly id: string;
+    readonly image?: string | undefined;
+  },
+  platform: NodeJS.Platform,
+): boolean {
   const icon =
     input.image !== undefined && input.image.startsWith("data:image/")
       ? Electron.nativeImage.createFromDataURL(input.image)
@@ -65,7 +58,7 @@ export function applyAppIcon(input: {
         })();
   if (icon === null || icon.isEmpty()) return false;
 
-  if (process.platform === "darwin") {
+  if (platform === "darwin") {
     try {
       Electron.app.dock?.setIcon(icon);
       return true;

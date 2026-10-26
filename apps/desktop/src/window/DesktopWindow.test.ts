@@ -1,3 +1,4 @@
+import { PASSKEY_BRIDGE_ARGUMENT } from "../preview/GuestProtocol.ts";
 const copyContextMenuImageMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("./ContextMenuImage.ts", () => ({ copyContextMenuImage: copyContextMenuImageMock }));
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
@@ -336,6 +337,7 @@ const desktopWindowBoundsEquivalence = Schema.toEquivalence(
 
 function makeTestLayer(input: {
   readonly window: Electron.BrowserWindow;
+  readonly passkeyBridgeEnabled?: boolean;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
@@ -417,7 +419,7 @@ function makeTestLayer(input: {
           shutdown: Effect.void,
         }),
         Layer.mock(PreviewPasskeys.PreviewPasskeys)({
-          bridgeEnabled: false,
+          bridgeEnabled: input.passkeyBridgeEnabled ?? false,
           installSessionHandlers: () => {},
           attachGuest: () => () => {},
         }),
@@ -467,11 +469,7 @@ function makeTestLayer(input: {
   );
 }
 
-// Builds a DesktopWindow over a fake ElectronWindow whose `create` returns the
-// given outcomes in order (null => simulated open failure), and whose
-// currentMainOrFirst mirrors the real fallback to the first live window (the
-// splash, before any main is registered). Reveal targets are recorded so tests
-// can assert what activation actually surfaced.
+// Simulate window creation outcomes, including the splash fallback before a main window exists.
 const makeSplashScenario = (
   createOutcomes: readonly (Electron.BrowserWindow | null)[],
   options?: {
@@ -604,6 +602,38 @@ const captureOne = DesktopSnapShotId.make("11111111-1111-4111-8111-111111111111"
 const captureTwo = DesktopSnapShotId.make("22222222-2222-4222-8222-222222222222");
 
 describe("DesktopWindow", () => {
+  it.effect.each([false, true])(
+    "configures browser guest passkeys when the bridge is %s",
+    (passkeyBridgeEnabled) =>
+      Effect.gen(function* () {
+        const host = makeFakeBrowserWindow();
+        const layer = makeTestLayer({
+          window: host.window,
+          passkeyBridgeEnabled,
+          createCount: yield* Ref.make(0),
+          mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
+        });
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          const attach = host.webContentsListeners.get("will-attach-webview");
+          assert.isDefined(attach);
+          const preferences: Electron.WebPreferences = {
+            additionalArguments: ["--existing-guest-argument"],
+          };
+          attach({ preventDefault: vi.fn() }, preferences, {
+            partition: "persist:t3code-preview-test",
+          });
+          assert.deepEqual(
+            preferences.additionalArguments,
+            passkeyBridgeEnabled
+              ? ["--existing-guest-argument", PASSKEY_BRIDGE_ARGUMENT]
+              : ["--existing-guest-argument"],
+          );
+        }).pipe(Effect.provide(layer));
+      }),
+  );
+
   it.effect("shows native context menus for browser guests and sign-in popups", () =>
     Effect.gen(function* () {
       const host = makeFakeBrowserWindow();

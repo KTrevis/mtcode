@@ -31,6 +31,7 @@ export function MonitoringDetails({
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const running = active && tasks.length > 0;
+  // oxlint-disable-next-line t3code/react-effect-budget -- Tick elapsed durations while remote background tasks are active.
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);

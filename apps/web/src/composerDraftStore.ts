@@ -130,7 +130,7 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
   COMPOSER_PERSIST_DEBOUNCE_MS,
 );
 
-export function flushComposerDraftStorage(): void {
+function flushComposerDraftStorage(): void {
   composerDebouncedStorage.flush();
 }
 

@@ -30,7 +30,7 @@ let app: IsolatedWebApp | undefined;
 describe("Goal", { concurrent: false }, () => {
   beforeAll(async () => {
     app = await startIsolatedWebApp();
-  }, 300_000);
+  });
 
   afterEach(async ({ task }) => {
     if (app === undefined) {

@@ -511,7 +511,7 @@ const PULL_REQUEST_RANKING_PROMPT = [
   "",
   "Score each pull request from 0 to 100:",
   "  90-100  a capability the fork would clearly want: a feature, a significant fix",
-  "  60-89   useful, but narrower — a smaller improvement, or one only some forks care about",
+  "  60-89   useful, but narrower: a smaller improvement, or one only some forks care about",
   "  30-59   marginal: a refactor, a dependency bump, a change with little outward effect",
   "  0-29    not worth porting: noise, revert, release chore, or specific to the upstream's own",
   "          infrastructure rather than to anything the fork runs",

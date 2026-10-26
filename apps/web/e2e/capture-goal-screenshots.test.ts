@@ -1,11 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - manual capture script: writes screenshot PNGs from disk paths.
-/**
- * Manual PR asset capture — not part of CI.
- *
- *   cd apps/web && vp test run --project e2e e2e/capture-goal-screenshots.test.ts
- *
- * Requires the dev-only /dev/goal-chips route. Writes PNGs to e2e/goal-state-screenshots/.
- */
+// Manual PR capture; opt in so regular E2E runs never rewrite evidence.
+// cd apps/web && T3CODE_CAPTURE_GOAL_SCREENSHOTS=1 vp test run --project e2e e2e/capture-goal-screenshots.test.ts
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -44,7 +39,7 @@ async function shotState(id: (typeof STATE_IDS)[number]): Promise<void> {
 describe("capture goal state screenshots", { concurrent: false }, () => {
   beforeAll(async () => {
     app = await startIsolatedWebApp({ addFixtureProject: false });
-  }, 300_000);
+  });
 
   afterAll(async () => {
     await app?.close();
@@ -58,7 +53,7 @@ describe("capture goal state screenshots", { concurrent: false }, () => {
     for (const id of STATE_IDS) {
       await shotState(id);
     }
-  }, 120_000);
+  });
 });
 
 function requireApp(): IsolatedWebApp {

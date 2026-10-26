@@ -180,6 +180,10 @@ const e2eTestProject = {
   test: {
     name: "e2e",
     include: ["e2e/**/*.test.ts"],
+    exclude:
+      process.env.T3CODE_CAPTURE_GOAL_SCREENSHOTS === "1"
+        ? []
+        : ["e2e/capture-goal-screenshots.test.ts"],
     environment: "node",
     fileParallelism: false,
     hookTimeout: 300_000,
@@ -409,6 +413,7 @@ export default defineConfig(() => {
         defineProject(unitTestProject),
         defineProject(browserTestProject),
         defineProject(renderScenariosProject),
+        defineProject(e2eTestProject),
       ],
     },
   };

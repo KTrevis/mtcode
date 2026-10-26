@@ -49,7 +49,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { getProductName } from "../../lib/branding";
+
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -124,7 +124,6 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
-import { resolveThreadComposerPrimaryAction } from "./threadPresentation";
 
 export const COMPOSER_COLLAPSED_CHROME = 60;
 

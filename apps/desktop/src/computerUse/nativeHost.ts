@@ -7,17 +7,7 @@ import { resolveDesktopMcpBinaryPathSync } from "../computerHistory/resolveBinar
 
 let registration: Promise<boolean> | undefined;
 
-/**
- * Register MT Code's Chrome native-messaging host (`com.munim.mtcode.desktop`)
- * so the extension reaches the desktop-control server MT Code runs.
- *
- * munim-computer-use does the work (`install-native-host`): under the MT
- * profile it writes a wrapper that relays into MT Code's own bridge socket, and
- * the host manifest for every Chrome/Chromium profile directory (the registry
- * on Windows). The binary rewrites nothing that is already current, so this is
- * cheap to repeat; it runs at most once per app launch and resolves to whether
- * a browser was registered.
- */
+// Register MT Code's Chrome native-messaging host (`com.munim.mtcode.desktop`) so the extension reaches the desktop-control server MT Code runs.
 export function ensureChromeNativeHostRegistered(): Promise<boolean> {
   registration ??= new Promise((resolve) => {
     const binary = resolveDesktopMcpBinaryPathSync();

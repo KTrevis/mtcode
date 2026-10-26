@@ -3,7 +3,7 @@ import { Modal, Pressable, View } from "react-native";
 
 import type { SourceControlSshPasswordPromptRequest } from "@t3tools/contracts";
 
-import { useThemeColor } from "../lib/useThemeColor";
+import { useResolveClassNames } from "uniwind";
 import { AppText, AppTextInput } from "./ui/AppText";
 import { sshPasswordPromptBroker } from "./sshPasswordPromptBroker";
 import { getSshPasswordPromptTiming } from "./sshPasswordPromptTiming";
@@ -12,8 +12,9 @@ export function SshPasswordPromptHost() {
   const [prompt, setPrompt] = useState<SourceControlSshPasswordPromptRequest | null>(null);
   const [password, setPassword] = useState("");
   const [now, setNow] = useState(() => Date.now());
-  const pressedOverlay = useThemeColor("--color-subtle");
+  const rippleStyle = useResolveClassNames("bg-subtle");
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Subscribe to SSH requests emitted by the external RPC prompt broker.
   useEffect(
     () =>
       sshPasswordPromptBroker.subscribe((nextPrompt) => {
@@ -24,6 +25,7 @@ export function SshPasswordPromptHost() {
     [],
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Tick the expiry label while an external SSH request is pending.
   useEffect(() => {
     if (prompt === null) {
       return;
@@ -111,7 +113,7 @@ export function SshPasswordPromptHost() {
                 <Pressable
                   accessibilityRole="button"
                   className="min-h-10 items-center justify-center px-4"
-                  android_ripple={{ color: pressedOverlay }}
+                  android_ripple={{ color: rippleStyle.backgroundColor }}
                   onPress={() => finish(prompt.requestId, null)}
                 >
                   <AppText className="text-base font-t3-medium">
@@ -124,7 +126,7 @@ export function SshPasswordPromptHost() {
                   accessibilityRole="button"
                   className="min-h-10 items-center justify-center px-4"
                   disabled={continueDisabled}
-                  android_ripple={{ color: pressedOverlay }}
+                  android_ripple={{ color: rippleStyle.backgroundColor }}
                   onPress={submit}
                 >
                   <AppText

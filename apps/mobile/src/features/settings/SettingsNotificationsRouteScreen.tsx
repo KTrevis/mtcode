@@ -34,7 +34,7 @@ import {
 } from "../agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
 import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
-import { getConnectName, getProductName } from "../../lib/branding";
+import { getConnectName } from "../../lib/branding";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";

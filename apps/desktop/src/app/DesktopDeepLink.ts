@@ -25,17 +25,7 @@ const { logInfo, logWarning } = makeComponentLogger("desktop-deep-link");
 const UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const THREAD_ID_SEGMENT = "[^/?#]+";
 
-/**
- * The OS-level URL scheme other tools open thread links with. KT Code installs
- * next to T3 Code (its own bundle id and data dir), so each product owns its
- * own scheme: `mtcode://` when the build is branded "KT Code", `t3code://`
- * otherwise, with a `-dev` suffix for unpackaged runs. This is separate from
- * `ElectronProtocol.getDesktopScheme`, which stays `t3code://app` because it
- * is the renderer's internal origin and the OAuth callback host.
- *
- * Keep in sync with `protocolSchemes` in `scripts/lib/desktop-distro.ts`,
- * which declares the same schemes in the packaged Info.plist / .desktop entry.
- */
+// The OS-level URL scheme other tools open thread links with.
 export function resolveThreadDeepLinkScheme(input: {
   readonly baseName: string;
   readonly isDevelopment: boolean;
@@ -44,22 +34,7 @@ export function resolveThreadDeepLinkScheme(input: {
   return input.isDevelopment ? `${scheme}-dev` : scheme;
 }
 
-/**
- * Parses a thread deep link of exactly the shape
- * `<scheme>://threads/<environmentId>/<threadId>` (or host `app`).
- *
- * The environment id is always a server-generated UUID. The thread id is one
- * URI-encoded segment that decodes to a non-empty string — besides UUIDs the
- * app emits `import:<provider>:<session>` ids for imported threads, and agent
- * awareness ships them URI-encoded in `/threads/...` links.
- *
- * The scheme and host compare case-insensitively (URL semantics) and UUID
- * casing is normalized to lowercase. Everything else is rejected — extra or
- * missing path segments, a non-UUID environment, an empty thread segment,
- * query strings, fragments, and trailing slashes — so the URL scheme cannot
- * become an arbitrary-navigation primitive and OAuth callback URLs pass
- * through to their own listeners.
- */
+// Parses a thread deep link of exactly the shape `<scheme>://threads/<environmentId>/<threadId>` (or host `app`).
 export function parseThreadDeepLink(
   url: string,
   scheme: string,
@@ -131,15 +106,7 @@ export const EarlyOpenUrlCapture = Context.Reference<EarlyOpenUrlCapture>(
   { defaultValue: () => emptyEarlyOpenUrlCapture },
 );
 
-/**
- * Must run at the earliest synchronous point of main-process startup: macOS
- * can emit the cold-start open-url before the deep-link service's own
- * listener exists, and an unheard event is simply lost. Capture only — no
- * parsing, no preventDefault — so OAuth callbacks and every other URL keep
- * flowing to their own listeners. The returned handle is an explicit input
- * to the service; `configure` drains it through the normal parse path,
- * which also detaches this listener.
- */
+// Must run at the earliest synchronous point of main-process startup: macOS can emit the cold-start open-url before the deep-link service's own listener exists, and an unheard event is simply lost.
 export function captureEarlyOpenUrls(source: EarlyOpenUrlSource): EarlyOpenUrlCapture {
   const urls: string[] = [];
   const listener = (_event: unknown, url: string) => {
@@ -170,7 +137,7 @@ export class DesktopDeepLink extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopDeepLink") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const earlyCapture = yield* EarlyOpenUrlCapture;
@@ -183,13 +150,7 @@ export const make = Effect.gen(function* () {
   const pending = yield* Ref.make<Option.Option<DesktopThreadDeepLinkPayload>>(Option.none());
   const generation = yield* Ref.make(0);
 
-  // Renderer webContents that completed the subscribe handshake, oldest
-  // first. A subscriber has mounted its deep-link listener, so a push cannot
-  // race the renderer's startup — and the WSL splash never subscribes, so it
-  // can never swallow a link. Entries drop three ways: the renderer explicitly
-  // unsubscribes when its listener tears down (e.g. navigating to /connect or
-  // /pair, which unmounts the deep-link component while the webContents stays
-  // alive), the webContents fires destroyed, or a stale entry is pruned on use.
+  // Renderer webContents that completed the subscribe handshake, oldest first.
   const subscribers: DesktopIpc.DesktopIpcSenderWebContents[] = [];
   const observedSenders = new WeakSet<DesktopIpc.DesktopIpcSenderWebContents>();
 
@@ -340,12 +301,7 @@ export const make = Effect.gen(function* () {
           ),
         );
 
-      // Claim the scheme for this install so the OS routes links here even
-      // when a sibling product (T3 Code next to KT Code) or an older copy is
-      // also installed. Packaged builds only: the bundle carries the scheme in
-      // its Info.plist / registry entry, and a dev Electron binary would
-      // otherwise claim it for every checkout. Linux resolves handlers from
-      // the packaged .desktop MimeType instead (see DesktopLinuxUrlHandler).
+      // Claim the scheme for this install so the OS routes links here even when a sibling product (T3 Code next to KT Code) or an older copy is also installed.
       if (environment.isPackaged && environment.platform !== "linux") {
         const registered = yield* electronApp.setAsDefaultProtocolClient(scheme);
         if (registered) {

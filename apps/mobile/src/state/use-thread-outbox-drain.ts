@@ -945,7 +945,6 @@ export function useThreadOutboxDrain(): void {
     },
     [
       attachQueuedGoal,
-      dropQueuedCommandForm,
       makeDeliveryHelpers,
       setThreadInteractionMode,
       setThreadRuntimeMode,
@@ -1124,7 +1123,13 @@ export function useThreadOutboxDrain(): void {
       }
       return outcome === "removed";
     },
-    [makeDeliveryHelpers, preparePullRequest, restoreQueuedMessage, startTurn],
+    [
+      dropQueuedCommandForm,
+      makeDeliveryHelpers,
+      preparePullRequest,
+      restoreQueuedMessage,
+      startTurn,
+    ],
   );
 
   // Subscribe to outcomes; they may arrive after the last shell update, leaving read-once entries uncollected.

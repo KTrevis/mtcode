@@ -744,14 +744,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   // so the offer expires with the limit.
   const limitsResetAt = threadUsageLimitResetsAt(thread);
   const snoozePresets = useMemo(
-    // oxlint-disable-next-line react/purity -- The memo recomputes on the snoozePresetMinute tick, so preset times refresh every minute.
     () =>
       swipeActions.secondary === "snooze"
-        ? resolveSnoozePresets(new Date(), { limitsResetAt })
+        ? resolveSnoozePresets(new Date(props.snoozePresetMinute || snoozeGateNow), {
+            limitsResetAt,
+          })
         : ([] as const),
-    // oxlint-disable-next-line react/memo-dependencies -- The minute tick refreshes relative snooze times while the row remains mounted.
-    [props.snoozePresetMinute, swipeActions.secondary, limitsResetAt],
+    [props.snoozePresetMinute, snoozeGateNow, swipeActions.secondary, limitsResetAt],
   );
+
   const snoozePresetActions = useMemo<MenuAction[]>(
     () => [
       ...snoozePresets.map((preset) => ({
@@ -950,6 +951,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       handleUnsnooze,
       setCustomSnoozeOpen,
       snoozePresets,
+      limitsResetAt,
     ],
   );
   const primaryAction = useMemo(() => {

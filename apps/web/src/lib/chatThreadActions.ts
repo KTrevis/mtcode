@@ -1,5 +1,4 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { findProjectByPath } from "@t3tools/client-runtime/state/projects";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -95,33 +94,4 @@ export async function startNewThreadFromContext(
 
   await context.handleNewThread(projectRef);
   return true;
-}
-
-export function resolveNewThreadEnvironmentId(input: {
-  readonly activeThread?: { readonly environmentId: EnvironmentId } | null;
-  readonly activeDraftThread?: { readonly environmentId: EnvironmentId } | null;
-  readonly primaryEnvironmentId: EnvironmentId | null;
-}): EnvironmentId | null {
-  return (
-    input.activeThread?.environmentId ??
-    input.activeDraftThread?.environmentId ??
-    input.primaryEnvironmentId
-  );
-}
-
-export function findComputerHomeProjectRef(input: {
-  readonly environmentId: EnvironmentId;
-  readonly homeDirectory: string;
-  readonly projects: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly id: ProjectId;
-    readonly workspaceRoot?: string;
-    readonly cwd?: string;
-  }>;
-}): ScopedProjectRef | null {
-  const match = findProjectByPath(
-    input.projects.filter((project) => project.environmentId === input.environmentId),
-    input.homeDirectory,
-  );
-  return match ? scopeProjectRef(input.environmentId, match.id) : null;
 }

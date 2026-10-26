@@ -1,14 +1,8 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { AppStateStatus } from "react-native";
 
-/**
- * Whether the focused thread route should record a visit. The Done indicator
- * only compares the latest completion to the visited watermark, so a visit
- * is worth sending only when a completion is unseen: never while the app is
- * not in front, the environment is not connected, the server does not track
- * visits, the thread's messages have not loaded (the user cannot have read
- * what they cannot see), or the watermark already covers the completion.
- */
+// Acknowledge only visible, loaded completions while their environment and the app are active.
+
 export function shouldAcknowledgeThreadVisit(input: {
   readonly appState: AppStateStatus;
   readonly connectionState: EnvironmentConnectionPhase;

@@ -6,11 +6,11 @@ export function composerEditor(page: Page): Locator {
   return page.getByTestId("composer-editor");
 }
 
-export function sendMessageButton(page: Page): Locator {
+function sendMessageButton(page: Page): Locator {
   return page.getByRole("button", { name: "Send message" });
 }
 
-export function addProjectButton(page: Page): Locator {
+function addProjectButton(page: Page): Locator {
   return page.getByRole("button", { name: "Add project" }).first();
 }
 
@@ -109,16 +109,6 @@ export async function submitGoalSlashCommand(page: Page, command: string): Promi
   await submitComposer(page);
 }
 
-export async function runPaletteAction(page: Page, query: string): Promise<void> {
-  await openCommandPalette(page);
-  await paletteInput(page).fill(query);
-  await commandPalette(page)
-    .locator("[data-slot=command-item]", { hasText: query })
-    .first()
-    .click();
-  await commandPalette(page).waitFor({ state: "hidden" });
-}
-
 export async function addProjectFromEmptyState(page: Page, workspaceRoot: string): Promise<void> {
   await addProjectButton(page).click();
   await commandPalette(page).waitFor({ state: "visible" });
@@ -139,8 +129,4 @@ export async function waitForAppReady(page: Page): Promise<"empty" | "composer">
     return "composer";
   }
   return "empty";
-}
-
-export async function waitForEmptyApp(page: Page): Promise<void> {
-  await waitForAppReady(page);
 }

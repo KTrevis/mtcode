@@ -22,7 +22,6 @@ export function projectEnvironmentPresentation(
   environmentId: EnvironmentId,
   presentation: BaseEnvironmentPresentation,
 ): EnvironmentPresentation {
-  const displayUrl = connectionCatalogDisplayUrl(presentation.entry);
   return {
     ...presentation,
     environmentId,

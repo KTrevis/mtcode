@@ -1,18 +1,4 @@
-/**
- * MT Code update feed, in front of GitHub Releases, so deliveries can be counted.
- *
- * GitHub's per-asset download counter only moves for a full-file request. A
- * `Range:` request returns 206 and leaves it alone, and electron-updater range-
- * requests the archive whenever a .blockmap exists -- which is every release.
- * So every differential auto-update is invisible there. This Worker sits on the
- * updater's path and records what actually happens.
- *
- * It owns no artifacts. The yml is proxied from the newest GitHub release and
- * binaries are redirected to it, so GitHub stays the only place a release
- * lives. Anything unexpected falls through to a redirect at the same GitHub
- * URL the app used before this existed: a broken Worker must not mean a fleet
- * that cannot update.
- */
+// Differential Range downloads bypass GitHub counters; failures redirect to the original release URL.
 
 const REPO = "munimtechnologies/mtcode";
 const TAG_PREFIX = "munim-v";
@@ -133,12 +119,7 @@ function activeUserCodes(request) {
 
 function serveAsset(request, env, ctx, url, version) {
   const name = url.pathname.slice(1);
-  // A delivery is the updater's ranged fetch of an archive: the differential
-  // update GitHub's counter cannot see. A full-file request is left to GitHub,
-  // which does count it once the redirect lands, so counting it here too would
-  // report one download twice. Blockmaps are not deliveries at all: the updater
-  // reads the installed version's as well as the new one's, so counting them
-  // logged every update as two, one of them for the version it replaced.
+  // Count only ranged archive deliveries; GitHub counts full downloads and blockmaps are not deliveries.
   if (!name.endsWith(".blockmap") && request.headers.has("range")) {
     ctx.waitUntil(
       clientId(request, env)
@@ -154,18 +135,8 @@ function serveAsset(request, env, ctx, url, version) {
   return Response.redirect(githubTagged(version, name), 302);
 }
 
-/**
- * Deliveries count one per client per day, which also folds in the rows logged
- * before blockmaps stopped counting (an update then logged its old and new
- * version).
- *
- * Active users are counted over the last complete UTC day, as people: installs
- * that sent the same active-user code (one person's devices on one account)
- * are joined, and an install that sent none counts as one user on its own. A
- * polling client checks in every four minutes, so a full day sees every
- * install that ran. The codes are only needed for that one day, so they are
- * deleted after two.
- */
+// Count one delivery per client/day and merge devices sharing a daily account code.
+// Active-user codes expire after two days; clients without a code each count as one user.
 async function stats(env) {
   const [total, monthly, installs, links] = await env.DB.batch([
     env.DB.prepare(

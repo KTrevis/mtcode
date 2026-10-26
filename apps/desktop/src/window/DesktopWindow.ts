@@ -242,11 +242,7 @@ const TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS = new Set([
 // Same-origin only, like the clipboard permissions above.
 const TRUSTED_RENDERER_DEVICE_PERMISSIONS = new Set(["geolocation"]);
 
-// Computer View's Fullscreen button calls `element.requestFullscreen()` and
-// then `navigator.keyboard.lock()`, which is what lets Cmd-Tab and Escape
-// reach the remote machine. Electron routes both through the permission
-// handler, and the default-deny above rejected the fullscreen promise, so
-// the button did nothing.
+// Computer View's Fullscreen button calls `element.requestFullscreen()` and then `navigator.keyboard.lock()`, which is what lets Cmd-Tab and Escape reach the remote machine.
 const TRUSTED_RENDERER_DISPLAY_PERMISSIONS = new Set(["fullscreen", "keyboardLock", "pointerLock"]);
 
 export function isTrustedRendererPermissionRequest(input: {
@@ -612,6 +608,13 @@ export const make = Effect.gen(function* () {
       webPreferences.nodeIntegration = false;
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = false;
+      webPreferences.disableHtmlFullscreenWindowResize = true;
+      if (previewPasskeys.bridgeEnabled) {
+        webPreferences.additionalArguments = [
+          ...(webPreferences.additionalArguments ?? []),
+          PASSKEY_BRIDGE_ARGUMENT,
+        ];
+      }
       // Keep offscreen/background thread guests composited so CDP and
       // capturePage stay usable after the user leaves the thread.
       webPreferences.backgroundThrottling = false;

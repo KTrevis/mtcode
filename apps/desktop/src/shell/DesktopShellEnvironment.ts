@@ -1,4 +1,4 @@
-import { buildEnvironmentCaptureCommand, setWindowsPath } from "@t3tools/shared/shell";
+import { setWindowsPath } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -6,7 +6,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 

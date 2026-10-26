@@ -84,12 +84,8 @@ import {
 } from "react";
 import {
   AppState,
-  ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
-  Pressable,
   useWindowDimensions,
   View,
   type GestureResponderEvent,

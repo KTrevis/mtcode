@@ -15,13 +15,15 @@ import * as ComputerHistoryManager from "../../computerHistory/ComputerHistoryMa
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 
+const decodeServerSettings = Schema.decodeEffect(Schema.fromJsonString(ServerSettings));
+
 const readHistorySettings = Effect.fn("desktop.computerHistory.readSettings")(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const raw = yield* fileSystem
     .readFileString(environment.serverSettingsPath)
     .pipe(Effect.orElseSucceed(() => "{}"));
-  const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(ServerSettings))(raw).pipe(
+  const decoded = yield* decodeServerSettings(raw).pipe(
     Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
   );
   return decoded.computerHistory;

@@ -6,7 +6,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 
 import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/codexAuthHandoff";
@@ -64,8 +63,6 @@ export class DesktopClerk extends Context.Service<
     >;
   }
 >()("@t3tools/desktop/app/DesktopClerk") {}
-
-const isStringArg = (value: unknown): value is string => typeof value === "string";
 
 function resolveDesktopClerkFrontendApiHostname(
   publishableKey: string | undefined,

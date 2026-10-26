@@ -4,7 +4,7 @@ PR assets for the composer-attached Goal pill. Regenerate with:
 
 ```bash
 cd apps/web
-vp test run --project e2e e2e/capture-goal-screenshots.test.ts
+T3CODE_CAPTURE_GOAL_SCREENSHOTS=1 vp test run --project e2e e2e/capture-goal-screenshots.test.ts
 ```
 
 Uses the dev-only `/dev/goal-chips` preview route (not available in production builds).

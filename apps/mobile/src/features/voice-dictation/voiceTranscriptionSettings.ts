@@ -199,6 +199,7 @@ export function useMobileVoiceTranscriptionSettings() {
     () => snapshot,
     () => snapshot,
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- Load secure-store settings when a dictation settings subscriber mounts.
   useEffect(() => {
     void loadMobileVoiceTranscriptionSettings();
   }, []);

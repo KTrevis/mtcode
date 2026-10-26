@@ -1,3 +1,4 @@
+import { Platform as HostProcessPlatform } from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -13,9 +14,13 @@ export const setAppIcon = DesktopIpc.makeIpcMethod({
   }),
   result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.appIcon.setAppIcon")(function* (input) {
-    return applyAppIcon({
-      id: input.id,
-      ...(input.image === undefined ? {} : { image: input.image }),
-    });
+    const platform = yield* HostProcessPlatform;
+    return applyAppIcon(
+      {
+        id: input.id,
+        ...(input.image === undefined ? {} : { image: input.image }),
+      },
+      platform,
+    );
   }),
 });

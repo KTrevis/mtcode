@@ -3,7 +3,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { afterEach, beforeEach, vi } from "vite-plus/test";
+import { beforeEach, vi } from "vite-plus/test";
 
 const {
   appendSwitchMock,

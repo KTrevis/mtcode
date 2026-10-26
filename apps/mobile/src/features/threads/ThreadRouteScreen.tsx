@@ -15,7 +15,6 @@ import {
   AuthTerminalReadScope,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
-  MessageId,
   ThreadId,
   type ProjectScript,
 } from "@t3tools/contracts";

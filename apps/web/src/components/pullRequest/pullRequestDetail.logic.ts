@@ -1261,23 +1261,6 @@ export function buildMergeUpstreamReleaseHandoff(input: {
   };
 }
 
-export function buildAskAboutLinesHandoff(input: {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly headBranch: string;
-  readonly baseBranch: string;
-  readonly state: PullRequestState;
-  readonly isDraft: boolean;
-  readonly comment: ReviewCommentContext;
-  readonly question: string;
-}): FixFindingsHandoff {
-  return {
-    prompt: bounded(input.question),
-    reviewComments: [pullRequestContextComment(input, ANSWER_INSTRUCTIONS), input.comment],
-  };
-}
-
 export function buildAddSelectionToAgentHandoff(input: {
   readonly number: number;
   readonly title: string;

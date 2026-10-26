@@ -888,6 +888,29 @@ function searchQuery(input: {
   ].join(" ");
 }
 
+const decodeRepositoryParent = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      parent: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+    }),
+  ),
+);
+
+const decodeRepositoryReleases = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        tag_name: Schema.String,
+        name: Schema.NullOr(Schema.String),
+        html_url: Schema.String,
+        published_at: Schema.NullOr(Schema.String),
+        prerelease: Schema.Boolean,
+        draft: Schema.Boolean,
+      }),
+    ),
+  ),
+);
+
 const decodeRevisionRefs = Schema.decodeUnknownOption(
   Schema.fromJsonString(
     Schema.Struct({
@@ -1724,13 +1747,7 @@ export const make = Effect.gen(function* () {
         operation: "getRepositoryParent",
         path: `repos/${input.repository}`,
       });
-      const decoded = yield* Schema.decodeEffect(
-        Schema.fromJsonString(
-          Schema.Struct({
-            parent: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
-          }),
-        ),
-      )(response.body).pipe(
+      const decoded = yield* decodeRepositoryParent(response.body).pipe(
         Effect.mapError((cause) => readError(input.cwd, "getRepositoryParent", cause)),
       );
       return decoded.parent?.full_name ?? null;
@@ -1741,20 +1758,7 @@ export const make = Effect.gen(function* () {
         operation: "listReleases",
         path: `repos/${input.repository}/releases?per_page=${Math.min(100, Math.max(1, input.limit))}`,
       });
-      const decoded = yield* Schema.decodeEffect(
-        Schema.fromJsonString(
-          Schema.Array(
-            Schema.Struct({
-              tag_name: Schema.String,
-              name: Schema.NullOr(Schema.String),
-              html_url: Schema.String,
-              published_at: Schema.NullOr(Schema.String),
-              prerelease: Schema.Boolean,
-              draft: Schema.Boolean,
-            }),
-          ),
-        ),
-      )(response.body).pipe(
+      const decoded = yield* decodeRepositoryReleases(response.body).pipe(
         Effect.mapError((cause) => readError(input.cwd, "listReleases", cause)),
       );
       return decoded

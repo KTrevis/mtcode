@@ -85,7 +85,6 @@ import {
   resolveWorkEntryToolPresentation,
   toolGroupAction,
   type ToolGroupSummaryKind,
-  workEntryShowsInlineImage,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";

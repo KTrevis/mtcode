@@ -140,6 +140,7 @@ function ComputerTaskHost(props: {
   const thisPresentation = useAtomValue(environmentPresentations.presentationAtom(environmentId));
   useAtomValue(environmentSnapshotAtom(environmentId));
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Refresh the server MCP computer catalog when peers or connection identities change.
   useEffect(() => {
     if (thisPresentation?.connection.phase !== "connected") return;
     void sync({ environmentId, input: { clientId, computers } });

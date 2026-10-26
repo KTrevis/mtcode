@@ -11,7 +11,6 @@ const appleString = (value: string) => `"${value.replaceAll("\\", "\\\\").replac
 /** Keep paths and SSH destinations as data across each shell/AppleScript boundary. */
 export function terminalLaunch(input: OpenExternalTerminalInput, platform: string) {
   if (
-    // oxlint-disable-next-line no-control-regex -- Control characters cannot be passed safely through terminal scripting.
     /[\x00-\x1f\x7f]/.test(input.cwd) ||
     (input.sshHost && !/^[a-zA-Z0-9_][a-zA-Z0-9_.@:[\]-]*$/.test(input.sshHost))
   ) {

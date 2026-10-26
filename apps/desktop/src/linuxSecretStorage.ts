@@ -1,5 +1,3 @@
-import { desktopAppDisplayName } from "./app/desktopDistro.ts";
-
 export type LinuxPasswordStorePreference =
   | "auto"
   | "gnome-libsecret"

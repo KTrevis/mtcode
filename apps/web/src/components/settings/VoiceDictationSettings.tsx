@@ -228,4 +228,4 @@ function VoiceDictationSettingsSection() {
   );
 }
 
-export { TRANSCRIPTION_API_KEY_ENV, VoiceDictationSettingsSection };
+export { VoiceDictationSettingsSection };
