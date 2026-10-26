@@ -1,16 +1,10 @@
-import {
-  PiNativeRuntimeId,
-  PiNativeSessionKey,
-  ProjectId,
-  ThreadId,
-  threadEnvironmentAttribution,
-} from "@t3tools/contracts";
+import { PiNativeRuntimeId, PiNativeSessionKey, ProjectId, ThreadId } from "@t3tools/contracts";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { describe, expect } from "vite-plus/test";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../persistence/Sqlite.ts";
 import type { PiSessionCatalogRecord } from "./SessionCatalog.ts";
 import {
   isPiSubagentLiveEvent,
@@ -111,15 +105,7 @@ describe("PiSessionProjection", () => {
       const backing = projectPiBacking(record, runtime, true);
       const connected = status === "idle" || status === "streaming";
       expect(backing.runtimePresence).toBe(connected ? "connected" : "unknown");
-      expect(threadEnvironmentAttribution(backing, "mbp")).toBe(
-        connected ? "live on mbp" : "copy on mbp · runtime unknown",
-      );
     }
-    const { runtimePresence: _, ...legacyBacking } = projectPiBacking(record, undefined, true);
-    expect(threadEnvironmentAttribution(legacyBacking, "mbp")).toBe(
-      "copy on mbp · runtime unknown",
-    );
-    expect(threadEnvironmentAttribution(undefined, "mbp")).toBe("mbp");
   });
   const recap = {
     type: "custom",
@@ -895,10 +881,10 @@ it.layer(SqlitePersistenceMemory)("Pi external history ownership", (it) => {
         readonly events: number;
       }>`
         SELECT
-          (SELECT COUNT(*) FROM projection_threads) AS threads,
-          (SELECT COUNT(*) FROM projection_thread_messages) AS messages,
-          (SELECT COUNT(*) FROM projection_thread_activities) AS activities,
-          (SELECT COUNT(*) FROM orchestration_events) AS events
+          (SELECT COUNT(*) FROM orchestration_v2_projection_threads) AS threads,
+          (SELECT COUNT(*) FROM orchestration_v2_projection_messages) AS messages,
+          (SELECT COUNT(*) FROM orchestration_v2_projection_turn_items) AS activities,
+          (SELECT COUNT(*) FROM orchestration_v2_events) AS events
       `;
 
       expect(counts).toEqual({ threads: 0, messages: 0, activities: 0, events: 0 });

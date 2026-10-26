@@ -2,12 +2,11 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import {
   makePiRpcClient,
@@ -241,7 +240,7 @@ describe("PiRpcClient process", () => {
       });
 
       yield* makePiRpcClient({ command: "fake-pi" }).pipe(
-        Effect.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
       expect(spawnOptions).toMatchObject({ stdin: { stream: "pipe", endOnDone: false } });
     }).pipe(Effect.scoped),

@@ -14,21 +14,19 @@ export const completionNotificationSnapshot = createEnvironmentQueryAtomFamily(
     label: "environment-data:thread:completion-notification-snapshot",
     staleTimeMs: 60_000,
     idleTtlMs: 30_000,
-    execute: (input: {
+    execute: Effect.fn("completionNotificationSnapshot.load")(function* (input: {
       readonly threadId: ThreadId;
       /** Makes each completed shell state a distinct query cache entry. */
       readonly updatedAt: string;
-    }) =>
-      Effect.gen(function* () {
-        const supervisor = yield* EnvironmentSupervisor;
-        const loader = yield* ThreadSnapshotLoader;
-        const prepared = yield* SubscriptionRef.get(supervisor.prepared);
-        if (Option.isNone(prepared)) {
-          return Option.none();
-        }
-        return yield* loader.load(prepared.value, input.threadId, { turnLimit: 1 }, undefined, {
-          timeoutMs: 1_000,
-        });
-      }),
+    }) {
+      const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+      const loader = yield* ThreadSnapshotLoader;
+      const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+      if (Option.isNone(prepared)) {
+        return Option.none();
+      }
+      const result = yield* loader.load(prepared.value, input.threadId);
+      return result._tag === "present" ? Option.some(result.snapshot) : Option.none();
+    }),
   },
 );

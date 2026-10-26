@@ -2,9 +2,7 @@ import * as Schema from "effect/Schema";
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -107,7 +105,7 @@ export function useVoicePanelGeometry(): {
   });
   const operationRef = useRef<PointerOperation | null>(null);
 
-  const release = useCallback((pointerId: number, persist: boolean) => {
+  const release = (pointerId: number, persist: boolean) => {
     const operation = operationRef.current;
     if (!operation || operation.pointerId !== pointerId) return;
     if (operation.rafId !== null) cancelAnimationFrame(operation.rafId);
@@ -130,9 +128,9 @@ export function useVoicePanelGeometry(): {
         console.error("Could not persist voice panel geometry.", error);
       }
     }
-  }, []);
+  };
 
-  const schedule = useCallback((next: VoicePanelGeometry) => {
+  const schedule = (next: VoicePanelGeometry) => {
     const operation = operationRef.current;
     if (!operation) return;
     operation.pending = clampVoicePanelGeometry(next);
@@ -143,83 +141,79 @@ export function useVoicePanelGeometry(): {
       active.rafId = null;
       setGeometry(active.pending);
     });
-  }, []);
+  };
 
-  const begin = useCallback(
-    (event: ReactPointerEvent<HTMLElement>, mode: PointerOperation["mode"], edge?: ResizeEdge) => {
-      if (event.button !== 0 || operationRef.current) return;
-      if (mode === "move" && (event.target as Element).closest("button")) return;
-      event.preventDefault();
-      const target = event.currentTarget;
-      target.setPointerCapture(event.pointerId);
-      const cursor = mode === "move" ? "grabbing" : `${edge}-resize`;
-      document.body.style.cursor = cursor;
-      document.body.style.userSelect = "none";
-      operationRef.current = {
-        pointerId: event.pointerId,
-        target,
-        mode,
-        ...(edge === undefined ? {} : { edge }),
-        startX: event.clientX,
-        startY: event.clientY,
-        startGeometry: geometry,
-        pending: geometry,
-        rafId: null,
-      };
-    },
-    [geometry],
-  );
+  const begin = (
+    event: ReactPointerEvent<HTMLElement>,
+    mode: PointerOperation["mode"],
+    edge?: ResizeEdge,
+  ) => {
+    if (event.button !== 0 || operationRef.current) return;
+    if (mode === "move" && (event.target as Element).closest("button")) return;
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    const cursor = mode === "move" ? "grabbing" : `${edge}-resize`;
+    document.body.style.cursor = cursor;
+    document.body.style.userSelect = "none";
+    operationRef.current = {
+      pointerId: event.pointerId,
+      target,
+      mode,
+      ...(edge === undefined ? {} : { edge }),
+      startX: event.clientX,
+      startY: event.clientY,
+      startGeometry: geometry,
+      pending: geometry,
+      rafId: null,
+    };
+  };
 
-  const onPointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      const operation = operationRef.current;
-      if (!operation || operation.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      const dx = event.clientX - operation.startX;
-      const dy = event.clientY - operation.startY;
-      if (operation.mode === "move") {
-        schedule({
-          ...operation.startGeometry,
-          x: operation.startGeometry.x + dx,
-          y: operation.startGeometry.y + dy,
-        });
-        return;
-      }
+  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const operation = operationRef.current;
+    if (!operation || operation.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const dx = event.clientX - operation.startX;
+    const dy = event.clientY - operation.startY;
+    if (operation.mode === "move") {
+      schedule({
+        ...operation.startGeometry,
+        x: operation.startGeometry.x + dx,
+        y: operation.startGeometry.y + dy,
+      });
+      return;
+    }
 
-      const edge = operation.edge ?? "se";
-      let { x, y, width, height } = operation.startGeometry;
-      if (edge.includes("e")) width += dx;
-      if (edge.includes("s")) height += dy;
-      if (edge.includes("w")) {
-        x += dx;
-        width -= dx;
-      }
-      if (edge.includes("n")) {
-        y += dy;
-        height -= dy;
-      }
-      if (width < MIN_WIDTH) {
-        if (edge.includes("w")) x -= MIN_WIDTH - width;
-        width = MIN_WIDTH;
-      }
-      if (height < MIN_HEIGHT) {
-        if (edge.includes("n")) y -= MIN_HEIGHT - height;
-        height = MIN_HEIGHT;
-      }
-      schedule({ x, y, width, height });
-    },
-    [schedule],
-  );
+    const edge = operation.edge ?? "se";
+    let { x, y, width, height } = operation.startGeometry;
+    if (edge.includes("e")) width += dx;
+    if (edge.includes("s")) height += dy;
+    if (edge.includes("w")) {
+      x += dx;
+      width -= dx;
+    }
+    if (edge.includes("n")) {
+      y += dy;
+      height -= dy;
+    }
+    if (width < MIN_WIDTH) {
+      if (edge.includes("w")) x -= MIN_WIDTH - width;
+      width = MIN_WIDTH;
+    }
+    if (height < MIN_HEIGHT) {
+      if (edge.includes("n")) y -= MIN_HEIGHT - height;
+      height = MIN_HEIGHT;
+    }
+    schedule({ x, y, width, height });
+  };
 
-  const commonHandlers = useMemo(
-    () => ({
-      onPointerMove,
-      onPointerUp: (event: ReactPointerEvent<HTMLElement>) => release(event.pointerId, true),
-      onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => release(event.pointerId, false),
-    }),
-    [onPointerMove, release],
-  );
+  const commonHandlers = {
+    onPointerMove,
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => release(event.pointerId, true),
+    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => release(event.pointerId, false),
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Clamp the floating panel when the external browser viewport resizes.
   useEffect(() => {
     const onResize = () => setGeometry((current) => clampVoicePanelGeometry(current));
     window.addEventListener("resize", onResize);

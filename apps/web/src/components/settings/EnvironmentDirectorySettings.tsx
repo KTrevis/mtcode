@@ -104,21 +104,23 @@ export function EnvironmentDirectoryDisclosure({
   environment: EnvironmentPresentation;
 }) {
   return (
-    <Collapsible className="mt-3">
-      <CollapsibleTrigger
-        className="group flex min-h-8 w-full min-w-0 items-center gap-2 text-left"
-        aria-label={`Default directories for ${environment.label}`}
-      >
-        <span className="shrink-0 text-xs text-foreground/70 transition-colors group-hover:text-foreground">
-          Default directories
-        </span>
-        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
-        <div className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
-          <EnvironmentDirectoryRows environment={environment} />
-        </div>
-      </CollapsiblePanel>
-    </Collapsible>
+    <div className="mt-3">
+      <Collapsible>
+        <CollapsibleTrigger
+          className="group flex min-h-8 w-full min-w-0 items-center gap-2 text-left"
+          aria-label={`Default directories for ${environment.label}`}
+        >
+          <span className="shrink-0 text-xs text-foreground/70 transition-colors group-hover:text-foreground">
+            Default directories
+          </span>
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <div className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
+            <EnvironmentDirectoryRows environment={environment} />
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
+    </div>
   );
 }

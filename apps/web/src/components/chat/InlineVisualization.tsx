@@ -1,6 +1,6 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import type { InlineVisualizationReference } from "@t3tools/shared/inlineVisualization";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAssetUrlState } from "~/assets/assetUrls";
 import { Button } from "~/components/ui/button";
@@ -54,17 +54,14 @@ export function InlineVisualization(props: {
   const title = props.reference.title ?? visualizationTitle(props.reference.path);
   const assetUrl = asset._tag === "Success" ? asset.url : null;
 
-  useEffect(() => {
-    setFragment(null);
-    setFailed(false);
-    setHeight(384);
-  }, [props.reference.path]);
-
+  // oxlint-disable-next-line t3code/react-effect-budget -- Fetch and cancel the external visualization asset.
   useEffect(() => {
     if (!assetUrl) return;
-    setFailed(false);
     const controller = new AbortController();
-    void fetch(assetUrl, { signal: controller.signal })
+    void fetch(assetUrl, {
+      signal: controller.signal,
+      cache: retryRevision > 0 ? "reload" : "default",
+    })
       .then((response) => {
         if (!response.ok) throw new Error(`Visualization request failed: ${response.status}`);
         return response.text();
@@ -81,6 +78,7 @@ export function InlineVisualization(props: {
     return () => controller.abort();
   }, [assetUrl, retryRevision]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Subscribe to height messages from the sandboxed frame.
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       if (event.source !== frameRef.current?.contentWindow) return;
@@ -92,6 +90,7 @@ export function InlineVisualization(props: {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Observe host theme tokens used by the isolated frame document.
   useEffect(() => {
     const syncThemeTokens = () => setThemeTokens(readHostThemeTokens());
     syncThemeTokens();
@@ -103,10 +102,8 @@ export function InlineVisualization(props: {
     return () => observer.disconnect();
   }, []);
 
-  const frameDocument = useMemo(
-    () => (fragment === null ? null : renderDocument(fragment, props.theme, title, themeTokens)),
-    [fragment, props.theme, themeTokens, title],
-  );
+  const frameDocument =
+    fragment === null ? null : renderDocument(fragment, props.theme, title, themeTokens);
 
   return (
     <div
@@ -126,14 +123,17 @@ export function InlineVisualization(props: {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setRetryRevision((value) => value + 1)}
+              onClick={() => {
+                setFailed(false);
+                setRetryRevision((value) => value + 1);
+              }}
             >
               Retry
             </Button>
           ) : null}
         </div>
       ) : frameDocument === null ? (
-        <Skeleton className="h-96 rounded-none" role="status" aria-label="Loading visualization" />
+        <Skeleton className="h-96" role="status" aria-label="Loading visualization" />
       ) : (
         <iframe
           ref={frameRef}

@@ -1,10 +1,4 @@
-/**
- * Session-scoped record of the threads the user opened, most recent first.
- * Deliberately in-memory: the recent-threads switcher cycles what was
- * visited since the app loaded, not a persisted history. Only right after a
- * reload, when that history is too short to switch between, does the
- * switcher fall back to activity order (see resolveRecentThreadSwitcherKeys).
- */
+// Session-scoped record of the threads the user opened, most recent first.
 import { create } from "zustand";
 
 export const MAX_RECENT_THREAD_KEYS = 50;
@@ -21,11 +15,7 @@ export function withRecentThreadKey(
   return [opened, ...current.filter((key) => key !== opened)].slice(0, MAX_RECENT_THREAD_KEYS);
 }
 
-/**
- * How many threads the activity fallback offers. Reaching further back is the
- * command palette's job; an overlay long enough to scroll stops being a
- * switcher.
- */
+// How many threads the activity fallback offers.
 export const RECENT_THREADS_FALLBACK_LIMIT = 10;
 
 export interface RecentThreadActivity {
@@ -34,14 +24,7 @@ export interface RecentThreadActivity {
   activityAt: string;
 }
 
-/**
- * Thread keys the switcher offers when it opens. `liveHistory` is the visit
- * history already filtered to live, unarchived threads; `liveThreads` is every
- * live, unarchived thread. With two or more visited threads the history is
- * used as-is. Below that — right after a reload, when only the current thread
- * has been visited — the list is topped up from the other live threads by most
- * recent activity, so Ctrl+Tab has somewhere to go before a second visit.
- */
+// Thread keys the switcher offers when it opens.
 export function resolveRecentThreadSwitcherKeys(input: {
   liveHistory: ReadonlyArray<string>;
   liveThreads: ReadonlyArray<RecentThreadActivity>;

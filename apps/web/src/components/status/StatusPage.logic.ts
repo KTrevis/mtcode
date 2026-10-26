@@ -1,4 +1,4 @@
-import type { OrchestrationSessionStatus, RuntimeMode, ServerProvider } from "@t3tools/contracts";
+import type { RuntimeMode } from "@t3tools/contracts";
 
 export interface CodexRuntimeStatus {
   readonly approvalPolicy: "untrusted" | "on-request" | "never";
@@ -67,23 +67,13 @@ export function codexRemainingPercent(usedPercent: number): number {
   return Math.max(0, Math.min(100, 100 - usedPercent));
 }
 
-export function isCodexSessionStatus(status: OrchestrationSessionStatus): boolean {
+export function isCodexSessionStatus(status: string): boolean {
   return (
     status !== "stopped" && status !== "idle" && status !== "interrupted" && status !== "error"
   );
 }
 
-export function codexProviderStatusLabel(provider: ServerProvider): string {
-  if (!provider.enabled) return "Disabled";
-  if (!provider.installed) return "Not installed";
-  if (provider.auth.status === "unauthenticated") return "Not authenticated";
-  if (provider.status === "error") return "Unavailable";
-  if (provider.status === "warning") return "Needs attention";
-  if (provider.status === "ready") return "Ready";
-  return "Checking";
-}
-
-export function formatStatusTimestamp(value: string): string {
+function formatStatusTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString(undefined, {

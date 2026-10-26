@@ -67,13 +67,13 @@ export class DesktopNotificationPlatformService extends Context.Service<
   }
 >()("@t3tools/desktop/notifications/DesktopNotifications/DesktopNotificationPlatformService") {}
 
-export function notificationTargetKey(target: DesktopNotificationTarget): string {
+function notificationTargetKey(target: DesktopNotificationTarget): string {
   return JSON.stringify([target.environmentId, target.threadId]);
 }
 
 const TEST_NOTIFICATION_KEY = "desktop-notification-test";
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const platform = yield* DesktopNotificationPlatformService;
   const notifications = new Map<string, NativeNotification>();
@@ -117,54 +117,53 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const showContent = (input: {
+  const showContent = Effect.fn("desktop.notifications.show")(function* (input: {
     readonly key: string;
     readonly content: AgentNotificationContent;
     readonly silent: boolean;
     readonly target: DesktopNotificationTarget | null;
-  }): Effect.Effect<DesktopNotificationShowResult> =>
-    Effect.gen(function* () {
-      const supported = yield* Effect.try({
-        try: platform.isSupported,
-        catch: () => false,
-      }).pipe(Effect.orElseSucceed(() => false));
-      if (supported !== true) {
-        return "unsupported" as const;
-      }
+  }) {
+    const supported = yield* Effect.try({
+      try: platform.isSupported,
+      catch: () => false,
+    }).pipe(Effect.orElseSucceed(() => false));
+    if (supported !== true) {
+      return "unsupported" as const;
+    }
 
-      return yield* Effect.try({
-        try: () => {
-          closeNotification(input.key);
-          const notification = platform.create({
-            title: input.content.title,
-            body: input.content.body,
-            silent: input.silent,
-            timeoutType: "default",
-          });
-          notifications.set(input.key, notification);
-          const clearIfCurrent = () => {
-            if (notifications.get(input.key) === notification) {
-              notifications.delete(input.key);
-            }
-          };
-          notification.once("close", clearIfCurrent);
-          notification.once("click", () => {
-            clearIfCurrent();
-            runFork(reveal(input.target));
-          });
-          notification.on("failed", (_event, error) => {
-            clearIfCurrent();
-            runFork(Effect.logWarning("Native desktop notification failed.", { error }));
-          });
-          notification.show();
-          return "shown" as const;
-        },
-        catch: (cause) => new DesktopNotificationShowError({ notificationKey: input.key, cause }),
-      }).pipe(
-        Effect.tapError((error) => Effect.logWarning(error.message, error.cause)),
-        Effect.orElseSucceed(() => "failed" as const),
-      );
-    }).pipe(Effect.withSpan("desktop.notifications.show"));
+    return yield* Effect.try({
+      try: () => {
+        closeNotification(input.key);
+        const notification = platform.create({
+          title: input.content.title,
+          body: input.content.body,
+          silent: input.silent,
+          timeoutType: "default",
+        });
+        notifications.set(input.key, notification);
+        const clearIfCurrent = () => {
+          if (notifications.get(input.key) === notification) {
+            notifications.delete(input.key);
+          }
+        };
+        notification.once("close", clearIfCurrent);
+        notification.once("click", () => {
+          clearIfCurrent();
+          runFork(reveal(input.target));
+        });
+        notification.on("failed", (_event, error) => {
+          clearIfCurrent();
+          runFork(Effect.logWarning("Native desktop notification failed.", { error }));
+        });
+        notification.show();
+        return "shown" as const;
+      },
+      catch: (cause) => new DesktopNotificationShowError({ notificationKey: input.key, cause }),
+    }).pipe(
+      Effect.tapError((error) => Effect.logWarning(error.message, error.cause)),
+      Effect.orElseSucceed(() => "failed" as const),
+    );
+  });
 
   yield* Effect.addFinalizer(() => Effect.sync(closeAllNotifications));
 
@@ -187,15 +186,18 @@ export const make = Effect.gen(function* () {
         },
       });
     }),
-    dismiss: (target) => Effect.sync(() => closeNotification(notificationTargetKey(target))),
+    dismiss: Effect.fn("DesktopNotifications.dismiss")((target) =>
+      Effect.sync(() => closeNotification(notificationTargetKey(target))),
+    ),
     dismissAll: Effect.sync(closeAllNotifications),
-    showTest: (input) =>
+    showTest: Effect.fn("DesktopNotifications.showTest")((input) =>
       showContent({
         key: TEST_NOTIFICATION_KEY,
         content: formatAgentNotificationTestContent(),
         silent: input.silent,
         target: null,
       }),
+    ),
   });
 });
 

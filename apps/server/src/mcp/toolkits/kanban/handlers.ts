@@ -4,8 +4,11 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { requireMcpCapability } from "../../McpInvocationContext.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
+import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import { readCaller } from "../../threadAccess.ts";
+import type { Toolkit } from "effect/ai";
 import {
   KanbanTicketCreateError,
   KanbanTicketListError,
@@ -14,11 +17,14 @@ import {
   KanbanToolkit,
 } from "./tools.ts";
 
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { startTicket } from "./startTicket.ts";
 
+type Params<K extends keyof typeof KanbanToolkit.tools> = Parameters<
+  Toolkit.HandlersFrom<typeof KanbanToolkit.tools>[K]
+>[0];
+
 const make = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngineService;
+  const engine = yield* ProjectService.ProjectService;
   const crypto = yield* Crypto.Crypto;
   // ponytail: serialize MCP moves; use per-project locks if launch throughput matters.
   const moveLock = yield* Semaphore.make(1);
@@ -34,15 +40,15 @@ const make = Effect.gen(function* () {
       dependsOn?: readonly string[] | undefined;
     },
   ) {
-    const scope = yield* requireMcpCapability("kanban");
-    const requestId = input.clientRequestId ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
+    const { scope } = yield* readCaller();
+    const requestId = input.clientRequestId ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
     const commandId = CommandId.make(
-      `mcp:${type}:${[scope.providerSessionId, input.projectId, input.ticketId, requestId]
+      `mcp:${type}:${[scope.requestNamespace, input.projectId, input.ticketId, requestId]
         .map((part) => `${part.length}:${part}`)
         .join(":")}`,
     );
     const { sequence } = yield* engine
-      .dispatch({
+      .mutateKanban({
         type,
         commandId,
         projectId: input.projectId,
@@ -61,13 +67,23 @@ const make = Effect.gen(function* () {
       );
     return { projectId: input.projectId, ticketId: input.ticketId, commandId, sequence };
   });
-  return KanbanToolkit.of({
-    kanban_list_tickets: Effect.fn("KanbanToolkit.listTickets")(function* (input) {
-      const scope = yield* requireMcpCapability("kanban");
-      const snapshots = yield* ProjectionSnapshotQuery;
+  return {
+    kanban_list_tickets: Effect.fn("KanbanToolkit.listTickets")(function* (
+      input: Params<"kanban_list_tickets">,
+    ) {
+      const { scope } = yield* readCaller();
+      const projects = yield* ProjectService.ProjectService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const snapshots = {
+        getProjectShellById: projects.getShell,
+        getThreadShellById: (threadId: import("@t3tools/contracts").ThreadId | undefined) =>
+          threadId === undefined
+            ? Effect.succeedNone
+            : threads.getThreadShell(threadId).pipe(Effect.map(Option.fromNullishOr)),
+      };
       const projectId = yield* Effect.gen(function* () {
         if (input.projectId !== undefined) return input.projectId;
-        const caller = yield* snapshots.getThreadShellById(scope.threadId);
+        const caller = yield* snapshots.getThreadShellById(scope.thread?.threadId);
         return Option.getOrNull(caller)?.projectId;
       }).pipe(
         Effect.mapError((cause) => new KanbanTicketListError({ detail: cause.message, cause })),
@@ -95,15 +111,27 @@ const make = Effect.gen(function* () {
         tags: project.value.kanbanTags ?? [],
       };
     }),
-    kanban_update_ticket: (input) => mutateTicket("project.kanban-ticket.update", input),
-    kanban_delete_ticket: (input) => mutateTicket("project.kanban-ticket.delete", input),
-    kanban_move_ticket: Effect.fn("KanbanToolkit.moveTicket")(function* (input) {
-      const scope = yield* requireMcpCapability("kanban");
-      const snapshots = yield* ProjectionSnapshotQuery;
+    kanban_update_ticket: (input: Params<"kanban_update_ticket">) =>
+      mutateTicket("project.kanban-ticket.update", input),
+    kanban_delete_ticket: (input: Params<"kanban_delete_ticket">) =>
+      mutateTicket("project.kanban-ticket.delete", input),
+    kanban_move_ticket: Effect.fn("KanbanToolkit.moveTicket")(function* (
+      input: Params<"kanban_move_ticket">,
+    ) {
+      const { scope } = yield* readCaller();
+      const projects = yield* ProjectService.ProjectService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const snapshots = {
+        getProjectShellById: projects.getShell,
+        getThreadShellById: (threadId: import("@t3tools/contracts").ThreadId | undefined) =>
+          threadId === undefined
+            ? Effect.succeedNone
+            : threads.getThreadShell(threadId).pipe(Effect.map(Option.fromNullishOr)),
+      };
       const caller =
         input.projectId === undefined
           ? yield* snapshots
-              .getThreadShellById(scope.threadId)
+              .getThreadShellById(scope.thread?.threadId)
               .pipe(
                 Effect.mapError(
                   (cause) => new KanbanTicketMoveError({ detail: cause.message, cause }),
@@ -124,7 +152,7 @@ const make = Effect.gen(function* () {
         );
       const card = Option.getOrNull(project)?.kanbanCards?.find((candidate) =>
         input.ticketId === undefined
-          ? candidate.agentThreadId === scope.threadId
+          ? candidate.agentThreadId === scope.thread?.threadId
           : candidate.id === input.ticketId,
       );
       if (Option.isNone(project) || !card) {
@@ -138,10 +166,10 @@ const make = Effect.gen(function* () {
         ? yield* startTicket(project.value, card, input.instructions)
         : card.agentThreadId;
       const commandId = CommandId.make(
-        `mcp:kanban-move:${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}`,
+        `mcp:kanban-move:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
       );
       const { sequence } = yield* engine
-        .dispatch({
+        .mutateKanban({
           type: "project.kanban-ticket.move",
           commandId,
           projectId,
@@ -169,17 +197,19 @@ const make = Effect.gen(function* () {
         ...(agentThreadId ? { agentThreadId } : {}),
       };
     }, moveLock.withPermits(1)),
-    kanban_create_ticket: Effect.fn("KanbanToolkit.createTicket")(function* (input) {
-      const scope = yield* requireMcpCapability("kanban");
-      const requestId = input.clientRequestId ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
+    kanban_create_ticket: Effect.fn("KanbanToolkit.createTicket")(function* (
+      input: Params<"kanban_create_ticket">,
+    ) {
+      const { scope } = yield* readCaller();
+      const requestId = input.clientRequestId ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
       const commandId = CommandId.make(
-        `mcp:kanban-create:${[scope.providerSessionId, input.projectId, requestId]
+        `mcp:kanban-create:${[scope.requestNamespace, input.projectId, requestId]
           .map((part) => `${part.length}:${part}`)
           .join(":")}`,
       );
       const ticketId = commandId;
       const { sequence } = yield* engine
-        .dispatch({
+        .mutateKanban({
           type: "project.kanban-ticket.create",
           commandId,
           projectId: input.projectId,
@@ -193,7 +223,16 @@ const make = Effect.gen(function* () {
         );
       return { projectId: input.projectId, ticketId, commandId, sequence };
     }),
-  });
+  };
 });
 
-export const KanbanToolkitHandlersLive = KanbanToolkit.toLayer(make);
+export const layer = McpToolAccess.toLayer(
+  KanbanToolkit,
+  Effect.map(make, (handlers) => ({
+    kanban_list_tickets: McpToolAccess.reads(handlers.kanban_list_tickets),
+    kanban_create_ticket: McpToolAccess.writesEnvironment(handlers.kanban_create_ticket),
+    kanban_update_ticket: McpToolAccess.writesEnvironment(handlers.kanban_update_ticket),
+    kanban_delete_ticket: McpToolAccess.writesEnvironment(handlers.kanban_delete_ticket),
+    kanban_move_ticket: McpToolAccess.writesEnvironment(handlers.kanban_move_ticket),
+  })),
+);

@@ -1,13 +1,4 @@
-/**
- * Live remote view of this computer: streams periodic screen captures and
- * injects pointer/keyboard input by driving the bundled desktop-control MCP
- * binary over newline-delimited JSON-RPC.
- *
- * One child process is shared by every viewer and input call, refcounted so
- * it exits when the last subscriber goes away. Enablement mirrors Computer
- * Use: when the desktop MCP is disabled in settings or the binary is absent,
- * every call fails closed with `unavailable`.
- */
+// Viewers share a refcounted desktop MCP process; disabled or missing desktop control fails closed.
 import {
   COMPUTER_VIEW_DEFAULT_MAX_WIDTH,
   ComputerViewError,
@@ -33,8 +24,8 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import * as Ndjson from "effect/unstable/encoding/Ndjson";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as Ndjson from "effect/encoding/Ndjson";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   buildComputerViewFrame,
@@ -94,7 +85,10 @@ const unavailable = (detail: string, cause?: unknown) =>
     ...(cause === undefined ? {} : { cause }),
   });
 
-function dispatchLine(pending: Map<number, Deferred.Deferred<McpRpcResponse>>, line: unknown) {
+const dispatchLine = Effect.fn("ComputerViewBroker.dispatchLine")(function (
+  pending: Map<number, Deferred.Deferred<McpRpcResponse>>,
+  line: unknown,
+) {
   if (typeof line !== "object" || line === null) return Effect.void;
   const message = line as {
     readonly id?: unknown;
@@ -113,9 +107,9 @@ function dispatchLine(pending: Map<number, Deferred.Deferred<McpRpcResponse>>, l
     return Deferred.succeed(deferred, { errorMessage: detail });
   }
   return Deferred.succeed(deferred, { result: (message.result ?? {}) as McpToolResult });
-}
+});
 
-export const make = Effect.gen(function* ComputerViewBrokerMake() {
+const make = Effect.gen(function* ComputerViewBrokerMake() {
   const resolveMcp = yield* makeResolveEnabledDesktopMcp();
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   // Two helper processes: one captures, one takes input. The helper answers
@@ -174,18 +168,19 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     return response.result ?? {};
   });
 
-  const shutdownClient = (client: ActiveClient) =>
-    Effect.gen(function* () {
-      yield* Scope.close(client.scope, Exit.void);
-      const orphaned = [...client.pending.values()];
-      client.pending.clear();
-      yield* Effect.forEach(
-        orphaned,
-        (deferred) =>
-          Deferred.succeed(deferred, { errorMessage: "The desktop MCP process stopped." }),
-        { discard: true },
-      );
-    });
+  const shutdownClient = Effect.fn("ComputerViewBroker.shutdownClient")(function* (
+    client: ActiveClient,
+  ) {
+    yield* Scope.close(client.scope, Exit.void);
+    const orphaned = [...client.pending.values()];
+    client.pending.clear();
+    yield* Effect.forEach(
+      orphaned,
+      (deferred) =>
+        Deferred.succeed(deferred, { errorMessage: "The desktop MCP process stopped." }),
+      { discard: true },
+    );
+  });
 
   const startClient = Effect.gen(function* () {
     const launch = yield* resolveMcp().pipe(
@@ -199,11 +194,7 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     const command = ChildProcess.make(launch.path, [], {
       env: {
         ...Object.fromEntries(launch.env.map(({ name, value }) => [name, value])),
-        // This process exists to be driven by a person watching the screen it
-        // captures, so its input takes over the real pointer and keyboard
-        // instead of being routed to a window in the background. Agent
-        // sessions run their own desktop-MCP process, which keeps the
-        // background behaviour and leaves this machine's user alone.
+        // Viewer input owns the real pointer; agent sessions use separate processes with background input.
         [`${MTCODE_DESKTOP_ENV_PREFIX}REMOTE_CONTROL`]: "1",
       },
       extendEnv: true,

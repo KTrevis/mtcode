@@ -16,7 +16,6 @@ interface AutoSettleSyncTarget {
   readonly supportsScope?: boolean;
 }
 
-/** Receives connected, capable targets. Applying these defaults must preserve other settings. */
 export function planAutoSettleSettingsSync(
   reference: {
     readonly environmentId: EnvironmentId;
@@ -41,8 +40,7 @@ export function planAutoSettleSettingsSync(
       target.settings !== null &&
       (target.settings.sidebarAutoSettleAfterDays !== patch.sidebarAutoSettleAfterDays ||
         target.settings.sidebarAutoSettleOnMerge !== patch.sidebarAutoSettleOnMerge ||
-        target.settings.sidebarAutoSettlePinnedThreads !==
-          patch.sidebarAutoSettlePinnedThreads ||
+        target.settings.sidebarAutoSettlePinnedThreads !== patch.sidebarAutoSettlePinnedThreads ||
         (target.supportsScope === true &&
           patch.sidebarAutoSettleScope !== undefined &&
           target.settings.sidebarAutoSettleScope !== patch.sidebarAutoSettleScope)),

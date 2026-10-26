@@ -1,23 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import {
-  deriveMonitoringTasks,
+  deriveProjectionMonitoringTasks,
   monitoringCategoryLabel,
   formatMonitoringDuration,
 } from "@t3tools/client-runtime/state/monitoring";
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
-import { AppText as Text } from "../../components/AppText";
+import type {
+  OrchestrationV2PendingBackgroundTask,
+  OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
+import { AppText as Text } from "../../components/ui/AppText";
 
 export function MonitoringDetails({
-  activities,
+  pendingTasks,
+  turnItems,
   onStop,
   active,
 }: {
-  activities: ReadonlyArray<OrchestrationThreadActivity>;
+  pendingTasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>;
+  turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
   onStop: (taskId: string) => Promise<void>;
   active: boolean;
 }) {
-  const tasks = useMemo(() => deriveMonitoringTasks(activities), [activities]);
+  const tasks = useMemo(
+    () => deriveProjectionMonitoringTasks(pendingTasks, turnItems),
+    [pendingTasks, turnItems],
+  );
   const [open, setOpen] = useState(false);
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);

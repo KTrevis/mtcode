@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { cn } from "~/lib/utils";
 
 export function SearchOptionButton(props: {
   readonly active: boolean;
+  readonly size?: "default" | "inline";
+  readonly disabled?: boolean;
   readonly label: string;
   readonly onClick: () => void;
   readonly children: ReactNode;
@@ -17,11 +18,9 @@ export function SearchOptionButton(props: {
           <Toggle
             aria-label={props.label}
             pressed={props.active}
-            className={cn(
-              "size-8 rounded-[5px] font-mono text-muted-foreground data-pressed:text-foreground sm:size-7",
-              props.className,
-            )}
-            size="compact"
+            className={props.className}
+            size={props.size === "inline" ? "searchInline" : "search"}
+            disabled={props.disabled}
             variant="ghost"
             onClick={props.onClick}
           />

@@ -1,98 +1,57 @@
+import { VoiceDictationSettingsSection } from "./VoiceDictationSettings";
+import { DesktopNotificationsSettings } from "./DesktopNotificationsSettings";
 import { SettingsGroup } from "./SettingsGroup";
-import { LocalSkySettings } from "./LocalSkySettings";
-import { isLocalSky, SKY_OPTIONS } from "../../artwork/skyArtwork";
-import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
-import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
+import { PRIVACY_POLICY_URL } from "../../legalLinks";
+import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { CSSProperties, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
-  type BackgroundActivityProfile,
   type DesktopUpdateChannel,
+  IDLE_COMPACTION_MODES,
+  globalIdleCompaction,
   ProviderDriverKind,
   type ProviderInstanceId,
-  type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-  type VoiceTranscriptionProvider,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
-  isAtomCommandInterrupted,
-  settlePromise,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import {
-  DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
-  DEFAULT_APP_ICON_SELECTION,
-  DEFAULT_SIDEBAR_ARTWORK_SELECTION,
-  MAX_CUSTOM_APP_ICON_BYTES,
-  MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES,
   DEFAULT_UNIFIED_SETTINGS,
-  type ChatWidth,
   type DiffLayout,
-  type EnvironmentIdentificationMode,
-  MAX_APPEARANCE_CONTRAST,
-  MAX_CODE_FONT_SIZE,
-  MAX_GLASS_OPACITY,
-  MAX_INTERFACE_FONT_SIZE,
-  MAX_PANEL_ANIMATION_DURATION_MS,
-  MAX_PROMPT_FONT_SIZE,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  MAX_TERMINAL_FONT_SIZE,
-  MIN_CODE_FONT_SIZE,
-  MIN_APPEARANCE_CONTRAST,
-  MIN_GLASS_OPACITY,
-  MIN_INTERFACE_FONT_SIZE,
-  MIN_PANEL_ANIMATION_DURATION_MS,
-  MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   type ResponseStreamingMode,
-  MIN_TERMINAL_FONT_SIZE,
   type QuitConfirmationMode,
-  type UnifiedSettings,
+  SidebarProjectSortOrder,
 } from "@t3tools/contracts/settings";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import { createModelSelection } from "@t3tools/shared/model";
-import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import {
-  APP_BASE_NAME,
   APP_DISPLAY_VERSION,
   APP_HAS_UPDATE_TRACKS,
   HOSTED_APP_CHANNEL,
   HOSTED_APP_CHANNEL_LABEL,
 } from "../../branding";
+import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
+import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateDisabledReason,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
-import {
-  resolveEnvironmentIdentificationPillLabel,
-  useEnvironmentStageLabel,
-} from "../SidebarStageBackdrop";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
-import { useCustomThemes } from "../../hooks/useCustomThemes";
 import {
   readAppearanceModePreference,
   readThemeHalves,
   readThemePreference,
   useTheme,
 } from "../../hooks/useTheme";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
-import {
-  getClientSettings,
-  usePrimarySettings,
-  useUpdatePrimarySettings,
-} from "../../hooks/useSettings";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -100,12 +59,14 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
-import { useThreadActions } from "../../hooks/useThreadActions";
+import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
+  selectsPlanAgent,
 } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
@@ -114,78 +75,27 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
+import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
-import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "../ui/dialog";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
-import {
-  DEFAULT_CODE_FONT_STACK,
-  DEFAULT_SANS_FONT_STACK,
-  isFontFamilyAvailable,
-  isMonospaceFamily,
-  resolveDefaultFamilyLabel,
-  resolveTerminalFontPreference,
-  resolveTerminalFontSizePreference,
-  TYPOGRAPHY_ADVANCED_STORAGE_KEY,
-} from "../../appearanceFonts";
-import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
-import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ThemeLibrary } from "./ThemeSettings";
 import {
-  backgroundActivityOverrideSettings,
-  backgroundActivitySharedPolicySettings,
-  durationToSeconds,
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
-  hasChangedVoiceTranscriptionSettings,
-  normalizeIntervalSeconds,
-  PROVIDER_HEALTH_INTERVAL_MIN_SECONDS,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
-  resolveBackgroundActivityProfileOption,
-  shouldRestoreVoiceTranscriptionDefaults,
-  voiceTranscriptionModelOptions,
 } from "./SettingsPanels.logic";
-import { ProviderHealthIntervalField } from "./ProviderHealthIntervalField";
 import {
-  PolicyTooltip,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
   SettingsPageContainer,
@@ -195,44 +105,30 @@ import {
   useSettingsSearchTargetId,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-import { ProjectFavicon } from "../ProjectFavicon";
-import { DesktopNotificationsSettings } from "./DesktopNotificationsSettings";
-import {
-  listVoiceTranscriptionModels,
-  readVoiceTranscriptionEnvironmentStatus,
-} from "../../lib/voiceTranscription";
-import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
-
-const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
-  artwork: "Artwork",
-  pill: "Version pill",
-  none: "None",
-};
+import { BackgroundActivitySettingsRow } from "./BackgroundActivitySettings";
 
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
   paragraph: "Show finished paragraphs",
-  token: "Token by token (legacy)",
 };
 
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: "Text appears once the agent finishes its turn.",
   paragraph: "Each paragraph or code block appears as soon as it is complete.",
-  token:
-    "Every token repaints the answer as it arrives. Slower and harder to read. Thinking traces still arrive a paragraph at a time.",
 };
+
+const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
+  updated_at: "Last user message",
+  created_at: "Created at",
+  manual: "Manual",
+};
+const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
-
-const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
-  comfortable: "Comfortable",
-  wide: "Wide",
-  full: "Full",
-};
 
 const DIFF_LAYOUT_LABELS: Record<DiffLayout, string> = {
   stacked: "Stacked",
@@ -245,58 +141,7 @@ const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
   "double-click": "Double press",
 };
 
-const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
-  balanced: "Balanced",
-  performance: "Performance",
-  "battery-saver": "Battery saver",
-};
-
-type BackgroundActivityProfileOption = BackgroundActivityProfile | "advanced";
-
-const BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS: Record<BackgroundActivityProfileOption, string> = {
-  ...BACKGROUND_ACTIVITY_PROFILE_LABELS,
-  advanced: "Advanced",
-};
-
-const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile, string> = {
-  balanced: "Pauses probes for idle clients, locked hosts, or low power mode.",
-  performance: "Allows scoped background probes while any subscribed client remains connected.",
-  "battery-saver": "Also pauses background probes when the host or client is on battery.",
-};
-
-const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION = "Uses custom intervals.";
-
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
-const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
-  readonly key:
-    | "pauseWhenHostLocked"
-    | "pauseWhenHostLowPower"
-    | "pauseWhenClientLowPower"
-    | "pauseWhenOnBattery";
-  readonly label: string;
-}> = [
-  { key: "pauseWhenHostLocked", label: "Pause when host is locked" },
-  { key: "pauseWhenHostLowPower", label: "Pause on host low power" },
-  { key: "pauseWhenClientLowPower", label: "Pause on client low power" },
-  { key: "pauseWhenOnBattery", label: "Pause on battery" },
-];
-
-function resetBackgroundActivitySettings() {
-  return {
-    backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
-  };
-}
-
-function backgroundActivityProfileSettings(profile: BackgroundActivityProfile) {
-  return {
-    backgroundActivity: {
-      schemaVersion: 1 as const,
-      profile,
-      overrides: {},
-    },
-  };
-}
-
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
@@ -315,37 +160,34 @@ function AboutVersionSection() {
   const selectedUpdateChannel = updateState?.channel ?? "latest";
   const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
 
-  const handleUpdateChannelChange = useCallback(
-    (channel: DesktopUpdateChannel) => {
-      const bridge = window.desktopBridge;
-      if (
-        !bridge ||
-        typeof bridge.setUpdateChannel !== "function" ||
-        channel === selectedUpdateChannel
-      ) {
-        return;
-      }
+  const handleUpdateChannelChange = (channel: DesktopUpdateChannel) => {
+    const bridge = window.desktopBridge;
+    if (
+      !bridge ||
+      typeof bridge.setUpdateChannel !== "function" ||
+      channel === selectedUpdateChannel
+    ) {
+      return;
+    }
 
-      setIsChangingUpdateChannel(true);
-      void bridge
-        .setUpdateChannel(channel)
-        .catch((error: unknown) => {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not change update track",
-              description: error instanceof Error ? error.message : "Update track change failed.",
-            }),
-          );
-        })
-        .finally(() => {
-          setIsChangingUpdateChannel(false);
-        });
-    },
-    [selectedUpdateChannel],
-  );
+    setIsChangingUpdateChannel(true);
+    void bridge
+      .setUpdateChannel(channel)
+      .catch((error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not change update track",
+            description: error instanceof Error ? error.message : "Update track change failed.",
+          }),
+        );
+      })
+      .finally(() => {
+        setIsChangingUpdateChannel(false);
+      });
+  };
 
-  const handleButtonClick = useCallback(async () => {
+  const handleButtonClick = async () => {
     const bridge = window.desktopBridge;
     if (!bridge) return;
 
@@ -428,7 +270,7 @@ function AboutVersionSection() {
           }),
         );
       });
-  }, [isUpdateActionPending, updateState]);
+  };
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
   const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
@@ -448,11 +290,12 @@ function AboutVersionSection() {
   const description =
     action === "download" || action === "install"
       ? "Update available."
-      : "Current version of the application.";
+      : (getDesktopUpdateDisabledReason(updateState) ?? "Current version of the application.");
 
   return (
     <>
       <SettingsRow
+        id={searchableSetting("app-version").id}
         title={<AboutVersionTitle />}
         description={description}
         control={
@@ -473,9 +316,9 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
-      {APP_HAS_UPDATE_TRACKS && hasDesktopBridge ? (
+      {hasDesktopBridge ? (
         <SettingsRow
-          title="Update track"
+          {...searchableSetting("update-track")}
           description="Use stable releases or nightly builds. Switch back anytime."
           control={
             <Select
@@ -505,9 +348,9 @@ function AboutVersionSection() {
             </Select>
           }
         />
-      ) : APP_HAS_UPDATE_TRACKS && selectedHostedAppChannel ? (
+      ) : selectedHostedAppChannel ? (
         <SettingsRow
-          title="Update track"
+          {...searchableSetting("update-track")}
           description="Switches the hosted app release channel."
           control={
             <Select
@@ -534,6 +377,7 @@ function AboutVersionSection() {
           }
         />
       ) : null}
+      {hasDesktopBridge ? <CliCommandSettingsRow /> : null}
     </>
   );
 }
@@ -556,223 +400,143 @@ export function useSettingsRestore(onRestored?: () => void) {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
   const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
-  const isDesktopNotificationsDirty =
-    settings.desktopNotifications.enabled !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.enabled ||
-    settings.desktopNotifications.soundEnabled !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.soundEnabled ||
-    settings.desktopNotifications.showContext !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.showContext ||
-    settings.desktopNotifications.events.approval !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.approval ||
-    settings.desktopNotifications.events.input !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.input ||
-    settings.desktopNotifications.events.completion !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.completion ||
-    settings.desktopNotifications.events.failure !==
-      DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.failure;
-  const isVoiceTranscriptionDirty = hasChangedVoiceTranscriptionSettings(settings);
 
-  const changedSettingLabels = useMemo(
-    () => [
-      ...(theme !== "system" ? ["Theme"] : []),
-      ...(!followSystem ? ["Follow system"] : []),
-      ...(themeHalves !== null ? ["Theme mix"] : []),
-      ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
-        ? ["Contrast"]
-        : []),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-      ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
-        ? ["Diff colors"]
-        : []),
-      ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
-      ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
-        ? ["Panel animations"]
-        : []),
-      ...(settings.environmentIdentificationMode !==
-      DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-        ? ["Environment identification"]
-        : []),
-      ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-        ? ["Time format"]
-        : []),
-      ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
-        ? ["Thread notifications"]
-        : []),
-      ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
-        ? ["In-app notifications"]
-        : []),
-      ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-        ? ["Visible threads"]
-        : []),
-      ...(settings.sidebarProjectGroupingMode !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-        ? ["Project Grouping"]
-        : []),
-      ...(settings.sidebarWorkingShelfEnabled !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
-        ? ["Working section"]
-        : []),
-      ...(settings.sidebarAutoSettleAfterDays !==
-        DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ||
-      settings.sidebarAutoSettleScope !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleScope
-        ? ["Auto-settle inactive threads"]
-        : []),
-      ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-        ? ["Auto-settle merged threads"]
-        : []),
-      ...(settings.tabsEnabled !== DEFAULT_UNIFIED_SETTINGS.tabsEnabled ? ["Workspace tabs"] : []),
-      ...(settings.sidebarAutoSettlePinnedThreads !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads
-        ? ["Auto-settle pinned threads"]
-        : []),
-      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
-      ...getChangedTypographySettingLabels(settings),
-      ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
-        ? ["Default diff file state"]
-        : []),
-      ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-        ? ["Diff whitespace changes"]
-        : []),
-      ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
-      ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
-        ? ["Proactive panels"]
-        : []),
-      ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
-        ? ["Show skills in slash menu"]
-        : []),
-      ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
-        ? ["Collapse composer on scroll"]
-        : []),
-      ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
-        ? ["Rich text composer"]
-        : []),
-      ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
-      ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
-        ? ["Follow-up behavior"]
-        : []),
-      ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
-        ? ["Context window indicator"]
-        : []),
-      ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
-        ? ["Response streaming"]
-        : []),
-      ...(settings.enableProviderUpdateChecks !==
-      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-        ? ["Provider update checks"]
-        : []),
-      ...(isDesktopNotificationsDirty ? ["Notifications"] : []),
-      ...(settings.continueThreadsAfterServerUpdate !==
-      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-        ? ["Continue threads after restarts"]
-        : []),
-      ...(isBackgroundActivityDirty ? ["Background activity"] : []),
-      ...(settings.defaultThreadBranch !== DEFAULT_UNIFIED_SETTINGS.defaultThreadBranch
-        ? ["Default branch"]
-        : []),
-      ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New thread mode"]
-        : []),
-      ...(settings.newWorktreesStartFromOrigin !==
-      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
-        ? ["New worktrees start from origin"]
-        : []),
-      ...(settings.worktreeBranchPrefix !== DEFAULT_UNIFIED_SETTINGS.worktreeBranchPrefix
-        ? ["Worktree branch prefix"]
-        : []),
-      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
-        : []),
-      ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
-        ? ["Unpin confirmation"]
-        : []),
-      ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
-        : []),
-      ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
-        : []),
-      ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
-      ...(settings.soundNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled
-        ? ["Background turn chime"]
-        : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
-      ...getChangedBrowserSettingLabels(settings),
-      ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
-        ? ["Agent browser access"]
-        : []),
-      ...(isVoiceTranscriptionDirty ? ["Voice dictation"] : []),
-    ],
-    [
-      isTextGenerationModelDirty,
-      isBackgroundActivityDirty,
-      isDesktopNotificationsDirty,
-      settings.browserDefaultViewport,
-      settings.browserDefaultZoomFactor,
-      settings.browserDefaultAppearance,
-      settings.browserRecordingFrameRate,
-      settings.browserRecordingShowKeyPresses,
-      settings.browserRecordingShowMousePresses,
-      settings.browserLinkTarget,
-      settings.browserAutoShowFloatingPreview,
-      settings.appearanceContrast,
-      settings.diffColorScheme,
-      settings.chatWidth,
-      settings.enableAgentBrowserAccess,
-      settings.confirmQuit,
-      isVoiceTranscriptionDirty,
-      settings.confirmThreadArchive,
-      settings.confirmThreadDelete,
-      settings.soundNotificationsEnabled,
-      settings.confirmThreadUnpin,
-      settings.composerCollapseOnScroll,
-      settings.composerRichTextEnabled,
-      settings.sendShortcut,
-      settings.followUpBehavior,
-      settings.addProjectBaseDirectory,
-      settings.defaultThreadEnvMode,
-      settings.defaultThreadBranch,
-      settings.newWorktreesStartFromOrigin,
-      settings.worktreeBranchPrefix,
-      settings.diffFilesCollapsed,
-      settings.diffIgnoreWhitespace,
-      settings.diffLayout,
-      settings.proactivePanelsEnabled,
-      settings.environmentIdentificationMode,
-      settings.contextWindowMeterEnabled,
-      settings.fontFamilyCode,
-      settings.fontFamilyComposer,
-      settings.fontFamilySans,
-      settings.fontFamilyTerminal,
-      settings.fontSizeCode,
-      settings.fontSizeInterface,
-      settings.fontSizePrompt,
-      settings.fontSizeTerminal,
-      settings.glassOpacity,
-      settings.panelAnimationDurationMs,
-      settings.responseStreamingMode,
-      settings.enableProviderUpdateChecks,
-      settings.continueThreadsAfterServerUpdate,
-      settings.sidebarAutoSettleAfterDays,
-      settings.sidebarAutoSettleScope,
-      settings.sidebarAutoSettleOnMerge,
-      settings.sidebarAutoSettlePinnedThreads,
-      settings.sidebarProjectGroupingMode,
-      settings.sidebarWorkingShelfEnabled,
-      settings.sidebarThreadPreviewCount,
-      settings.tabsEnabled,
-      settings.showSkillsInSlashMenu,
-      settings.timestampFormat,
-      settings.notificationMode,
-      settings.inAppNotificationsEnabled,
-      settings.wordWrap,
-      followSystem,
-      theme,
-      themeHalves,
-    ],
-  );
+  const changedSettingLabels = [
+    ...(theme !== "system" ? ["Theme"] : []),
+    ...(!followSystem ? ["Follow system"] : []),
+    ...(themeHalves !== null ? ["Theme mix"] : []),
+    ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
+      ? ["Contrast"]
+      : []),
+    ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+    ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
+      ? ["Diff colors"]
+      : []),
+    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
+    ...(settings.mathRenderingEnabled !== DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled
+      ? ["Render math"]
+      : []),
+    ...(settings.redesignEnabled !== DEFAULT_UNIFIED_SETTINGS.redesignEnabled
+      ? ["New design"]
+      : []),
+    ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
+      ? ["Panel animations"]
+      : []),
+    ...(settings.environmentIdentificationMode !==
+    DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
+      ? ["Environment identification"]
+      : []),
+    ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
+      ? ["Time format"]
+      : []),
+    ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
+      ? ["Thread notifications"]
+      : []),
+    ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
+      ? ["In-app notifications"]
+      : []),
+    ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
+      ? ["Visible threads"]
+      : []),
+    ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
+      ? ["Project Grouping"]
+      : []),
+    ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
+      ? ["Project order"]
+      : []),
+    ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
+      ? ["Working section"]
+      : []),
+    ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
+      ? ["Auto-settle inactive threads"]
+      : []),
+    ...(settings.sidebarAutoSettleKeepPullRequests !==
+    DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
+      ? ["Keep threads with a PR"]
+      : []),
+    ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
+      ? ["Auto-settle merged threads"]
+      : []),
+    ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
+      ? ["Resume after usage limits"]
+      : []),
+    ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
+      ? ["Snooze until limits reset"]
+      : []),
+    ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+    ...(settings.persistComposerContextStrip !==
+    DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
+      ? ["Composer context"]
+      : []),
+    ...getChangedTypographySettingLabels(settings),
+    ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
+      ? ["Default diff file state"]
+      : []),
+    ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
+      ? ["Diff whitespace changes"]
+      : []),
+    ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
+    ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
+      ? ["Proactive panels"]
+      : []),
+    ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
+      ? ["Show skills in slash menu"]
+      : []),
+    ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
+      ? ["Collapse composer on scroll"]
+      : []),
+    ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
+      ? ["Rich text composer"]
+      : []),
+    ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
+    ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
+      ? ["Follow-up behavior"]
+      : []),
+    ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
+      ? ["Context window indicator"]
+      : []),
+    ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
+      ? ["Response streaming"]
+      : []),
+    ...(settings.enableProviderUpdateChecks !== DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
+      ? ["Provider update checks"]
+      : []),
+    ...(settings.continueThreadsAfterServerUpdate !==
+    DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
+      ? ["Continue threads after restarts"]
+      : []),
+    ...(isBackgroundActivityDirty ? ["Background activity"] : []),
+    ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
+      ? ["New thread mode"]
+      : []),
+    ...(settings.newWorktreesStartFromOrigin !==
+    DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
+      ? ["New worktrees start from remote"]
+      : []),
+    ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
+      ? ["Add project base directory"]
+      : []),
+    ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
+      ? ["Unpin confirmation"]
+      : []),
+    ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
+      ? ["Archive confirmation"]
+      : []),
+    ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
+      ? ["Delete confirmation"]
+      : []),
+    ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
+    ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+    ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
+      ? ["Thread title instructions"]
+      : []),
+    ...getChangedBrowserSettingLabels(settings),
+    ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
+      ? ["Agent browser access"]
+      : []),
+  ];
 
-  const restoreDefaults = useCallback(async () => {
+  const restoreDefaults = async () => {
     if (changedSettingLabels.length === 0) return;
     const api = readLocalApi();
     const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
@@ -783,29 +547,15 @@ export function useSettingsRestore(onRestored?: () => void) {
     );
     if (!confirmed) return;
 
-    const shouldResetVoiceTranscription = shouldRestoreVoiceTranscriptionDefaults({
-      wasIncludedInConfirmation: isVoiceTranscriptionDirty,
-      liveSettings: getClientSettings(),
-    });
-
-    // Only touch the theme keys that are actually dirty, so a theme-storage
-    // failure cannot block restoring unrelated settings. Preferences are
-    // re-read after the confirmation dialog: they may have changed (another
-    // tab, an OS flip) while it was open, and rollback must restore the live
-    // values rather than the ones captured at render time.
+    // Reset only dirty theme keys so storage failures cannot block other settings; re-read after confirmation
+    // for safe rollback.
     let previousTheme = theme;
     try {
       previousTheme = readThemePreference();
-    } catch {
-      // Storage is unreadable; the render-time value is the best rollback.
-    }
-    // The mix may have changed while the confirmation dialog was open; both
-    // the dirty check and the rollback must see the live value.
+    } catch {}
     const liveHalves = readThemeHalves();
     const needsThemeReset = previousTheme !== "system";
     const needsMixReset = liveHalves !== null;
-    // Same for the appearance mode: trusting the render-time value would skip
-    // the reset and report success while a non-system mode stayed in storage.
     const needsFollowSystemReset = readAppearanceModePreference(previousTheme) !== "system";
     const notifyThemeRestoreFailure = () => {
       toastManager.add(
@@ -816,9 +566,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         }),
       );
     };
-    // Rollback restores the base preference first (which clears any mix) and
-    // then re-applies the captured mix on top, so no failure path can leave
-    // the pair of keys half-restored.
+    // Restore the base preference before the mix because restoring the base clears the mix.
     const previousHalves = liveHalves;
     const rollbackThemeState = () => {
       if (needsThemeReset) setTheme(previousTheme);
@@ -843,10 +591,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
+      mathRenderingEnabled: DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled,
+      redesignEnabled: DEFAULT_UNIFIED_SETTINGS.redesignEnabled,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
@@ -862,39 +613,29 @@ export function useSettingsRestore(onRestored?: () => void) {
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
-      sidebarAutoSettleScope: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleScope,
+      sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
-      sidebarAutoSettlePinnedThreads: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads,
-      tabsEnabled: DEFAULT_UNIFIED_SETTINGS.tabsEnabled,
+      autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-      desktopNotifications: DEFAULT_UNIFIED_SETTINGS.desktopNotifications,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      defaultThreadBranch: DEFAULT_UNIFIED_SETTINGS.defaultThreadBranch,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-      worktreeBranchPrefix: DEFAULT_UNIFIED_SETTINGS.worktreeBranchPrefix,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
-      soundNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-      ...(shouldResetVoiceTranscription
-        ? {
-            voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
-            voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
-            voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
-            voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
-          }
-        : {}),
+      threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -910,25 +651,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       browserRecordingShowKeyPresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowKeyPresses,
       browserRecordingShowMousePresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowMousePresses,
       browserLinkTarget: DEFAULT_UNIFIED_SETTINGS.browserLinkTarget,
+      browserSearchEngine: DEFAULT_UNIFIED_SETTINGS.browserSearchEngine,
+      browserCustomSearchUrl: DEFAULT_UNIFIED_SETTINGS.browserCustomSearchUrl,
       browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
-      // Re-granted like any other default. The confirmation dialog lists it by
-      // name, so a user restoring defaults is told the agent regains access
-      // rather than discovering it later.
+      pullRequestLinksOpenInApp: DEFAULT_UNIFIED_SETTINGS.pullRequestLinksOpenInApp,
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
     });
     onRestored?.();
-  }, [
-    changedSettingLabels,
-    clearThemeHalves,
-    isVoiceTranscriptionDirty,
-    onRestored,
-    setFollowSystem,
-    setTheme,
-    setThemeHalf,
-    theme,
-    themeHalves,
-    updateSettings,
-  ]);
+  };
 
   return {
     changedSettingLabels,
@@ -936,1664 +666,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-/**
- * Gate in front of the legacy token-by-token mode. The primary action steers
- * the user to paragraph streaming; the legacy path is the quiet option.
- */
-function TokenStreamingWarningDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  onUseParagraphs,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  onUseParagraphs: () => void;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogPopup>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Token by token is a worse experience</AlertDialogTitle>
-          <AlertDialogDescription>
-            Token streaming repaints the message on every delta. It is slower, harder to read, and
-            costs more CPU on every connected device. This mode stays only for backwards
-            compatibility. Use paragraph streaming instead.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <Button variant="ghost-muted" className="sm:mr-auto" onClick={onConfirm}>
-            Use token by token
-          </Button>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button onClick={onUseParagraphs}>Use paragraphs</Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
-    </AlertDialog>
-  );
-}
-
-function BackgroundActivityAdvancedDialog({
-  open,
-  onOpenChange,
-}: {
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-}) {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
-  const activeProfile = resolvedBackgroundActivity.profile;
-  const automaticGitFetchIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.automaticGitFetchInterval,
-  );
-  const providerHealthRefreshIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.providerHealthRefreshInterval,
-  );
-  const hostPowerMonitorActiveIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.hostPowerMonitorActiveInterval,
-  );
-  const hostPowerMonitorIdleIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.hostPowerMonitorIdleInterval,
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Background Activity</DialogTitle>
-          <DialogDescription>
-            Tune the shared power policy and the background intervals that feed it.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          <div className="overflow-hidden rounded-xl border bg-card text-card-foreground">
-            <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Shared policy</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Controls whether background work may run after a subscribed interval fires.
-                </p>
-              </div>
-              <Select
-                value={activeProfile}
-                onValueChange={(value) => {
-                  if (
-                    value === "balanced" ||
-                    value === "performance" ||
-                    value === "battery-saver"
-                  ) {
-                    updateSettings({
-                      backgroundActivity: backgroundActivitySharedPolicySettings(settings, value),
-                    });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Shared background policy"
-                >
-                  <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="balanced">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="performance">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="battery-saver">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">
-                  {searchableSetting("git-fetch-interval").title}
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh remote branch status in the background.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={automaticGitFetchIntervalSeconds}
-                  min={0}
-                  step={5}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          automaticGitFetchInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease Git fetch interval" />
-                    <NumberFieldInput aria-label="Git fetch interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase Git fetch interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Provider health interval</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh provider availability, versions, auth state, and model metadata. Set to 0
-                  to disable. Minimum {PROVIDER_HEALTH_INTERVAL_MIN_SECONDS} seconds.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <ProviderHealthIntervalField
-                  valueSeconds={providerHealthRefreshIntervalSeconds}
-                  label="Provider health interval"
-                  onCommit={(interval) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        { providerHealthRefreshInterval: interval },
-                      ),
-                    )
-                  }
-                />
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Host power monitor</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state while clients are active.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={hostPowerMonitorActiveIntervalSeconds}
-                  min={5}
-                  step={5}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          hostPowerMonitorActiveInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value, 5),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease active host power interval" />
-                    <NumberFieldInput aria-label="Active host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase active host power interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Idle host monitor</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state when no foreground client is active.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={hostPowerMonitorIdleIntervalSeconds}
-                  min={5}
-                  step={30}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          hostPowerMonitorIdleInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value, 5),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease idle host power interval" />
-                    <NumberFieldInput aria-label="Idle host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase idle host power interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="grid gap-0 border-t sm:grid-cols-2">
-              {BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES.map(({ key, label }) => (
-                <label
-                  key={key}
-                  className="flex items-center justify-between gap-3 border-b px-4 py-3 last:border-b-0 sm:border-r sm:even:border-r-0"
-                >
-                  <span className="text-sm font-medium">{label}</span>
-                  <Switch
-                    checked={resolvedBackgroundActivity[key]}
-                    onCheckedChange={(checked) =>
-                      updateSettings(
-                        backgroundActivityOverrideSettings(
-                          settings.backgroundActivity,
-                          resolvedBackgroundActivity,
-                          {
-                            [key]: Boolean(checked),
-                          },
-                        ),
-                      )
-                    }
-                    aria-label={label}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </DialogPanel>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => updateSettings(resetBackgroundActivitySettings())}
-          >
-            Reset all
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
-  );
-}
-
-export function AppearanceSettingsPanel() {
-  const {
-    appearanceMode,
-    refreshTheme,
-    resolvedTheme,
-    setAppearanceMode,
-    setTheme,
-    setThemeHalf,
-    theme,
-    themeHalves,
-  } = useTheme();
-  const customThemes = useCustomThemes();
-  const [isImportThemeOpen, setIsImportThemeOpen] = useState(false);
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const environmentStageLabel = useEnvironmentStageLabel();
-  const showEnvironmentIdentification =
-    resolveEnvironmentIdentificationPillLabel(environmentStageLabel) !== null;
-  const glassOpacityRatio =
-    (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
-  const glassOpacitySliderStyle = {
-    "--settings-slider-progress": `${glassOpacityRatio * 100}%`,
-    "--settings-slider-fill-offset": `${0.5 - glassOpacityRatio}rem`,
-  } as CSSProperties;
-  const appearanceContrastRatio =
-    (settings.appearanceContrast - MIN_APPEARANCE_CONTRAST) /
-    (MAX_APPEARANCE_CONTRAST - MIN_APPEARANCE_CONTRAST);
-  const appearanceContrastSliderStyle = {
-    "--settings-slider-progress": `${appearanceContrastRatio * 100}%`,
-    "--settings-slider-fill-offset": `${0.5 - appearanceContrastRatio}rem`,
-  } as CSSProperties;
-  const panelAnimationDurationRatio =
-    (settings.panelAnimationDurationMs - MIN_PANEL_ANIMATION_DURATION_MS) /
-    (MAX_PANEL_ANIMATION_DURATION_MS - MIN_PANEL_ANIMATION_DURATION_MS);
-  const panelAnimationDurationSliderStyle = {
-    "--settings-slider-progress": `${panelAnimationDurationRatio * 100}%`,
-    "--settings-slider-fill-offset": `${0.5 - panelAnimationDurationRatio}rem`,
-  } as CSSProperties;
-
-  return (
-    <SettingsPageContainer>
-      <SettingsSection id="appearance" title="Colors & themes" variant="plain" hideTitle>
-        <div id={searchableSetting("theme").id}>
-          <ThemeLibrary
-            appearanceMode={appearanceMode}
-            customThemes={customThemes}
-            initialAppearance={resolvedTheme}
-            refreshTheme={refreshTheme}
-            isImportOpen={isImportThemeOpen}
-            setAppearanceMode={setAppearanceMode}
-            setTheme={setTheme}
-            setThemeHalf={setThemeHalf}
-            theme={theme}
-            themeHalves={themeHalves}
-            onImportOpenChange={setIsImportThemeOpen}
-          />
-        </div>
-      </SettingsSection>
-
-      <SettingsSection id="appearance-interface" title="Interface">
-        <SettingsRow
-          {...searchableSetting("setting-appearance-contrast")}
-          description="Adjust the contrast of colors and borders across the interface."
-          resetAction={
-            settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast ? (
-              <SettingResetButton
-                label="contrast"
-                onClick={() =>
-                  updateSettings({
-                    appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full items-center gap-3 sm:w-52">
-              <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                htmlFor="appearance-contrast"
-              >
-                {settings.appearanceContrast}%
-              </output>
-              <input
-                aria-label="Contrast"
-                className="settings-slider min-w-0 flex-1"
-                id="appearance-contrast"
-                max={MAX_APPEARANCE_CONTRAST}
-                min={MIN_APPEARANCE_CONTRAST}
-                onChange={(event) => {
-                  const appearanceContrast = Number(event.currentTarget.value);
-                  if (
-                    Number.isInteger(appearanceContrast) &&
-                    appearanceContrast >= MIN_APPEARANCE_CONTRAST &&
-                    appearanceContrast <= MAX_APPEARANCE_CONTRAST
-                  ) {
-                    updateSettings({ appearanceContrast });
-                  }
-                }}
-                step={5}
-                style={appearanceContrastSliderStyle}
-                type="range"
-                value={settings.appearanceContrast}
-              />
-            </div>
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("setting-glass-opacity")}
-          description="Higher values make menus, dialogs, and the composer more solid."
-          resetAction={
-            settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
-              <SettingResetButton
-                label="glass opacity"
-                onClick={() =>
-                  updateSettings({ glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full items-center gap-3 sm:w-52">
-              <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                htmlFor="glass-opacity"
-              >
-                {settings.glassOpacity}%
-              </output>
-              <input
-                aria-label="Glass opacity"
-                className="settings-slider min-w-0 flex-1"
-                id="glass-opacity"
-                max={MAX_GLASS_OPACITY}
-                min={MIN_GLASS_OPACITY}
-                onChange={(event) => {
-                  const glassOpacity = Number(event.currentTarget.value);
-                  if (
-                    Number.isInteger(glassOpacity) &&
-                    glassOpacity >= MIN_GLASS_OPACITY &&
-                    glassOpacity <= MAX_GLASS_OPACITY
-                  ) {
-                    updateSettings({ glassOpacity });
-                  }
-                }}
-                step={5}
-                style={glassOpacitySliderStyle}
-                type="range"
-                value={settings.glassOpacity}
-              />
-            </div>
-          }
-        />
-
-        {showEnvironmentIdentification ? (
-          <SettingsRow
-            {...searchableSetting("environment-identification")}
-            description="Choose how Dev and Nightly environments are identified."
-            resetAction={
-              settings.environmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
-                <SettingResetButton
-                  label="environment identification"
-                  onClick={() =>
-                    updateSettings({
-                      environmentIdentificationMode: DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.environmentIdentificationMode}
-                onValueChange={(value) => {
-                  if (value === "artwork" || value === "pill" || value === "none") {
-                    updateSettings({ environmentIdentificationMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Environment identification"
-                >
-                  <SelectValue>
-                    {ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(ENVIRONMENT_IDENTIFICATION_LABELS).map(([value, label]) => (
-                    <SelectItem hideIndicator key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        ) : null}
-
-        <SidebarArtworkRow />
-        <AppIconRow />
-        <SettingsRow
-          {...searchableSetting("diff-color-scheme")}
-          description="Choose colors for additions and deletions, including change counts."
-          resetAction={
-            settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme ? (
-              <SettingResetButton
-                label="diff colors"
-                onClick={() =>
-                  updateSettings({ diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="w-full sm:w-40">
-              <Select
-                value={settings.diffColorScheme}
-                onValueChange={(value) => {
-                  if (value === "red-green" || value === "blue-orange")
-                    updateSettings({ diffColorScheme: value });
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Diff colors">
-                  <span
-                    aria-hidden="true"
-                    className={
-                      settings.diffColorScheme === "blue-orange"
-                        ? "flex shrink-0 flex-row-reverse gap-1"
-                        : "flex shrink-0 gap-1"
-                    }
-                  >
-                    <span className="size-2 rounded-full bg-diff-deletion" />
-                    <span className="size-2 rounded-full bg-diff-addition" />
-                  </span>
-                  <SelectValue>
-                    {settings.diffColorScheme === "blue-orange" ? "Blue & orange" : "Red & green"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value="red-green">Red & green (default)</SelectItem>
-                  <SelectItem value="blue-orange">Blue & orange</SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("chat-width")}
-          description="Set how wide messages and the composer can grow on large screens."
-          resetAction={
-            settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
-              <SettingResetButton
-                label="chat width"
-                onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
-              />
-            ) : null
-          }
-          control={
-            <div className="w-full sm:w-40">
-              <Select
-                value={settings.chatWidth}
-                onValueChange={(value) => {
-                  if (value === "comfortable" || value === "wide" || value === "full")
-                    updateSettings({ chatWidth: value });
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Chat width">
-                  <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value="comfortable">Comfortable (default)</SelectItem>
-                  <SelectItem value="wide">Wide</SelectItem>
-                  <SelectItem value="full">Full</SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection id="motion" title="Motion">
-        <SettingsRow
-          {...searchableSetting("panel-animations")}
-          description="Set how fast panels open and close."
-          control={
-            <div className="grid w-full grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
-              <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
-              <div className="flex w-full items-center gap-3">
-                <output
-                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                  htmlFor="panel-animation-duration"
-                >
-                  {settings.panelAnimationDurationMs} ms
-                </output>
-                <input
-                  aria-label="Panel animation duration"
-                  className="settings-slider min-w-0 flex-1"
-                  id="panel-animation-duration"
-                  max={MAX_PANEL_ANIMATION_DURATION_MS}
-                  min={MIN_PANEL_ANIMATION_DURATION_MS}
-                  onChange={(event) => {
-                    const panelAnimationDurationMs = Number(event.currentTarget.value);
-                    if (
-                      Number.isInteger(panelAnimationDurationMs) &&
-                      panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
-                      panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
-                    ) {
-                      updateSettings({ panelAnimationDurationMs });
-                    }
-                  }}
-                  step={25}
-                  style={panelAnimationDurationSliderStyle}
-                  type="range"
-                  value={settings.panelAnimationDurationMs}
-                />
-              </div>
-            </div>
-          }
-          resetAction={
-            settings.panelAnimationDurationMs !==
-            DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
-              <SettingResetButton
-                label="panel animations"
-                onClick={() =>
-                  updateSettings({
-                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
-                  })
-                }
-              />
-            ) : null
-          }
-        />
-      </SettingsSection>
-
-      <TypographySection />
-    </SettingsPageContainer>
-  );
-}
-
-function useFontDefaultFamilies() {
-  const settings = useScopedSettings();
-  // An unset preference shows the font it resolves to on this machine; the
-  // default stacks are the platform's own faces, so the name is probed, not
-  // hardcoded.
-  const defaults = useMemo(
-    () => ({
-      sans: resolveDefaultFamilyLabel(DEFAULT_SANS_FONT_STACK) ?? "System default",
-      code: resolveDefaultFamilyLabel(DEFAULT_CODE_FONT_STACK) ?? "System monospace",
-    }),
-    [],
-  );
-  return {
-    sans: defaults.sans,
-    code: defaults.code,
-    // The composer inherits whatever the interface preference resolves to.
-    interfaceFamily: settings.fontFamilySans.trim() || defaults.sans,
-  };
-}
-
-function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const defaults = useFontDefaultFamilies();
-  return (
-    <FontFamilySettingsRow
-      {...searchableSetting("interface-font")}
-      description="Everything outside code blocks and the terminal."
-      defaultFamily={defaults.sans}
-      defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilySans}
-      value={settings.fontFamilySans}
-      onValueChange={(fontFamilySans) => updateSettings({ fontFamilySans })}
-      onReset={() =>
-        updateSettings({
-          fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
-          fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
-        })
-      }
-      size={{
-        label: "Interface font size",
-        min: MIN_INTERFACE_FONT_SIZE,
-        max: MAX_INTERFACE_FONT_SIZE,
-        value: settings.fontSizeInterface,
-        defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
-        onChange: (fontSizeInterface) => updateSettings({ fontSizeInterface }),
-      }}
-      {...(preview !== undefined ? { preview } : {})}
-    />
-  );
-}
-
-function PromptFontRow() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const defaults = useFontDefaultFamilies();
-  return (
-    <FontFamilySettingsRow
-      {...searchableSetting("prompt-font")}
-      description="Only the box you write prompts in. Mono works well here."
-      defaultFamily={defaults.interfaceFamily}
-      defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer}
-      value={settings.fontFamilyComposer}
-      onValueChange={(fontFamilyComposer) => updateSettings({ fontFamilyComposer })}
-      onReset={() =>
-        updateSettings({
-          fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
-          fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
-        })
-      }
-      size={{
-        label: "Prompt font size",
-        min: MIN_PROMPT_FONT_SIZE,
-        max: MAX_PROMPT_FONT_SIZE,
-        value: settings.fontSizePrompt,
-        defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
-        onChange: (fontSizePrompt) => updateSettings({ fontSizePrompt }),
-      }}
-      preview={<PromptFontPreview />}
-    />
-  );
-}
-
-function CodeFontRow({
-  title,
-  description = "Code blocks, diffs, and file previews.",
-  preview,
-}: {
-  title?: string;
-  description?: string;
-  preview?: ReactNode;
-}) {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const defaults = useFontDefaultFamilies();
-  return (
-    <FontFamilySettingsRow
-      {...searchableSetting("code-font")}
-      {...(title !== undefined ? { title } : {})}
-      description={description}
-      defaultFamily={defaults.code}
-      defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilyCode}
-      value={settings.fontFamilyCode}
-      onValueChange={(fontFamilyCode) => updateSettings({ fontFamilyCode })}
-      onReset={() =>
-        updateSettings({
-          fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
-          fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
-        })
-      }
-      requireMonospace
-      size={{
-        label: "Code font size",
-        min: MIN_CODE_FONT_SIZE,
-        max: MAX_CODE_FONT_SIZE,
-        value: settings.fontSizeCode,
-        defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
-        onChange: (fontSizeCode) => updateSettings({ fontSizeCode }),
-      }}
-      preview={preview ?? <CodeFontPreview />}
-    />
-  );
-}
-
-function TerminalFontRow() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const defaults = useFontDefaultFamilies();
-  return (
-    <FontFamilySettingsRow
-      {...searchableSetting("terminal-font")}
-      description="Terminal output, independent from code blocks and diffs."
-      defaultFamily={defaults.code}
-      defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal}
-      value={settings.fontFamilyTerminal}
-      onValueChange={(fontFamilyTerminal) => updateSettings({ fontFamilyTerminal })}
-      onReset={() =>
-        updateSettings({
-          fontFamilyTerminal: DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal,
-          fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
-        })
-      }
-      requireMonospace
-      size={{
-        label: "Terminal font size",
-        min: MIN_TERMINAL_FONT_SIZE,
-        max: MAX_TERMINAL_FONT_SIZE,
-        value: settings.fontSizeTerminal,
-        defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
-        onChange: (fontSizeTerminal) => updateSettings({ fontSizeTerminal }),
-      }}
-      preview={
-        <TerminalFontPreview
-          family={resolveTerminalFontPreference({
-            advanced: true,
-            code: settings.fontFamilyCode,
-            terminal: settings.fontFamilyTerminal,
-          })}
-          size={settings.fontSizeTerminal}
-        />
-      }
-    />
-  );
-}
-
-function FontSmoothingRow() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  if (!isMacPlatform(navigator.platform)) return null;
-  return (
-    <SettingsRow
-      {...searchableSetting("font-smoothing")}
-      description="Use thinner grayscale text smoothing instead of the macOS default."
-      resetAction={
-        settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
-          <SettingResetButton
-            label="font smoothing"
-            onClick={() =>
-              updateSettings({ fontSmoothing: DEFAULT_UNIFIED_SETTINGS.fontSmoothing })
-            }
-          />
-        ) : null
-      }
-      control={
-        <Switch
-          checked={settings.fontSmoothing}
-          onCheckedChange={(checked) => updateSettings({ fontSmoothing: Boolean(checked) })}
-          aria-label="Font smoothing"
-        />
-      }
-    />
-  );
-}
-
-function WordWrapRow() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  return (
-    <SettingsRow
-      {...searchableSetting("word-wrap")}
-      description="Wrap long lines in code blocks, tables, diffs, and file previews by default."
-      resetAction={
-        settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? (
-          <SettingResetButton
-            label="word wrapping"
-            onClick={() => updateSettings({ wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap })}
-          />
-        ) : null
-      }
-      control={
-        <Switch
-          checked={settings.wordWrap}
-          onCheckedChange={(checked) => updateSettings({ wordWrap: Boolean(checked) })}
-          aria-label="Wrap code, tables, diffs, and file previews by default"
-        />
-      }
-    />
-  );
-}
-
-function FontSettingsGroup() {
-  return (
-    <>
-      <InterfaceFontRow />
-      <PromptFontRow />
-      <CodeFontRow />
-      <TerminalFontRow />
-      <FontSmoothingRow />
-    </>
-  );
-}
-
-/**
- * The two-font view: one sans, one monospace. The prompt follows the
- * interface font and the terminal follows the monospace font, so the demos
- * under each row show every surface the choice reaches.
- */
-function SimpleFontRows() {
-  const settings = useScopedSettings();
-  return (
-    <>
-      <InterfaceFontRow preview={<PromptFontPreview />} />
-      <CodeFontRow
-        title="Monospace font"
-        description="Code blocks, diffs, file previews, and the terminal."
-        preview={
-          <>
-            <CodeFontPreview />
-            <TerminalFontPreview
-              family={resolveTerminalFontPreference({
-                advanced: false,
-                code: settings.fontFamilyCode,
-                terminal: settings.fontFamilyTerminal,
-              })}
-              size={resolveTerminalFontSizePreference({
-                advanced: false,
-                code: settings.fontSizeCode,
-                terminal: settings.fontSizeTerminal,
-              })}
-            />
-          </>
-        }
-      />
-    </>
-  );
-}
-
-// Font smoothing only renders on macOS, so a search jump to it elsewhere
-// must not flip the section - the target would never mount to be scrolled to.
-const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
-  "prompt-font",
-  "terminal-font",
-  ...(typeof navigator !== "undefined" && isMacPlatform(navigator.platform)
-    ? ["font-smoothing"]
-    : []),
-]);
-
-/**
- * The two-font view by default - one sans, one monospace, each cascading to
- * every surface it reaches - with an Advanced switch in the section header
- * that reveals the per-surface override rows. The choice persists locally,
- * and a settings-search jump to an override row flips Advanced on so the
- * target exists to scroll to.
- */
-/**
- * Sidebar artwork: pick a built-in scene, one of your own, or nothing.
- *
- * Upstream only draws artwork on Dev/Nightly builds. MT Code ships a single
- * release, so the artwork is a preference; custom pieces live in server
- * settings, which is what makes them follow the account to every client
- * attached to it rather than sitting in one browser's local storage.
- */
-function SidebarArtworkRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [addError, setAddError] = useState<string | null>(null);
-  const custom = settings.customSidebarArtworks;
-  const selection = settings.sidebarArtwork;
-
-  const options = useMemo(
-    () => [
-      { value: "night", label: "Night sky" },
-      { value: "day", label: "Blueprint" },
-      { value: "local-day-night", label: "Local day & night" },
-      { value: "local-weather", label: "Local day, night & weather" },
-      ...SKY_OPTIONS,
-      { value: "none", label: "None" },
-      ...custom.map((artwork) => ({ value: artwork.id, label: artwork.name })),
-    ],
-    [custom],
-  );
-
-  const onPickFile = async (file: File) => {
-    setAddError(null);
-    if (file.size > MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES * 0.7) {
-      // base64 inflates by ~4/3, so the on-disk limit is hit before the file one.
-      setAddError("That image is too large. Pick one under about 350 KB.");
-      return;
-    }
-    const image = await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-    if (image === null || !image.startsWith("data:image/")) {
-      setAddError("That file could not be read as an image.");
-      return;
-    }
-    const id = `art_${Math.random().toString(36).slice(2, 10)}`;
-    const name = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Artwork";
-    updateSettings({
-      customSidebarArtworks: [...custom, { id, name, image, createdAt: new Date().toISOString() }],
-      sidebarArtwork: id,
-    });
-  };
-
-  const removeArtwork = (id: string) => {
-    updateSettings({
-      customSidebarArtworks: custom.filter((artwork) => artwork.id !== id),
-      ...(selection === id ? { sidebarArtwork: DEFAULT_SIDEBAR_ARTWORK_SELECTION } : {}),
-    });
-  };
-
-  return (
-    <SettingsRow
-      {...searchableSetting("sidebar-artwork")}
-      description="Artwork behind the sidebar header. Your own artwork syncs to every client signed in here."
-      resetAction={
-        selection !== DEFAULT_SIDEBAR_ARTWORK_SELECTION ? (
-          <SettingResetButton
-            label="sidebar artwork"
-            onClick={() => updateSettings({ sidebarArtwork: DEFAULT_SIDEBAR_ARTWORK_SELECTION })}
-          />
-        ) : null
-      }
-      control={
-        <div className="flex w-full flex-col items-end gap-2">
-          <Select
-            value={selection}
-            onValueChange={(value) => {
-              if (typeof value === "string") updateSettings({ sidebarArtwork: value });
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-60" aria-label="Sidebar artwork">
-              <SelectValue>
-                {options.find((option) => option.value === selection)?.label ?? "None"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {options.map((option) => (
-                <SelectItem hideIndicator key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          {isLocalSky(selection) ? <LocalSkySettings /> : null}
-          <div className="flex items-center gap-2">
-            {custom.some((artwork) => artwork.id === selection) ? (
-              <Button size="xs" variant="ghost" onClick={() => removeArtwork(selection ?? "")}>
-                Remove
-              </Button>
-            ) : null}
-            <Button size="xs" variant="outline" onClick={() => fileInputRef.current?.click()}>
-              Add artwork
-            </Button>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void onPickFile(file);
-            }}
-          />
-          {addError !== null ? <span className="text-2xs text-destructive">{addError}</span> : null}
-        </div>
-      }
-    />
-  );
-}
-
-/**
- * App icon: the built-in mark, a light or dark variant, or your own image.
- *
- * The installed bundle keeps its own icon — rewriting that would break the
- * code signature and take every macOS permission grant with it — so the pick
- * is applied to the running app's Dock tile (or window icon off macOS).
- */
-function AppIconRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [addError, setAddError] = useState<string | null>(null);
-  const custom = settings.customAppIcons;
-  const selection = settings.appIcon;
-
-  const options = useMemo(
-    () => [
-      { value: "default", label: "MT Code" },
-      { value: "light", label: "Light — black mark" },
-      { value: "dark", label: "Dark — white mark" },
-      { value: "match-artwork", label: "Match sidebar artwork" },
-      { value: "local-day-night", label: "Local day & night" },
-      { value: "local-weather", label: "Local day, night & weather" },
-      ...SKY_OPTIONS,
-      ...custom.map((icon) => ({ value: icon.id, label: icon.name })),
-    ],
-    [custom],
-  );
-
-  const onPickFile = async (file: File) => {
-    setAddError(null);
-    if (file.size > MAX_CUSTOM_APP_ICON_BYTES * 0.7) {
-      setAddError("That image is too large. Pick one under about 350 KB.");
-      return;
-    }
-    const image = await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-    // Electron's nativeImage reads PNG and JPEG only, so an SVG would save
-    // fine here and then silently fail to draw.
-    if (image === null || !/^data:image\/(png|jpeg|jpg)/.test(image)) {
-      setAddError("Use a square PNG or JPEG.");
-      return;
-    }
-    const id = `icon_${Math.random().toString(36).slice(2, 10)}`;
-    const name = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Icon";
-    updateSettings({
-      customAppIcons: [...custom, { id, name, image, createdAt: new Date().toISOString() }],
-      appIcon: id,
-    });
-  };
-
-  const removeIcon = (id: string) => {
-    updateSettings({
-      customAppIcons: custom.filter((icon) => icon.id !== id),
-      ...(selection === id ? { appIcon: DEFAULT_APP_ICON_SELECTION } : {}),
-    });
-  };
-
-  return (
-    <SettingsRow
-      {...searchableSetting("app-icon")}
-      description="Icon this app wears in the Dock and window. Your own icons sync to every client signed in here."
-      resetAction={
-        selection !== DEFAULT_APP_ICON_SELECTION ? (
-          <SettingResetButton
-            label="app icon"
-            onClick={() => updateSettings({ appIcon: DEFAULT_APP_ICON_SELECTION })}
-          />
-        ) : null
-      }
-      control={
-        <div className="flex w-full flex-col items-end gap-2">
-          <Select
-            value={selection}
-            onValueChange={(value) => {
-              if (typeof value === "string") updateSettings({ appIcon: value });
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-60" aria-label="App icon">
-              <SelectValue>
-                {options.find((option) => option.value === selection)?.label ?? "MT Code"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {options.map((option) => (
-                <SelectItem hideIndicator key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          {isLocalSky(selection) ? <LocalSkySettings /> : null}
-          {selection === "match-artwork" ? (
-            <p className="max-w-sm text-xs text-muted-foreground">
-              Keeps the MT mark and follows your sidebar artwork, including local daylight and
-              weather. Applies to the running desktop app.
-            </p>
-          ) : null}
-          <div className="flex items-center gap-2">
-            {custom.some((icon) => icon.id === selection) ? (
-              <Button size="xs" variant="ghost" onClick={() => removeIcon(selection ?? "")}>
-                Remove
-              </Button>
-            ) : null}
-            <Button size="xs" variant="outline" onClick={() => fileInputRef.current?.click()}>
-              Upload icon
-            </Button>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void onPickFile(file);
-            }}
-          />
-          {addError !== null ? <span className="text-2xs text-destructive">{addError}</span> : null}
-        </div>
-      }
-    />
-  );
-}
-
-function TypographySection() {
-  const [advanced, setAdvanced] = useLocalStorage(
-    TYPOGRAPHY_ADVANCED_STORAGE_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const searchTargetId = useSettingsSearchTargetId();
-  // Flip Advanced on once per search jump so the hidden target can mount and
-  // scroll; tracking the handled id lets the user turn it back off without
-  // the still-set target immediately re-expanding the section.
-  const lastExpandedTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchTargetId === null || !ADVANCED_TYPOGRAPHY_TARGET_IDS.has(searchTargetId)) return;
-    if (lastExpandedTargetRef.current === searchTargetId) return;
-    lastExpandedTargetRef.current = searchTargetId;
-    setAdvanced(true);
-  }, [searchTargetId, setAdvanced]);
-  return (
-    <SettingsSection
-      id="typography"
-      title="Typography"
-      headerAction={
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-          Advanced
-          <Switch
-            checked={advanced}
-            onCheckedChange={(checked) => setAdvanced(Boolean(checked))}
-            aria-label="Show advanced typography settings"
-          />
-        </label>
-      }
-    >
-      {advanced ? <FontSettingsGroup /> : <SimpleFontRows />}
-      <WordWrapRow />
-    </SettingsSection>
-  );
-}
-
-function FontFamilySettingsRow({
-  id,
-  title,
-  description,
-  defaultFamily,
-  defaultValue,
-  preview,
-  value,
-  onValueChange,
-  onReset,
-  requireMonospace = false,
-  size,
-}: {
-  id?: string;
-  title: string;
-  description: string;
-  /** What an unset preference renders as, e.g. "Menlo". */
-  defaultFamily: string;
-  /** The persisted family value supplied by the unified settings defaults. */
-  defaultValue: string;
-  preview?: ReactNode;
-  value: string;
-  onValueChange: (value: string) => void;
-  onReset: () => void;
-  requireMonospace?: boolean;
-  size: {
-    label: string;
-    min: number;
-    max: number;
-    value: number;
-    defaultValue: number;
-    onChange: (v: number) => void;
-  };
-}) {
-  const trimmed = value.trim();
-  // The fallback input edits a draft; the preference only commits once typing
-  // pauses and the text probes as an available font (or is an explicit
-  // clear), so the current font holds and nothing reflows mid-word.
-  const [draft, setDraft] = useState(value);
-  const [draftSettled, setDraftSettled] = useState(true);
-  const commitTimerRef = useRef<number | null>(null);
-  const lastValueRef = useRef(value);
-  if (lastValueRef.current !== value) {
-    // The committed value changed externally (hydration, reset, picker
-    // selection); adopt it and drop any pending commit of a stale draft.
-    lastValueRef.current = value;
-    if (commitTimerRef.current !== null) {
-      window.clearTimeout(commitTimerRef.current);
-      commitTimerRef.current = null;
-    }
-    setDraft(value);
-    setDraftSettled(true);
-  }
-  useEffect(
-    () => () => {
-      if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
-    },
-    [],
-  );
-  const acceptsFamily = (candidate: string) =>
-    isFontFamilyAvailable(candidate) && (!requireMonospace || isMonospaceFamily(candidate));
-  const commitDraft = (next: string) => {
-    setDraftSettled(true);
-    // A rejected name stays in the field, flagged: the terminal would silently
-    // fall back to its default, so the row must not claim it took the value.
-    if (next.trim().length === 0 || acceptsFamily(next)) {
-      onValueChange(next);
-    }
-  };
-  const flushDraft = () => {
-    if (commitTimerRef.current === null) return;
-    window.clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = null;
-    commitDraft(draft);
-  };
-  const draftTrimmed = draft.trim();
-  // Flag an unknown name only once typing pauses, and never for an empty
-  // field - that is the starting state, not a rejected entry.
-  const draftPending = draftSettled && draftTrimmed.length > 0 && draftTrimmed !== trimmed;
-  const resetToDefault = () => {
-    if (commitTimerRef.current !== null) {
-      window.clearTimeout(commitTimerRef.current);
-      commitTimerRef.current = null;
-    }
-    setDraft(defaultValue);
-    setDraftSettled(true);
-    onReset();
-  };
-  const resetAction =
-    value !== defaultValue || size.value !== size.defaultValue ? (
-      <SettingResetButton label={title.toLowerCase()} onClick={resetToDefault} />
-    ) : null;
-  const fontEnumeration = useFontEnumeration();
-  // Everyone starts on the plain input; focusing it is the user gesture that
-  // runs font discovery. Where the engine can enumerate, the control then
-  // upgrades to the picker - popped open when the swap happens under focus,
-  // so the interaction continues without a second click.
-  const inputFocusedRef = useRef(false);
-  const familyControl =
-    fontEnumeration.status === "granted" ? (
-      <FontFamilyPicker
-        ariaLabel={`${title} family`}
-        defaultFamily={defaultFamily}
-        selectedFamily={trimmed}
-        requireMonospace={requireMonospace}
-        initialOpen={inputFocusedRef.current}
-        onSelect={onValueChange}
-      />
-    ) : (
-      <Input
-        size="sm"
-        aria-label={`${title} family`}
-        aria-invalid={draftPending || undefined}
-        autoCapitalize="off"
-        autoComplete="off"
-        className="min-w-0 flex-1"
-        maxLength={200}
-        onFocus={() => {
-          inputFocusedRef.current = true;
-          discoverInstalledFonts();
-        }}
-        onBlur={() => {
-          inputFocusedRef.current = false;
-          flushDraft();
-        }}
-        onChange={(event) => {
-          const next = event.currentTarget.value;
-          setDraft(next);
-          setDraftSettled(false);
-          if (commitTimerRef.current !== null) {
-            window.clearTimeout(commitTimerRef.current);
-          }
-          commitTimerRef.current = window.setTimeout(() => {
-            commitTimerRef.current = null;
-            commitDraft(next);
-          }, 400);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") flushDraft();
-          if (event.key === "Escape") {
-            // Discard uncommitted typing without closing the settings page,
-            // which is what an unhandled Escape does.
-            event.preventDefault();
-            event.stopPropagation();
-            if (commitTimerRef.current !== null) {
-              window.clearTimeout(commitTimerRef.current);
-              commitTimerRef.current = null;
-            }
-            setDraft(value);
-            setDraftSettled(true);
-          }
-        }}
-        placeholder={defaultFamily}
-        spellCheck={false}
-        value={draft}
-      />
-    );
-  const control = (
-    <div className="flex w-full items-center gap-2 sm:w-auto">
-      <div className="min-w-0 flex-1 sm:w-44 sm:flex-none">{familyControl}</div>
-      <Select
-        value={String(size.value)}
-        onValueChange={(next) => {
-          if (typeof next !== "string") return;
-          const parsed = Number(next);
-          if (Number.isInteger(parsed) && parsed >= size.min && parsed <= size.max) {
-            size.onChange(parsed);
-          }
-        }}
-      >
-        <SelectTrigger size="sm" className="w-22 shrink-0" aria-label={size.label}>
-          <SelectValue>{size.value} px</SelectValue>
-        </SelectTrigger>
-        <SelectPopup align="end" alignItemWithTrigger={false}>
-          {Array.from({ length: size.max - size.min + 1 }, (_, index) => size.min + index).map(
-            (px) => (
-              <SelectItem hideIndicator key={px} value={String(px)}>
-                {px} px
-              </SelectItem>
-            ),
-          )}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-  return (
-    <SettingsRow
-      {...(id !== undefined ? { id } : {})}
-      title={title}
-      description={description}
-      resetAction={resetAction}
-      control={control}
-    >
-      {preview}
-    </SettingsRow>
-  );
-}
-
-const AUTO_SETTLE_OPTIONS = [
-  { value: "off", label: "Off" },
-  { value: "all", label: "All threads" },
-  { value: "without-pr", label: "Threads without a PR" },
-] as const;
-
-type AutoSettleMode = (typeof AUTO_SETTLE_OPTIONS)[number]["value"];
-
-const DEFAULT_INACTIVITY_SETTINGS = {
-  sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
-  sidebarAutoSettleScope: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleScope,
-};
-const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_INACTIVITY_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
-
-const TRANSCRIPTION_API_KEY_ENV = {
-  openai: "OPENAI_API_KEY",
-  groq: "GROQ_API_KEY",
-} as const;
-
-function VoiceDictationSettingsRows({
-  settings,
-  updateSettings,
-}: {
-  settings: UnifiedSettings;
-  updateSettings: ReturnType<typeof useUpdatePrimarySettings>;
-}) {
-  const [environmentApiKeys, setEnvironmentApiKeys] = useState<
-    Partial<Record<VoiceTranscriptionProvider, boolean>>
-  >({});
-  const [transcriptionModels, setTranscriptionModels] = useState<string[]>([]);
-  const [transcriptionModelsLoading, setTranscriptionModelsLoading] = useState(false);
-  const [transcriptionModelsError, setTranscriptionModelsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!settings.voiceTranscriptionEnabled) return;
-    let cancelled = false;
-    void readVoiceTranscriptionEnvironmentStatus()
-      .then((status) => {
-        if (!cancelled) setEnvironmentApiKeys(status);
-      })
-      .catch(() => {
-        if (!cancelled) setEnvironmentApiKeys({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [settings.voiceTranscriptionEnabled]);
-
-  const transcriptionProviderLabel =
-    settings.voiceTranscriptionProvider === "openai" ? "OpenAI" : "Groq";
-  const transcriptionApiKeyEnvironmentVariable =
-    TRANSCRIPTION_API_KEY_ENV[settings.voiceTranscriptionProvider];
-  const hasEnvironmentApiKey = environmentApiKeys[settings.voiceTranscriptionProvider];
-  const hasTranscriptionApiKey =
-    settings.voiceTranscriptionApiKey.trim().length > 0 || hasEnvironmentApiKey;
-
-  useEffect(() => {
-    if (!settings.voiceTranscriptionEnabled || !hasTranscriptionApiKey) {
-      setTranscriptionModels([]);
-      setTranscriptionModelsLoading(false);
-      setTranscriptionModelsError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setTranscriptionModelsLoading(true);
-    setTranscriptionModelsError(null);
-    const timeout = window.setTimeout(
-      () => {
-        void listVoiceTranscriptionModels({
-          provider: settings.voiceTranscriptionProvider,
-          apiKey: settings.voiceTranscriptionApiKey,
-        })
-          .then((models) => {
-            if (cancelled) return;
-            setTranscriptionModels([...models]);
-            setTranscriptionModelsLoading(false);
-          })
-          .catch((error: unknown) => {
-            if (cancelled) return;
-            setTranscriptionModels([]);
-            setTranscriptionModelsLoading(false);
-            setTranscriptionModelsError(
-              error instanceof Error ? error.message : "Failed to load transcription models.",
-            );
-          });
-      },
-      settings.voiceTranscriptionApiKey.trim() ? 400 : 0,
-    );
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [
-    hasTranscriptionApiKey,
-    settings.voiceTranscriptionApiKey,
-    settings.voiceTranscriptionEnabled,
-    settings.voiceTranscriptionProvider,
-  ]);
-
-  useEffect(() => {
-    if (
-      transcriptionModels.length > 0 &&
-      settings.voiceTranscriptionModel &&
-      !transcriptionModels.includes(settings.voiceTranscriptionModel)
-    ) {
-      updateSettings({ voiceTranscriptionModel: "" });
-    }
-  }, [settings.voiceTranscriptionModel, transcriptionModels, updateSettings]);
-
-  const transcriptionModelDescription = !hasTranscriptionApiKey
-    ? `Add an API key to load models available from ${transcriptionProviderLabel}.`
-    : transcriptionModelsLoading
-      ? `Loading models available from ${transcriptionProviderLabel}…`
-      : transcriptionModelsError
-        ? transcriptionModelsError
-        : transcriptionModels.length === 0
-          ? `${transcriptionProviderLabel} did not return any models.`
-          : `Loaded from ${transcriptionProviderLabel} using the configured API key.`;
-
-  const canResetVoiceDictation =
-    settings.voiceTranscriptionEnabled !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled ||
-    settings.voiceTranscriptionProvider !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider ||
-    settings.voiceTranscriptionApiKey !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey ||
-    settings.voiceTranscriptionModel !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel;
-
-  return (
-    <>
-      <SettingsRow
-        {...searchableSetting("voice-dictation")}
-        description="Record from the composer and turn speech into text. Uses portable browser media APIs on Linux, macOS, and Windows."
-        resetAction={
-          canResetVoiceDictation ? (
-            <SettingResetButton
-              label="voice dictation"
-              onClick={() =>
-                updateSettings({
-                  voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
-                  voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
-                  voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
-                  voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <Switch
-            checked={settings.voiceTranscriptionEnabled}
-            onCheckedChange={(checked) =>
-              updateSettings({ voiceTranscriptionEnabled: Boolean(checked) })
-            }
-            aria-label="Enable voice dictation beta"
-          />
-        }
-      />
-      {settings.voiceTranscriptionEnabled ? (
-        <>
-          <SettingsRow
-            title="Transcription provider"
-            description="Use OpenAI or Groq. T3 loads the models available to the configured API key."
-            control={
-              <Select
-                value={settings.voiceTranscriptionProvider}
-                onValueChange={(value) =>
-                  updateSettings({
-                    voiceTranscriptionProvider: value as VoiceTranscriptionProvider,
-                    voiceTranscriptionApiKey: "",
-                    voiceTranscriptionModel: "",
-                  })
-                }
-              >
-                <SelectTrigger className="w-full sm:w-44" aria-label="Transcription provider">
-                  <SelectValue>{transcriptionProviderLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="openai">
-                    OpenAI
-                  </SelectItem>
-                  <SelectItem hideIndicator value="groq">
-                    Groq
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-          <SettingsRow
-            title={`${transcriptionProviderLabel} API key`}
-            description={
-              hasEnvironmentApiKey
-                ? `${transcriptionApiKeyEnvironmentVariable} is configured on the connected T3 server. Enter a key here to override it for this client.`
-                : `Stored only in this client's local settings. You can also set ${transcriptionApiKeyEnvironmentVariable} on the connected T3 server.`
-            }
-            control={
-              <Input
-                type="password"
-                autoComplete="off"
-                className="w-full sm:w-64"
-                value={settings.voiceTranscriptionApiKey}
-                onChange={(event) =>
-                  updateSettings({
-                    voiceTranscriptionApiKey: event.target.value,
-                    voiceTranscriptionModel: "",
-                  })
-                }
-                placeholder={
-                  hasEnvironmentApiKey
-                    ? `Using ${transcriptionApiKeyEnvironmentVariable}`
-                    : "Required"
-                }
-                aria-label={`${transcriptionProviderLabel} transcription API key`}
-              />
-            }
-          />
-          <SettingsRow
-            title="Transcription model"
-            description={transcriptionModelDescription}
-            control={
-              <Select
-                value={settings.voiceTranscriptionModel}
-                disabled={transcriptionModelsLoading || transcriptionModels.length === 0}
-                onValueChange={(value) => {
-                  if (value !== null) updateSettings({ voiceTranscriptionModel: value });
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-64" aria-label="Transcription model">
-                  <SelectValue>
-                    {settings.voiceTranscriptionModel ||
-                      (transcriptionModelsLoading ? "Loading models…" : "Select model")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {transcriptionModels.map((model) => (
-                    <SelectItem hideIndicator key={model} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        </>
-      ) : null}
-    </>
-  );
-}
+const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 function AutoSettleDaysInput({
   value,
@@ -2602,12 +675,12 @@ function AutoSettleDaysInput({
   value: number;
   onCommit: (days: number) => void;
 }) {
-  // Local draft so the field can be emptied mid-edit; the setting only moves
-  // on valid input and snaps back to the persisted value on blur.
   const [draft, setDraft] = useState(String(value));
-  useEffect(() => {
+  const [draftSource, setDraftSource] = useState(value);
+  if (draftSource !== value) {
+    setDraftSource(value);
     setDraft(String(value));
-  }, [value]);
+  }
 
   return (
     <Input
@@ -2619,9 +692,6 @@ function AutoSettleDaysInput({
       value={draft}
       onChange={(event) => {
         setDraft(event.target.value);
-        // Number(), not parseInt: "3.5" must be rejected (not truncated to a
-        // committed 3 while the field shows 3.5) — commit only when the
-        // persisted value matches the displayed one.
         const parsed = Number(event.target.value);
         if (
           Number.isInteger(parsed) &&
@@ -2637,241 +707,24 @@ function AutoSettleDaysInput({
   );
 }
 
-function VoiceDictationSettingsSection() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const [environmentApiKeys, setEnvironmentApiKeys] = useState({ openai: false, groq: false });
-  const [environmentStatusLoading, setEnvironmentStatusLoading] = useState(true);
-  const [environmentStatusError, setEnvironmentStatusError] = useState<string | null>(null);
-  const [environmentStatusAttempt, setEnvironmentStatusAttempt] = useState(0);
-  const [models, setModels] = useState<readonly string[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const provider = settings.voiceTranscriptionProvider;
-  const apiKey = settings.voiceTranscriptionApiKey;
-  const model = settings.voiceTranscriptionModel;
-  const selectableModels = voiceTranscriptionModelOptions(models, model);
-
-  useEffect(() => {
-    let active = true;
-    setEnvironmentStatusLoading(true);
-    setEnvironmentStatusError(null);
-    void readVoiceTranscriptionEnvironmentStatus()
-      .then((status) => {
-        if (!active) return;
-        setEnvironmentApiKeys(status);
-        setEnvironmentStatusLoading(false);
-      })
-      .catch((cause: unknown) => {
-        if (!active) return;
-        setEnvironmentStatusLoading(false);
-        setEnvironmentStatusError(
-          cause instanceof Error ? cause.message : "Could not check server transcription keys.",
-        );
-      });
-    return () => {
-      active = false;
-    };
-  }, [environmentStatusAttempt]);
-
-  const providerLabel = provider === "openai" ? "OpenAI" : "Groq";
-  const environmentVariable = TRANSCRIPTION_API_KEY_ENV[provider];
-  const hasEnvironmentApiKey = environmentApiKeys[provider];
-  const hasApiKey = apiKey.trim().length > 0 || hasEnvironmentApiKey;
-
-  useEffect(() => {
-    if (!hasApiKey) {
-      setModels([]);
-      setModelsLoading(false);
-      setModelsError(null);
-      return;
-    }
-
-    let active = true;
-    setModelsLoading(true);
-    setModelsError(null);
-    const timeout = window.setTimeout(
-      () => {
-        void listVoiceTranscriptionModels({ provider, apiKey })
-          .then((nextModels) => {
-            if (!active) return;
-            setModels(nextModels);
-            setModelsLoading(false);
-          })
-          .catch((cause: unknown) => {
-            if (!active) return;
-            setModels([]);
-            setModelsLoading(false);
-            setModelsError(
-              cause instanceof Error ? cause.message : "Could not load transcription models.",
-            );
-          });
-      },
-      apiKey.trim() ? 400 : 0,
-    );
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
-  }, [apiKey, hasApiKey, provider]);
-
-  const modelDescription = !hasApiKey
-    ? environmentStatusLoading
-      ? `Checking the connected server for ${environmentVariable}…`
-      : environmentStatusError
-        ? `${environmentStatusError} Add a client key or retry the server check.`
-        : `Save an API key to load ${providerLabel} transcription models.`
-    : modelsLoading
-      ? `Loading models available from ${providerLabel}…`
-      : modelsError
-        ? modelsError
-        : models.length === 0
-          ? `${providerLabel} did not return any models.`
-          : model && !models.includes(model)
-            ? "The saved model was not returned by the provider. Keep it or choose another model."
-            : "Choose a model. The microphone appears in the composer after that.";
-
-  return (
-    <SettingsSection title="Voice dictation">
-      <SettingsRow
-        {...searchableSetting("voice-dictation")}
-        description="Codex-style dictation: cancel, insert into the end of the draft, or transcribe and send."
-        control={
-          <Select
-            value={provider}
-            onValueChange={(value) =>
-              updateSettings({
-                voiceTranscriptionProvider: value as VoiceTranscriptionProvider,
-                voiceTranscriptionApiKey: "",
-                voiceTranscriptionModel: "",
-                voiceTranscriptionEnabled: false,
-              })
-            }
-          >
-            <SelectTrigger className="w-full sm:w-44" aria-label="Transcription provider">
-              <SelectValue>{providerLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem hideIndicator value="openai">
-                OpenAI
-              </SelectItem>
-              <SelectItem hideIndicator value="groq">
-                Groq
-              </SelectItem>
-            </SelectPopup>
-          </Select>
-        }
-      />
-      <SettingsRow
-        title={`${providerLabel} API key`}
-        description={
-          environmentStatusLoading
-            ? `Checking whether ${environmentVariable} is configured on the connected server.`
-            : environmentStatusError
-              ? `${environmentStatusError} You can still enter a client key.`
-              : hasEnvironmentApiKey
-                ? `${environmentVariable} is configured on the connected server. A client key overrides it.`
-                : `Stored in this client's settings. You can also set ${environmentVariable} on the server.`
-        }
-        control={
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <Input
-              type="password"
-              autoComplete="off"
-              className="w-full sm:w-64"
-              value={apiKey}
-              onChange={(event) =>
-                updateSettings({
-                  voiceTranscriptionApiKey: event.target.value,
-                  voiceTranscriptionModel: "",
-                  voiceTranscriptionEnabled: false,
-                })
-              }
-              placeholder={hasEnvironmentApiKey ? `Using ${environmentVariable}` : "Required"}
-              aria-label={`${providerLabel} transcription API key`}
-            />
-            {environmentStatusError ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => setEnvironmentStatusAttempt((attempt) => attempt + 1)}
-              >
-                Retry
-              </Button>
-            ) : null}
-          </div>
-        }
-      />
-      <SettingsRow
-        title="Transcription model"
-        description={modelDescription}
-        control={
-          <Select
-            value={model}
-            disabled={modelsLoading || selectableModels.length === 0}
-            onValueChange={(value) => {
-              if (value !== null) {
-                updateSettings({
-                  voiceTranscriptionModel: value,
-                  voiceTranscriptionEnabled: true,
-                });
-              }
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-64" aria-label="Transcription model">
-              <SelectValue>
-                {model || (modelsLoading ? "Loading models…" : "Select model")}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {selectableModels.map((availableModel) => (
-                <SelectItem hideIndicator key={availableModel} value={availableModel}>
-                  {availableModel}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        }
-      />
-    </SettingsSection>
-  );
-}
-
-// The legacy rows sit behind the fold, so a settings-search jump has to
-// expand the section before its target can mount and scroll.
 const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
   "legacy-plan-mode",
   "legacy-context-window-indicator",
   "legacy-sidebar",
 ]);
 
-/**
- * Retired features kept only for users who still depend on them. Collapsed by
- * default so they stay out of the everyday settings path; a settings-search
- * jump to one of the rows unfolds the section.
- */
 function LegacyFeaturesSection() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const [open, setOpen] = useState(false);
   const searchTargetId = useSettingsSearchTargetId();
   const targetRef = useSettingsSearchTarget<HTMLElement>("legacy-features");
-  // Unfold once per search jump; tracking the handled id lets the user fold
-  // the section back up without the still-set target immediately reopening it.
-  const lastExpandedTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchTargetId === null) {
-      // A handled jump clears the target; forgetting it here lets a later
-      // jump to the same row expand the section again.
-      lastExpandedTargetRef.current = null;
-      return;
-    }
-    if (!LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) return;
-    if (lastExpandedTargetRef.current === searchTargetId) return;
-    lastExpandedTargetRef.current = searchTargetId;
-    setOpen(true);
-  }, [searchTargetId]);
+  // A search jump to a legacy setting opens the fold before its row mounts.
+  const [seenSearchTargetId, setSeenSearchTargetId] = useState<string | null>(null);
+  if (seenSearchTargetId !== searchTargetId) {
+    setSeenSearchTargetId(searchTargetId);
+    if (searchTargetId !== null && LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) setOpen(true);
+  }
 
   return (
     <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
@@ -2940,51 +793,28 @@ export function GeneralSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
-  const { scope, environment, connectedEnvironments } = useSettingsScope();
-  // The representative environment supplies the provider list for pickers;
-  // a fanned-out model choice is validated against every target before it
-  // is written. Per-machine tuning (background activity overrides) still
-  // needs exactly one environment.
+  const { scope, environment, connectedEnvironments, target, targets } = useSettingsScope();
+  const idleCompaction = scopedIdleCompaction(targets.length > 0 ? targets : [{ settings }]);
   const environmentId = environment?.environmentId ?? null;
   const isEnvironmentScope = scope.environmentIds.length === 1 && environmentId !== null;
   const hasServerTargets = connectedEnvironments.length > 0;
-  const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
-  const [tokenStreamingWarningOpen, setTokenStreamingWarningOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
-  const serverProviders = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const providersByEnvironment = useEnvironmentProviders();
+  const serverProviders =
+    (environment?.serverConfig
+      ? providersByEnvironment.get(environment.environmentId)
+      : undefined) ?? EMPTY_SERVER_PROVIDERS;
   const supportsAutoSettlement =
     connectedEnvironments.length > 0 &&
     connectedEnvironments.every(
       (target) => target.serverConfig?.environment.capabilities.threadAutoSettlement === true,
     );
-  const mixedAutoSettle = useScopedSettingsMixed([
-    "sidebarAutoSettleAfterDays",
-    "sidebarAutoSettleScope",
-  ]);
-  const supportsAutoSettleScope = connectedEnvironments.every(
-    (environment) =>
-      environment.serverConfig?.environment.capabilities.threadAutoSettlementScope === true,
+  const supportsAutoSettlementScope = connectedEnvironments.every(
+    (target) => target.serverConfig?.environment.capabilities.threadAutoSettlementScope === true,
   );
-  const autoSettleAfterDays = settings.sidebarAutoSettleAfterDays;
-  const autoSettleScope = settings.sidebarAutoSettleScope;
-  const autoSettleMode = autoSettleAfterDays === null ? "off" : autoSettleScope;
-  const autoSettleChanged =
-    autoSettleAfterDays !== DEFAULT_INACTIVITY_SETTINGS.sidebarAutoSettleAfterDays ||
-    autoSettleScope !== DEFAULT_INACTIVITY_SETTINGS.sidebarAutoSettleScope;
-
-  function changeAutoSettleMode(value: AutoSettleMode | null) {
-    if (value === null) return;
-    const sidebarAutoSettleAfterDays =
-      value === "off" ? null : (autoSettleAfterDays ?? AUTO_SETTLE_DEFAULT_DAYS);
-    updateSettings({
-      sidebarAutoSettleAfterDays,
-      sidebarAutoSettleScope: value === "off" ? "all" : value,
-    });
-  }
-
   const supportsRestartContinuation =
     connectedEnvironments.length > 0 &&
     connectedEnvironments.every(
@@ -3002,7 +832,11 @@ export function GeneralSettingsPanel() {
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(textGenerationProviders), settings),
+    applyProviderInstanceSettings(
+      deriveProviderInstanceEntries(textGenerationProviders),
+      settings,
+      target?.projectId ?? null,
+    ),
   );
   const hasTextGenerationProvider = textGenerationModelInstanceEntries.some(
     (entry) => entry.enabled && entry.isAvailable,
@@ -3026,23 +860,8 @@ export function GeneralSettingsPanel() {
     settings,
     textGenerationModelInstanceEntries,
   );
-  const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
-  const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
-  const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
-  const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
-  const mixedWorktreeBranchPrefix = useScopedSettingsMixed(["worktreeBranchPrefix"]);
+  const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
-  const mixedThreadTitleInstructions = useScopedSettingsMixed(["threadTitleInstructions"]);
-  const backgroundActivityDescription =
-    backgroundActivityProfileOption === "advanced"
-      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
-          BACKGROUND_ACTIVITY_PROFILE_LABELS[activeBackgroundActivityProfile]
-        }.`
-      : BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS[resolvedBackgroundActivity.profile];
-  const canResetBackgroundActivity = !Equal.equals(
-    settings.backgroundActivity,
-    DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
-  );
 
   return (
     <SettingsPageContainer>
@@ -3083,53 +902,127 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-
         <SettingsRow
-          {...searchableSetting("workspace-tabs")}
-          description="Show open conversations as tabs in the workspace topbar."
+          {...searchableSetting("project-order")}
+          description="Order of projects in the sidebar project picker and command palette."
           resetAction={
-            settings.tabsEnabled !== DEFAULT_UNIFIED_SETTINGS.tabsEnabled ? (
+            settings.sidebarProjectSortOrder !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder ? (
               <SettingResetButton
-                label="workspace tabs"
-                onClick={() =>
-                  updateSettings({ tabsEnabled: DEFAULT_UNIFIED_SETTINGS.tabsEnabled })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.tabsEnabled}
-              onCheckedChange={(checked) => updateSettings({ tabsEnabled: Boolean(checked) })}
-              aria-label="Workspace tabs"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("working-shelf")}
-          description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
-          resetAction={
-            settings.sidebarWorkingShelfEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
-              <SettingResetButton
-                label="working section"
+                label="project order"
                 onClick={() =>
                   updateSettings({
-                    sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+                    sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
                   })
                 }
               />
             ) : null
           }
           control={
-            <Switch
-              checked={settings.sidebarWorkingShelfEnabled}
+            <Select
+              value={settings.sidebarProjectSortOrder}
+              onValueChange={(value) => {
+                if (isSidebarProjectSortOrder(value)) {
+                  updateSettings({ sidebarProjectSortOrder: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Project order">
+                <SelectValue>
+                  {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SidebarProjectSortOrder.literals.map((sortOrder) => (
+                  <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Resume usage-limit stops at the reported reset time. Each thread can cancel its scheduled continuation."
+          settingKeys={["autoResumeLimitedThreads"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["autoResumeLimitedThreads"]}
+              checked={settings.autoResumeLimitedThreads}
               onCheckedChange={(checked) =>
-                updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
               }
-              aria-label="Working section (beta)"
+              aria-label="Resume after usage limits"
             />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("snooze-limited-threads")}
+          description="Snooze usage-limit stops until reset. Pair with resume to continue on wake."
+          settingKeys={["snoozeLimitedThreads"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["snoozeLimitedThreads"]}
+              checked={settings.snoozeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Snooze until limits reset"
+            />
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          settingKeys={["idleCompaction", "compactIdleThreads"]}
+          mixed={idleCompaction.mixed}
+          {...searchableSetting("compact-idle-threads")}
+          description="When to compact an idle Claude thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Each Claude provider can override this."
+          resetAction={
+            globalIdleCompaction(settings) !== globalIdleCompaction(DEFAULT_UNIFIED_SETTINGS) ? (
+              <SettingResetButton
+                label="compact idle threads"
+                onClick={() =>
+                  updateSettings({ idleCompaction: globalIdleCompaction(DEFAULT_UNIFIED_SETTINGS) })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={idleCompaction.mixed ? null : globalIdleCompaction(settings)}
+              onValueChange={(value) => {
+                const mode = IDLE_COMPACTION_MODES.find((candidate) => candidate.value === value);
+                if (mode) updateSettings({ idleCompaction: mode.value });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Compact idle threads">
+                <SelectValue>
+                  {(value: string | null) =>
+                    value === null
+                      ? "Mixed"
+                      : IDLE_COMPACTION_MODES.find((mode) => mode.value === value)?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {IDLE_COMPACTION_MODES.map((mode) => (
+                  <SelectItem
+                    hideIndicator
+                    key={mode.value}
+                    value={mode.value}
+                    // A server from before modes has only the on/off switch, so it cannot store "Never".
+                    disabled={mode.value === "off" && !idleCompaction.neverAvailable}
+                  >
+                    {mode.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
 
@@ -3167,18 +1060,18 @@ export function GeneralSettingsPanel() {
 
             <SettingsRow
               serverScoped
-              settingKeys={["sidebarAutoSettlePinnedThreads"]}
-              {...searchableSetting("auto-settle-pinned-threads")}
-              description="Pinned threads stay active by default. Turn this on to let pins settle like any other thread."
+              settingKeys={["sidebarAutoSettleAfterDays"]}
+              {...searchableSetting("auto-settle-inactive-threads")}
+              description="Sidebar threads with no activity for this long settle automatically."
               resetAction={
-                settings.sidebarAutoSettlePinnedThreads !==
-                DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads ? (
+                settings.sidebarAutoSettleAfterDays !==
+                DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
                   <SettingResetButton
-                    label="auto-settle pinned threads"
+                    label="auto-settle"
                     onClick={() =>
                       updateSettings({
-                        sidebarAutoSettlePinnedThreads:
-                          DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads,
+                        sidebarAutoSettleAfterDays:
+                          DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
                       })
                     }
                   />
@@ -3186,58 +1079,15 @@ export function GeneralSettingsPanel() {
               }
               control={
                 <ScopedSwitch
-                  settingKeys={["sidebarAutoSettlePinnedThreads"]}
-                  checked={settings.sidebarAutoSettlePinnedThreads}
+                  settingKeys={["sidebarAutoSettleAfterDays"]}
+                  checked={settings.sidebarAutoSettleAfterDays !== null}
                   onCheckedChange={(checked) =>
-                    updateSettings({ sidebarAutoSettlePinnedThreads: Boolean(checked) })
+                    updateSettings({
+                      sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
+                    })
                   }
-                  aria-label="Auto-settle pinned threads"
+                  aria-label="Auto-settle inactive threads"
                 />
-              }
-            />
-
-            <SettingsRow
-              serverScoped
-              settingKeys={["sidebarAutoSettleAfterDays", "sidebarAutoSettleScope"]}
-              {...searchableSetting("auto-settle-inactive-threads")}
-              description={
-                autoSettleMode === "without-pr"
-                  ? "Sidebar threads without a PR settle automatically after this long."
-                  : "Sidebar threads with no activity for this long settle automatically."
-              }
-              resetAction={
-                autoSettleChanged ? (
-                  <SettingResetButton
-                    label="auto-settle"
-                    onClick={() => updateSettings(DEFAULT_INACTIVITY_SETTINGS)}
-                  />
-                ) : null
-              }
-              control={
-                <Select<AutoSettleMode>
-                  items={AUTO_SETTLE_OPTIONS}
-                  value={mixedAutoSettle ? null : autoSettleMode}
-                  onValueChange={changeAutoSettleMode}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="w-full sm:w-56"
-                    aria-label="Auto-settle inactive threads"
-                  >
-                    <SelectValue placeholder={mixedAutoSettle ? "Mixed" : undefined} />
-                  </SelectTrigger>
-                  <SelectPopup align="end" alignItemWithTrigger={false}>
-                    {AUTO_SETTLE_OPTIONS.map(({ value, label }) => (
-                      <SelectItem
-                        key={value}
-                        value={value}
-                        disabled={value === "without-pr" && !supportsAutoSettleScope}
-                      >
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
               }
             />
             {settings.sidebarAutoSettleAfterDays !== null ? (
@@ -3254,14 +1104,32 @@ export function GeneralSettingsPanel() {
                 }
               />
             ) : null}
+            {settings.sidebarAutoSettleAfterDays !== null && supportsAutoSettlementScope ? (
+              <SettingsRow
+                serverScoped
+                settingKeys={["sidebarAutoSettleKeepPullRequests"]}
+                title="Keep threads with a PR"
+                description="Inactivity does not settle threads with a pull request. Merge and close still do."
+                control={
+                  <ScopedSwitch
+                    settingKeys={["sidebarAutoSettleKeepPullRequests"]}
+                    checked={settings.sidebarAutoSettleKeepPullRequests}
+                    onCheckedChange={(checked) =>
+                      updateSettings({ sidebarAutoSettleKeepPullRequests: checked })
+                    }
+                    aria-label="Keep threads with a PR"
+                  />
+                }
+              />
+            ) : null}
           </>
         ) : null}
       </SettingsSection>
 
-      <VoiceDictationSettingsRows settings={settings} updateSettings={updateSettings} />
-
       <SettingsSection id="behavior" title="Behavior">
         <NotificationSettings />
+        <DesktopNotificationsSettings />
+        <VoiceDictationSettingsSection />
         <SettingsRow
           {...searchableSetting("in-app-notifications")}
           description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
@@ -3336,52 +1204,30 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <>
-              <Select
-                value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
-                onValueChange={(value) => {
-                  if (value === "token") {
-                    // The legacy path needs an explicit confirmation.
-                    setTokenStreamingWarningOpen(true);
-                    return;
+            <Select
+              value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
+              onValueChange={(value) => {
+                if (value === "turn" || value === "paragraph") {
+                  updateSettings({ responseStreamingMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
+                <SelectValue>
+                  {(value: ResponseStreamingMode | null) =>
+                    value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
                   }
-                  if (value === "turn" || value === "paragraph") {
-                    updateSettings({ responseStreamingMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
-                  <SelectValue>
-                    {(value: ResponseStreamingMode | null) =>
-                      value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="turn">
-                    {RESPONSE_STREAMING_MODE_LABELS.turn}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="paragraph">
-                    {RESPONSE_STREAMING_MODE_LABELS.paragraph}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="token">
-                    {RESPONSE_STREAMING_MODE_LABELS.token}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-              <TokenStreamingWarningDialog
-                open={tokenStreamingWarningOpen}
-                onOpenChange={setTokenStreamingWarningOpen}
-                onConfirm={() => {
-                  updateSettings({ responseStreamingMode: "token" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-                onUseParagraphs={() => {
-                  updateSettings({ responseStreamingMode: "paragraph" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-              />
-            </>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="turn">
+                  {RESPONSE_STREAMING_MODE_LABELS.turn}
+                </SelectItem>
+                <SelectItem hideIndicator value="paragraph">
+                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow
@@ -3488,7 +1334,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("proactive-panels")}
-          description="Open linked pull requests first. Otherwise, open the working tree diff for changes to at least 3 files or 50 lines."
+          description="Open linked pull requests first. Otherwise, open Changes for edits to at least 3 files or 50 lines."
           resetAction={
             settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled ? (
               <SettingResetButton
@@ -3685,7 +1531,7 @@ export function GeneralSettingsPanel() {
           serverScoped
           settingKeys={["enableProviderUpdateChecks"]}
           {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for newer available versions."
+          description="Check installed provider CLIs for newer available versions and fetch model catalog updates. When off, new models may not appear."
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -3749,98 +1595,7 @@ export function GeneralSettingsPanel() {
           }
         />
 
-        <SettingsRow
-          serverScoped
-          settingKeys={["backgroundActivity"]}
-          id={searchableSetting("background-activity").id}
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              {searchableSetting("background-activity").title}
-              <PolicyTooltip>
-                This shared policy gates background work such as Git refreshes and provider health
-                probes after their individual intervals elapse.
-              </PolicyTooltip>
-            </span>
-          }
-          description={backgroundActivityDescription}
-          resetAction={
-            canResetBackgroundActivity ? (
-              <SettingResetButton
-                label="background activity"
-                onClick={() => updateSettings(resetBackgroundActivitySettings())}
-              />
-            ) : null
-          }
-          control={
-            <>
-              <Select
-                value={mixedBackgroundActivity ? null : backgroundActivityProfileOption}
-                onValueChange={(value) => {
-                  if (value === "advanced") {
-                    if (isEnvironmentScope) setBackgroundActivityDialogOpen(true);
-                    return;
-                  }
-                  if (
-                    value === "balanced" ||
-                    value === "performance" ||
-                    value === "battery-saver"
-                  ) {
-                    updateSettings(backgroundActivityProfileSettings(value));
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Background activity profile"
-                >
-                  <SelectValue>
-                    {(value: BackgroundActivityProfileOption | null) =>
-                      value === null ? "Mixed" : BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="balanced">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="performance">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="battery-saver">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="advanced" disabled={!isEnvironmentScope}>
-                    {isEnvironmentScope
-                      ? BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced
-                      : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one environment)`}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-              {backgroundActivityProfileOption === "advanced" && isEnvironmentScope ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-sm"
-                        variant="outline"
-                        aria-label="Configure advanced background activity"
-                        onClick={() => setBackgroundActivityDialogOpen(true)}
-                      >
-                        <SettingsIcon className="size-4" />
-                      </Button>
-                    }
-                  />
-                  <TooltipPopup side="top">Configure background activity</TooltipPopup>
-                </Tooltip>
-              ) : null}
-              <BackgroundActivityAdvancedDialog
-                open={backgroundActivityDialogOpen && isEnvironmentScope}
-                onOpenChange={setBackgroundActivityDialogOpen}
-              />
-            </>
-          }
-        />
+        <BackgroundActivitySettingsRow />
       </SettingsSection>
 
       <SettingsSection id="projects-and-threads" title="Projects & threads">
@@ -3848,12 +1603,12 @@ export function GeneralSettingsPanel() {
           serverScoped
           settingKeys={["newWorktreesStartFromOrigin"]}
           {...searchableSetting("start-from-origin")}
-          description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+          description="Uses the latest commit of the base branch’s tracked remote branch, even if its name differs. Otherwise uses the same-named branch on origin. Uses your local branch if that remote branch is missing."
           resetAction={
             settings.newWorktreesStartFromOrigin !==
             DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
               <SettingResetButton
-                label="new worktrees start from origin"
+                label="new worktrees start from remote"
                 onClick={() =>
                   updateSettings({
                     newWorktreesStartFromOrigin:
@@ -3870,22 +1625,23 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
               }
-              aria-label="Start new worktrees from origin by default"
+              aria-label="Start new worktrees from remote by default"
             />
           }
         />
         <SettingsRow
           serverScoped
-          settingKeys={["worktreeBranchPrefix"]}
-          {...searchableSetting("worktree-branch-prefix")}
-          description="Prefix for generated worktree branch names. Leave blank for no prefix."
+          settingKeys={["addProjectBaseDirectory"]}
+          {...searchableSetting("add-project-starts-in")}
+          description='Leave empty to use "~/" when the Add Project browser opens.'
           resetAction={
-            settings.worktreeBranchPrefix !== DEFAULT_UNIFIED_SETTINGS.worktreeBranchPrefix ? (
+            settings.addProjectBaseDirectory !==
+            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
               <SettingResetButton
-                label="worktree branch prefix"
+                label="add project base directory"
                 onClick={() =>
                   updateSettings({
-                    worktreeBranchPrefix: DEFAULT_UNIFIED_SETTINGS.worktreeBranchPrefix,
+                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
                   })
                 }
               />
@@ -3894,19 +1650,12 @@ export function GeneralSettingsPanel() {
           control={
             <DraftInput
               size="sm"
-              className="w-full sm:w-44"
-              value={mixedWorktreeBranchPrefix ? "" : settings.worktreeBranchPrefix}
-              placeholder={mixedWorktreeBranchPrefix ? "Mixed" : "No prefix"}
+              className="w-full sm:w-72"
+              value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
+              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+              placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
               spellCheck={false}
-              aria-label="Worktree branch prefix"
-              onCommit={(value) => {
-                const worktreeBranchPrefix = /[a-z0-9]/i.test(value)
-                  ? sanitizeBranchFragment(value)
-                  : "";
-                if (worktreeBranchPrefix !== settings.worktreeBranchPrefix) {
-                  updateSettings({ worktreeBranchPrefix });
-                }
-              }}
+              aria-label="Add project base directory"
             />
           }
         />
@@ -4036,33 +1785,6 @@ export function GeneralSettingsPanel() {
 
       <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
-          {...searchableSetting("sound-notifications")}
-          description="Play a chime when a background thread finishes a turn. The thread you are looking at stays quiet."
-          resetAction={
-            settings.soundNotificationsEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled ? (
-              <SettingResetButton
-                label="background turn chime"
-                onClick={() =>
-                  updateSettings({
-                    soundNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.soundNotificationsEnabled}
-              onCheckedChange={(checked) =>
-                updateSettings({ soundNotificationsEnabled: Boolean(checked) })
-              }
-              aria-label="Play a chime when a background thread finishes a turn"
-            />
-          }
-        />
-
-        <SettingsRow
           serverScoped
           settingKeys={["textGenerationModelSelection"]}
           {...searchableSetting("text-generation-model")}
@@ -4092,6 +1814,7 @@ export function GeneralSettingsPanel() {
             ) : (
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <ProviderModelPicker
+                  environmentId={environmentId}
                   activeInstanceId={textGenInstanceId}
                   model={textGenModel}
                   lockedProvider={null}
@@ -4134,19 +1857,13 @@ export function GeneralSettingsPanel() {
                 {textGenInstanceEntry ? (
                   <TraitsPicker
                     provider={textGenProvider}
-                    models={
-                      // Use the exact instance's models (rather than the
-                      // first-kind-match) so a custom text-gen instance like
-                      // `codex_personal` gets its own model list, not the
-                      // default Codex one.
-                      textGenInstanceEntry?.models ?? []
-                    }
+                    models={textGenInstanceEntry?.models ?? []}
                     model={textGenModel}
-                    prompt=""
-                    onPromptChange={() => {}}
                     modelOptions={textGenModelOptions}
                     allowPromptInjectedEffort={false}
-                    planModeEnabled={settings.planModeEnabled}
+                    planModeEnabled={
+                      settings.planModeEnabled || selectsPlanAgent(textGenModelOptions)
+                    }
                     triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                     onModelOptionsChange={(nextOptions) => {
                       updateSettings({
@@ -4169,61 +1886,35 @@ export function GeneralSettingsPanel() {
             )
           }
         />
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("thread-title-instructions")}
-          settingKeys={["threadTitleInstructions"]}
-          description="Additional instructions for new and regenerated thread titles on selected environments. Leave blank to use the default style."
-          resetAction={
-            mixedThreadTitleInstructions ||
-            settings.threadTitleInstructions !==
-              DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions ? (
-              <SettingResetButton
-                label="thread title instructions"
-                onClick={() =>
-                  updateSettings({
-                    threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
-                  })
-                }
-              />
-            ) : null
-          }
-        >
-          <div className="mt-3 max-w-2xl pb-3.5">
-            <Textarea
-              key={`${scope.environmentIds.join(",")}:${mixedThreadTitleInstructions}:${settings.threadTitleInstructions}`}
-              defaultValue={mixedThreadTitleInstructions ? "" : settings.threadTitleInstructions}
-              onBlur={(event) => {
-                const threadTitleInstructions = event.target.value.trim();
-                if (threadTitleInstructions !== event.target.defaultValue.trim()) {
-                  updateSettings({ threadTitleInstructions });
-                }
-              }}
-              rows={4}
-              maxLength={20_000}
-              placeholder={
-                mixedThreadTitleInstructions
-                  ? "Mixed. Enter instructions for all selected environments."
-                  : "Start each title with an emoji. Prefer sentence case."
-              }
-              aria-label="Thread title instructions"
-            />
-          </div>
-        </SettingsRow>
+        <ThreadTitleInstructionsSettings />
       </SettingsSection>
-
-      <DesktopNotificationsSettings />
-      <VoiceDictationSettingsSection />
 
       <SettingsSection id="about" title="About">
         {APP_HAS_UPDATE_TRACKS && (isElectron || HOSTED_APP_CHANNEL) ? (
           <AboutVersionSection />
         ) : (
-          <SettingsRow
-            title={<AboutVersionTitle />}
-            description="Current version of the application."
-          />
+          <>
+            <SettingsRow
+              id={searchableSetting("app-version").id}
+              title={<AboutVersionTitle />}
+              description="Current version of the application."
+            />
+          </>
         )}
+        <MobileAppSettingsRow />
+        <SettingsRow
+          {...searchableSetting("privacy-policy")}
+          description="How we handle your data, including the anonymous usage data T3 Code collects."
+          control={
+            <Button
+              render={<a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer noopener" />}
+              size="sm"
+              variant="outline"
+            >
+              View policy
+            </Button>
+          }
+        />
       </SettingsSection>
       <SettingsSection title="Diagnostics">
         <SettingsRow
@@ -4247,7 +1938,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description={`Notices for dependencies, assets, and optional tools used by ${APP_BASE_NAME}.`}
+          description="Notices for dependencies, assets, and optional tools used by T3 Code."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}
@@ -4261,230 +1952,6 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <LegacyFeaturesSection />
-    </SettingsPageContainer>
-  );
-}
-
-export function ArchivedThreadsPanel() {
-  const { scope } = useSettingsScope();
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
-  const {
-    snapshots: archivedSnapshots,
-    error: archiveError,
-    isLoading: isLoadingArchive,
-    refresh: refreshArchivedThreads,
-  } = useArchivedThreadSnapshots(scope.environmentIds);
-
-  const archivedGroups = useMemo(() => {
-    const selectedProjectKeys =
-      scope.kind === "project" || scope.kind === "checkout"
-        ? new Set(scope.members.map((member) => `${member.environmentId}:${member.id}`))
-        : null;
-    const projectsByEnvironmentAndId = new Map(
-      archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-        snapshot.projects
-          .filter(
-            (project) =>
-              selectedProjectKeys === null ||
-              selectedProjectKeys.has(`${environmentId}:${project.id}`),
-          )
-          .map(
-            (project) => [`${environmentId}:${project.id}`, { ...project, environmentId }] as const,
-          ),
-      ),
-    );
-    const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...thread,
-        environmentId,
-      })),
-    );
-
-    const archivedProjects = Array.from(projectsByEnvironmentAndId.values());
-    const groups: Array<{
-      readonly project: (typeof archivedProjects)[number];
-      readonly threads: Array<(typeof threads)[number]>;
-    }> = [];
-    for (const project of archivedProjects) {
-      const projectThreads: Array<(typeof threads)[number]> = [];
-      for (const thread of threads) {
-        if (thread.projectId === project.id && thread.environmentId === project.environmentId) {
-          projectThreads.push(thread);
-        }
-      }
-      if (projectThreads.length > 0) {
-        groups.push({
-          project,
-          threads: projectThreads.toSorted((left, right) => {
-            const leftKey = left.archivedAt ?? left.createdAt;
-            const rightKey = right.archivedAt ?? right.createdAt;
-            return rightKey.localeCompare(leftKey) || right.id.localeCompare(left.id);
-          }),
-        });
-      }
-    }
-    return groups;
-  }, [archivedSnapshots, scope]);
-
-  const handleArchivedThreadContextMenu = useCallback(
-    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
-      const api = readLocalApi();
-      if (!api) return;
-      const clicked = await api.contextMenu.show(
-        [
-          { id: "unarchive", label: "Unarchive" },
-          { id: "delete", label: "Delete", destructive: true },
-        ],
-        position,
-      );
-
-      if (clicked === "unarchive") {
-        const result = await unarchiveThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to unarchive thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-        return;
-      }
-
-      if (clicked === "delete") {
-        const result = await confirmAndDeleteThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to delete thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      }
-    },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
-  );
-
-  return (
-    <SettingsPageContainer>
-      {archivedGroups.length === 0 ? (
-        <SettingsSection
-          id={isLoadingArchive ? undefined : searchableSetting("archive").id}
-          title={searchableSetting("archive").title}
-        >
-          <SettingsRow
-            title={
-              <span className="inline-flex items-center gap-2">
-                {isLoadingArchive ? (
-                  <Spinner size="sm" tone="muted" />
-                ) : (
-                  <ArchiveIcon className="size-3.5 text-muted-foreground" />
-                )}
-                {isLoadingArchive
-                  ? "Loading archived threads"
-                  : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
-              </span>
-            }
-            description={
-              isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
-            }
-          />
-        </SettingsSection>
-      ) : (
-        archivedGroups.map(({ project, threads: projectThreads }, index) => (
-          <SettingsSection
-            key={`${project.environmentId}:${project.id}`}
-            id={index === 0 ? searchableSetting("archive").id : undefined}
-            title={project.title}
-            icon={<ProjectFavicon project={project} />}
-          >
-            {projectThreads.map((thread) => (
-              <SettingsRow
-                key={thread.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void (async () => {
-                    const result = await settlePromise(() =>
-                      handleArchivedThreadContextMenu(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                        {
-                          x: event.clientX,
-                          y: event.clientY,
-                        },
-                      ),
-                    );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
-                      toastManager.add(
-                        stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        }),
-                      );
-                    }
-                  })();
-                }}
-                title={thread.title}
-                description={
-                  <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </>
-                }
-                control={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="shrink-0"
-                    onClick={() => {
-                      void (async () => {
-                        const result = await unarchiveThread(
-                          scopeThreadRef(thread.environmentId, thread.id),
-                        );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
-                        }
-                        if (!isAtomCommandInterrupted(result)) {
-                          const error = squashAtomCommandFailure(result);
-                          toastManager.add(
-                            stackedThreadToast({
-                              type: "error",
-                              title: "Failed to unarchive thread",
-                              description:
-                                error instanceof Error ? error.message : "An error occurred.",
-                            }),
-                          );
-                        }
-                      })();
-                    }}
-                  >
-                    <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
-                  </Button>
-                }
-              />
-            ))}
-          </SettingsSection>
-        ))
-      )}
     </SettingsPageContainer>
   );
 }

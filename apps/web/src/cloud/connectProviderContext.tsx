@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import {
   canEmbedClerkProvider,
@@ -25,24 +25,21 @@ interface ConnectProvidersContextValue {
 const ConnectProvidersContext = createContext<ConnectProvidersContextValue | null>(null);
 
 export function ConnectProvidersRoot({ children }: { readonly children: ReactNode }) {
-  const providers = useMemo(() => readBakedConnectProviders(), []);
+  const providers = readBakedConnectProviders();
   const [activeId, setActiveIdState] = useState<ConnectProviderId | null>(() =>
     resolveDefaultConnectProviderId(providers, currentEmbedContext()),
   );
 
-  const setActiveId = useCallback(
-    (id: ConnectProviderId): boolean => {
-      const ctx = currentEmbedContext();
-      const next = selectEmbeddableConnectProviderId(providers, id, ctx);
-      if (!next) return false;
-      setActiveIdState(next);
-      writeStoredConnectProviderId(next);
-      return true;
-    },
-    [providers],
-  );
+  const setActiveId = (id: ConnectProviderId): boolean => {
+    const ctx = currentEmbedContext();
+    const next = selectEmbeddableConnectProviderId(providers, id, ctx);
+    if (!next) return false;
+    setActiveIdState(next);
+    writeStoredConnectProviderId(next);
+    return true;
+  };
 
-  const value = useMemo<ConnectProvidersContextValue>(() => {
+  const value = (() => {
     const ctx = currentEmbedContext();
     const active = providers.find((provider) => provider.id === activeId) ?? null;
     return {
@@ -52,7 +49,7 @@ export function ConnectProvidersRoot({ children }: { readonly children: ReactNod
       embedded: resolveEmbeddedClerkProvider(providers, activeId, ctx),
       setActiveId,
     };
-  }, [activeId, providers, setActiveId]);
+  })();
 
   return (
     <ConnectProvidersContext.Provider value={value}>{children}</ConnectProvidersContext.Provider>

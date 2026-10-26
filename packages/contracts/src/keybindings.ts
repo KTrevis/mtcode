@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, TrimmedString } from "./baseSchemas.ts";
 
-export const MAX_KEYBINDING_VALUE_LENGTH = 64;
+const MAX_KEYBINDING_VALUE_LENGTH = 64;
 const MAX_KEYBINDING_WHEN_LENGTH = 256;
 export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
@@ -37,14 +37,16 @@ export type ModelPickerJumpKeybindingCommand =
 const THREAD_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.steerQueuedMessage",
+  "thread.editQueuedMessage",
   "thread.previous",
   "thread.next",
   "thread.copyReference",
-  "thread.search",
   "thread.settle",
   "thread.pin",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
+
+  "thread.search",
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 
@@ -65,10 +67,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "terminal.splitVertical",
   "terminal.new",
   "terminal.close",
-  "terminal.find",
   "rightPanel.toggle",
+  "rightPanel.new",
+  "threadPanel.toggle",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
+  "view.reopenClosed",
   "pullRequest.copyNumber",
   "diff.toggle",
   "preview.toggle",
@@ -77,9 +81,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "preview.zoomIn",
   "preview.zoomOut",
   "preview.resetZoom",
-  "computerView.toggle",
   "commandPalette.toggle",
-  "kanban.open",
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",
@@ -87,10 +89,14 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "appearance.cycle",
   "themeEditor.toggle",
   "composer.stash",
-  "reasoning.decrease",
-  "reasoning.increase",
+  "composer.sendAlternate",
+  "composer.sendBackground",
+  "composer.sendAndNewThread",
   "composer.host",
+  "composer.cycleHost",
   "composer.effort",
+  "composer.increaseEffort",
+  "composer.decreaseEffort",
   "composer.mode",
   "composer.workspace",
   "composer.previousWorktree",
@@ -98,6 +104,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",
+  "chat.find",
   "editor.openFavorite",
   "usage.cost",
   "usage.tokens",
@@ -108,6 +115,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.period.quarter",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+
+  "terminal.find",
+  "computerView.toggle",
+  "kanban.open",
+  "reasoning.decrease",
+  "reasoning.increase",
   "recentThreads.next",
   "recentThreads.previous",
 ] as const;
@@ -158,6 +171,12 @@ export const KeybindingShortcut = Schema.Struct({
 });
 export type KeybindingShortcut = typeof KeybindingShortcut.Type;
 
+export const PreviewForwardedShortcut = Schema.Struct({
+  command: KeybindingCommand,
+  shortcut: KeybindingShortcut,
+});
+export type PreviewForwardedShortcut = typeof PreviewForwardedShortcut.Type;
+
 const KeybindingWhenNodeRef = Schema.suspend(
   (): Schema.Codec<KeybindingWhenNode> => KeybindingWhenNode,
 );
@@ -194,13 +213,7 @@ export const ResolvedKeybindingRule = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
 
-/**
- * The command set grows over time, so a client may receive rules it cannot
- * represent (a command or `when` node added after that client shipped).
- * Decoding drops those rules instead of failing the whole payload —
- * rejecting the config would take down the connection over a shortcut the
- * client couldn't dispatch anyway.
- */
+/** Drops undecodable rules without failing the connection. */
 export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindingRule).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );

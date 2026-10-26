@@ -17,8 +17,7 @@ import {
   resolveProjectAgentBrowserAccess,
   resolveProjectAutoPull,
 } from "@t3tools/shared/serverSettings";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import * as ProjectService from "./ProjectService.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { ProjectTransferFiles } from "./ProjectTransferFiles.ts";
@@ -40,8 +39,7 @@ interface Transfer {
 
 export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* () {
   const path = yield* Path.Path;
-  const projects = yield* ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngineService;
+  const projects = yield* ProjectService.ProjectService;
   const settings = yield* ServerSettingsService;
   const git = yield* GitVcsDriver;
   const files = new ProjectTransferFiles();
@@ -74,7 +72,7 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
         return { operation: "release" };
       }
       if (input.operation === "prepare") {
-        const found = yield* projects.getProjectShellById(input.projectId);
+        const found = yield* projects.getShell(input.projectId);
         if (Option.isNone(found))
           return yield* new ProjectTransferError({
             message: "The source project no longer exists.",
@@ -101,7 +99,7 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
           })
           .pipe(
             Effect.map((result) => result.stdout.trim() || null),
-            Effect.catch(() => Effect.succeed(null)),
+            Effect.orElseSucceed(() => null),
           );
         if (input.mode === "clone" && !remote)
           return yield* new ProjectTransferError({
@@ -262,16 +260,13 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
       const project = transfer.configuration.project;
       // Once a durable project may exist, cancellation must never delete its checkout.
       transfer.registered = true;
-      yield* engine.dispatch({
-        type: "project.create",
+      yield* projects.create({
         commandId: CommandId.make(`${input.transferId}:create`),
         projectId: transfer.projectId,
         workspaceRoot: cwd,
         title: project.title,
-        createdAt: transfer.createdAt,
       });
-      yield* engine.dispatch({
-        type: "project.meta.update",
+      yield* projects.update({
         commandId: CommandId.make(`${input.transferId}:configure`),
         projectId: transfer.projectId,
         defaultModelSelection: project.defaultModelSelection,

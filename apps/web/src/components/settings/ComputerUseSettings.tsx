@@ -1,5 +1,5 @@
 import { MonitorIcon } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type {
   DesktopComputerUsePermission,
   DesktopComputerUsePermissionsState,
@@ -104,7 +104,7 @@ export function ComputerUseSettings() {
   const [permState, setPermState] = useState<DesktopComputerUsePermissionsState | null>(null);
   const [permError, setPermError] = useState<string | null>(null);
 
-  const refreshPermissions = useCallback(async () => {
+  const refreshPermissions = async () => {
     const bridge = window.desktopBridge;
     if (!bridge?.getComputerUsePermissions) {
       setPermState(null);
@@ -118,8 +118,10 @@ export function ComputerUseSettings() {
     } catch (error) {
       setPermError(error instanceof Error ? error.message : "Could not read permissions");
     }
-  }, []);
+  };
 
+  /* oxlint-disable react/set-state-in-effect -- Subscribe to OS permission changes and refresh the native permission bridge on focus. Loading resets belong to this external request lifecycle. */
+  // oxlint-disable-next-line t3code/react-effect-budget -- Subscribe to OS permission changes and refresh the native permission bridge on focus.
   useEffect(() => {
     if (!onDesktop) return;
     const bridgeSupported = isBridgeSupported();
@@ -136,6 +138,7 @@ export function ComputerUseSettings() {
       window.clearInterval(id);
     };
   }, [onDesktop, refreshPermissions]);
+  /* oxlint-enable react/set-state-in-effect */
 
   const openPrivacyPane = async (pane: DesktopComputerUsePrivacyPane): Promise<boolean> => {
     const bridge = window.desktopBridge;
@@ -361,8 +364,8 @@ export function ComputerUseSettings() {
             <p className="px-3 text-sm text-muted-foreground sm:px-4">Checking permissions…</p>
           ) : null}
           {needsMacPrivacy ? (
-            <p className="px-3 text-[12px] leading-relaxed text-muted-foreground/80 sm:px-4">
-              After enabling a permission in System Settings, return here — status refreshes
+            <p className="px-3 text-xs leading-relaxed text-muted-foreground/80 sm:px-4">
+              After enabling a permission in System Settings, return here. status refreshes
               automatically.
             </p>
           ) : null}
@@ -378,42 +381,44 @@ export function ComputerUseSettings() {
               group without taking over your browsing.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-3 text-sm text-muted-foreground">
-            <ol className="list-decimal space-y-2 pl-4 text-foreground/90">
-              <li>
-                Open <span className="font-medium text-foreground">chrome://extensions</span> in
-                Chrome and turn on Developer mode.
-              </li>
-              <li>
-                Choose <span className="font-medium text-foreground">Load unpacked</span> and select
-                the{" "}
-                <span className="font-mono text-[12px] text-foreground">
-                  munim-computer-use/chrome-extension
-                </span>{" "}
-                folder bundled with the desktop app (its full path is shown below until the
-                extension is loaded).
-              </li>
-              <li>
-                Confirm the extension id is{" "}
-                <span className="font-mono text-[12px] text-foreground">
-                  kgdolgnijopbghhomnblabjkmjhnoage
-                </span>
-                .
-              </li>
-            </ol>
-            {chromeStatus ? (
-              <ExtensionStatus
-                tone={
-                  chromeStatus.status === "installed"
-                    ? "ok"
-                    : chromeStatus.status === "missing"
-                      ? "warn"
-                      : "muted"
-                }
-              >
-                {chromeStatus.detail}
-              </ExtensionStatus>
-            ) : null}
+          <DialogPanel>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <ol className="list-decimal space-y-2 pl-4 text-foreground/90">
+                <li>
+                  Open <span className="font-medium text-foreground">chrome://extensions</span> in
+                  Chrome and turn on Developer mode.
+                </li>
+                <li>
+                  Choose <span className="font-medium text-foreground">Load unpacked</span> and
+                  select the{" "}
+                  <span className="font-mono text-xs text-foreground">
+                    munim-computer-use/chrome-extension
+                  </span>{" "}
+                  folder bundled with the desktop app (its full path is shown below until the
+                  extension is loaded).
+                </li>
+                <li>
+                  Confirm the extension id is{" "}
+                  <span className="font-mono text-xs text-foreground">
+                    kgdolgnijopbghhomnblabjkmjhnoage
+                  </span>
+                  .
+                </li>
+              </ol>
+              {chromeStatus ? (
+                <ExtensionStatus
+                  tone={
+                    chromeStatus.status === "installed"
+                      ? "ok"
+                      : chromeStatus.status === "missing"
+                        ? "warn"
+                        : "muted"
+                  }
+                >
+                  {chromeStatus.detail}
+                </ExtensionStatus>
+              ) : null}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>Close</DialogClose>
@@ -432,19 +437,21 @@ export function ComputerUseSettings() {
             <DialogTitle>Allow {permissionPrompt?.label ?? "permission"}</DialogTitle>
             <DialogDescription>
               {APP_BASE_NAME} needs this macOS privacy permission for Computer Use. System Settings
-              will open to the right Privacy &amp; Security list — turn on the switch for{" "}
+              will open to the right Privacy &amp; Security list. turn on the switch for{" "}
               {APP_BASE_NAME}.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="text-sm text-muted-foreground">
-            {permissionPrompt?.kind === "accessibility" ? (
-              <p>
-                Accessibility lets the agent click and type in other apps without stealing your
-                mouse.
-              </p>
-            ) : (
-              <p>Screen Recording lets the agent take screenshots of apps and displays.</p>
-            )}
+          <DialogPanel>
+            <div className="text-sm text-muted-foreground">
+              {permissionPrompt?.kind === "accessibility" ? (
+                <p>
+                  Accessibility lets the agent click and type in other apps without stealing your
+                  mouse.
+                </p>
+              ) : (
+                <p>Screen Recording lets the agent take screenshots of apps and displays.</p>
+              )}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>

@@ -15,7 +15,6 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -136,7 +135,7 @@ const pickClientForComputer = (
   );
 };
 
-export const make = Effect.gen(function* ComputerTaskBrokerMake() {
+const make = Effect.gen(function* ComputerTaskBrokerMake() {
   const crypto = yield* Crypto.Crypto;
   const state = yield* SynchronizedRef.make<BrokerState>({
     clients: new Map(),
@@ -177,7 +176,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
     host: ComputerTaskHost,
   ) {
     const queue = yield* Queue.unbounded<ComputerTaskStreamEvent>();
-    const connectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const connectionId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
       clientId: host.clientId,
@@ -276,7 +275,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
 
   const send: ComputerTaskBroker["Service"]["send"] = Effect.fn("ComputerTaskBroker.send")(
     function* (request) {
-      const requestId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+      const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const deferred = yield* Deferred.make<ComputerTaskSendResult, ComputerTaskError>();
       const route = yield* SynchronizedRef.modify(state, (current) => {
         const client = pickClientForComputer(current.clients, request.computer.environmentId);
@@ -319,16 +318,15 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
         Effect.timeoutOption(COMPUTER_SEND_TIMEOUT_MS),
         Effect.ensuring(removePending),
       );
-      return yield* Option.match(result, {
-        onNone: () =>
-          Effect.fail(
+      return yield* Effect.fromOption(result).pipe(
+        Effect.mapError(
+          () =>
             new ComputerTaskError({
               code: "dispatch_failed",
               detail: "Timed out waiting for the other computer to accept the task.",
             }),
-          ),
-        onSome: (value) => Effect.succeed(value),
-      });
+        ),
+      );
     },
   );
 

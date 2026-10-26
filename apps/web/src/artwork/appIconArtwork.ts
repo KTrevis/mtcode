@@ -56,11 +56,7 @@ export async function renderArtworkAppIcon(background: string): Promise<string> 
   return canvas.toDataURL("image/png");
 }
 
-/**
- * Tones to substitute where the tile's stars sit, keyed by pixel index. The
- * replacement is read from a ring around each star rather than recorded per
- * star, so a star sitting on a cloud is filled with that cloud.
- */
+// Tones to substitute where the tile's stars sit, keyed by pixel index.
 function starLevels(pixels: Uint8ClampedArray): Map<number, number> {
   const levels = new Map<number, number>();
   const STAR_REACH = 9;
@@ -129,13 +125,7 @@ const median = (values: number[]) => {
   return values[values.length >> 1]!;
 };
 
-/**
- * The glass edge measured around the whole perimeter: for each sector and each
- * pixel of depth, how much white the tile lays over its sky, or how much it
- * darkens it. Taking medians per sector and smoothing across them keeps the
- * artwork out of it — probing a single pixel for "the sky under the rim" lands
- * on a cloud or a star and leaves a blot.
- */
+// The glass edge measured around the whole perimeter: for each sector and each pixel of depth, how much white the tile lays over its sky, or how much it darkens it.
 function rimProfile(pixels: Uint8ClampedArray, distance: Float32Array) {
   const depths: number[][][] = Array.from({ length: SECTORS }, () =>
     Array.from({ length: RIM + 1 }, () => [] as number[]),
@@ -197,11 +187,7 @@ function rampLookup(colors: readonly string[]): Uint8ClampedArray {
   return table;
 }
 
-/**
- * A sky icon is the shipped MT tile itself, repainted in that scene's colours
- * and given its weather. Every tone maps through the scene palette, so the
- * artwork, its gloss and the mark all stay exactly as they ship.
- */
+// A sky icon is the shipped MT tile itself, repainted in that scene's colours and given its weather.
 export async function renderSkyAppIcon(sky: SkyConditions): Promise<string> {
   const conditions = skyIconConditions(sky);
   const overlaySource = skyIconOverlayImage(conditions);
@@ -261,11 +247,7 @@ export async function renderSkyAppIcon(sky: SkyConditions): Promise<string> {
       green2 = Math.round(green2 + (tone - green2) * marked);
       blue2 = Math.round(blue2 + (tone - blue2) * marked);
     }
-    // The glass edge ships with the tile and every icon wears the same one, but
-    // it has to end up in the scene's colours without eating the art beneath
-    // it. So the sheen is lifted off, whatever it covered is repainted, and the
-    // sheen goes back on: clouds keep running to the edge, and the rim traces
-    // the shipped one's brightness in whatever colour the sky is.
+    // The glass edge ships with the tile and every icon wears the same one, but it has to end up in the scene's colours without eating the art beneath it.
     const depth = distance[pixel >> 2]!;
     if (depth > 0 && depth <= RIM) {
       const position = ((Math.atan2(y - 511.5, x - 511.5) + Math.PI) / (2 * Math.PI)) * SECTORS;

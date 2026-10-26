@@ -2,11 +2,11 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { CommandId, type OrchestrationThreadDetailSnapshot } from "@t3tools/contracts";
+import { CommandId, type OrchestrationV2ThreadDetailSnapshot } from "@t3tools/contracts";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+import * as Deferred from "effect/Deferred";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { afterAll, expect, vi } from "vite-plus/test";
@@ -20,7 +20,8 @@ const sandbox = vi.hoisted(() => {
   return root;
 });
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
 import { PiExternalLifecycleOverrideRepository } from "../persistence/Services/PiExternalLifecycleOverrides.ts";
 import { PiExternalThreadSource } from "./PiExternalThreadSource.ts";
 import { SessionCatalog } from "./SessionCatalog.ts";
@@ -127,18 +128,20 @@ process.stdin.on("end", () => process.exit(0));
       const dependencies = Layer.mergeAll(
         SessionCatalog.layer({ root: sessions }),
         SupervisorClient.layer,
-        Layer.mock(ProjectionSnapshotQuery)({
+        Layer.mock(ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+        Layer.mock(ProjectionStoreV2)({
           getShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 0,
-              projects: [],
+              schemaVersion: 2,
+              archivedThreads: [],
               threads: [],
               updatedAt: createdAt,
             }),
         }),
         Layer.mock(PiExternalLifecycleOverrideRepository)({
           list: () => Effect.succeed([]),
-          getBySourceKey: () => Effect.succeed(Option.none()),
+          getBySourceKey: () => Effect.succeedNone,
         }),
       );
       yield* Effect.gen(function* () {
@@ -157,15 +160,27 @@ process.stdin.on("end", () => process.exit(0));
           const source = yield* PiExternalThreadSource;
           const catalog = yield* SessionCatalog;
           const record = (yield* catalog.list())[0]!;
-          const snapshots = yield* Queue.unbounded<OrchestrationThreadDetailSnapshot>();
+          const snapshots = yield* Queue.unbounded<OrchestrationV2ThreadDetailSnapshot>();
+          const recapReady = yield* Deferred.make<OrchestrationV2ThreadDetailSnapshot>();
           yield* source.subscribeThread({ threadId: record.threadId }).pipe(
             Stream.runForEach((item) =>
-              item.kind === "snapshot" ? Queue.offer(snapshots, item.snapshot) : Effect.void,
+              item.kind === "snapshot"
+                ? Effect.all([
+                    Queue.offer(snapshots, item),
+                    item.projection.turnItems.some(
+                      (value) =>
+                        value.type === "system_notice" &&
+                        value.message === "isolated refresh proof",
+                    )
+                      ? Deferred.succeed(recapReady, item)
+                      : Effect.void,
+                  ])
+                : Effect.void,
             ),
             Effect.forkScoped,
           );
-          const before = yield* Queue.take(snapshots).pipe(Effect.timeout("5 seconds"));
-          expect(before.thread.messages).toHaveLength(2);
+          const before = yield* Queue.take(snapshots);
+          expect(before.projection.messages).toHaveLength(2);
           const customEntry = {
             type: "custom",
             id: "recap-1",
@@ -180,23 +195,19 @@ process.stdin.on("end", () => process.exit(0));
             },
           };
           NodeFS.appendFileSync(sessionFile, JSON.stringify(customEntry) + "\n");
-          const after = yield* Queue.take(snapshots).pipe(
-            Effect.repeat({
-              until: (snapshot) =>
-                snapshot.thread.activities.some((activity) => activity.kind === "session.recap"),
-            }),
-            Effect.timeout("5 seconds"),
+          const after = yield* Deferred.await(recapReady);
+          expect(after.projection.turnItems).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: "idle-session:recap-1",
+                type: "system_notice",
+                runId: null,
+                message: customEntry.data.text,
+              }),
+            ]),
           );
-          expect(after.thread.activities).toMatchObject([
-            {
-              id: "idle-session:recap-1",
-              kind: "session.recap",
-              turnId: null,
-              payload: { detail: customEntry.data.text },
-            },
-          ]);
           expect(after.snapshotSequence).toBe(before.snapshotSequence);
-          expect(after.thread.messages).toEqual(before.thread.messages);
+          expect(after.projection.messages).toEqual(before.projection.messages);
           expect((yield* supervisor.list())[0]).toEqual(runtimeBefore);
         }).pipe(
           Effect.ensuring(
@@ -213,10 +224,7 @@ process.stdin.on("end", () => process.exit(0));
               ),
           ),
         );
-      }).pipe(
-        Effect.provide(PiExternalThreadSource.layer.pipe(Layer.provideMerge(dependencies))),
-        Effect.timeout("15 seconds"),
-      );
+      }).pipe(Effect.provide(PiExternalThreadSource.layer.pipe(Layer.provideMerge(dependencies))));
     }),
   ),
 );

@@ -77,7 +77,7 @@ function Card({
   return (
     <div
       ref={setNodeRef}
-      className="group/kanban-card relative shrink-0 cursor-pointer rounded-lg bg-muted/50 px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+      className="group/kanban-card relative shrink-0 cursor-pointer rounded-lg bg-muted/50 px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing"
       style={{ opacity: isDragging ? 0 : 1 }}
       {...attributes}
       {...listeners}
@@ -110,7 +110,7 @@ function Card({
                     tabIndex={active ? 0 : -1}
                     role="img"
                     aria-label={dependencyStatus}
-                    className="inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   />
                 }
               >
@@ -152,7 +152,7 @@ function Card({
             to="/$environmentId/$threadId"
             params={{ environmentId, threadId: card.agentThreadId }}
             aria-label={`Open agent thread for ${card.title}`}
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            className="cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
@@ -162,7 +162,7 @@ function Card({
         <button
           type="button"
           aria-label={`Delete ${card.title}`}
-          className="cursor-pointer rounded p-1 text-muted-foreground hover:text-destructive-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="cursor-pointer rounded p-1 text-muted-foreground hover:text-destructive-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
@@ -220,7 +220,7 @@ function ColumnView({
     >
       <h2
         tabIndex={-1}
-        className="outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center gap-2 px-1 text-sm font-semibold"
+        className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring flex items-center gap-2 px-1 text-sm font-semibold"
       >
         {column}
         <span className="text-xs font-normal text-muted-foreground">{cards.length}</span>
@@ -373,11 +373,13 @@ export function KanbanBoard({
     if (currentCardId) focusCard(currentCardId);
     else focusColumn(activeColumn);
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- Restore board keyboard focus when a document-level key event arrives outside controls.
   useEffect(() => {
     window.addEventListener("keydown", recoverBoardFocus);
     return () => window.removeEventListener("keydown", recoverBoardFocus);
   }, []);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Restore DOM focus after persisted cards move between columns.
   useLayoutEffect(() => {
     const id = movingCardId.current;
     if (!id || !cards.some((card) => card.id === id)) return;

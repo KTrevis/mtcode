@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it, live } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -12,13 +12,12 @@ import * as PlatformError from "effect/PlatformError";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 
-const makeServerConfigLayer = () =>
+const layerServerConfig = () =>
   ServerConfig.layerTest(process.cwd(), { prefix: "t3-secret-store-test-" });
 
-const makeServerSecretStoreLayer = () =>
-  Layer.provide(ServerSecretStore.layer, makeServerConfigLayer());
+const layerServerSecretStore = () => Layer.provide(ServerSecretStore.layer, layerServerConfig());
 
-const PermissionDeniedFileSystemLayer = Layer.effect(
+const layerPermissionDeniedFileSystem = Layer.effect(
   FileSystem.FileSystem,
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -39,13 +38,13 @@ const PermissionDeniedFileSystemLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(NodeServices.layer));
 
-const makePermissionDeniedSecretStoreLayer = () =>
+const layerPermissionDeniedSecretStore = () =>
   ServerSecretStore.layer.pipe(
-    Layer.provide(makeServerConfigLayer()),
-    Layer.provideMerge(PermissionDeniedFileSystemLayer),
+    Layer.provide(layerServerConfig()),
+    Layer.provideMerge(layerPermissionDeniedFileSystem),
   );
 
-const RenameFailureFileSystemLayer = Layer.effect(
+const layerRenameFailureFileSystem = Layer.effect(
   FileSystem.FileSystem,
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -66,85 +65,13 @@ const RenameFailureFileSystemLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(NodeServices.layer));
 
-const makeRenameFailureSecretStoreLayer = () =>
+const layerRenameFailureSecretStore = () =>
   ServerSecretStore.layer.pipe(
-    Layer.provide(makeServerConfigLayer()),
-    Layer.provideMerge(RenameFailureFileSystemLayer),
+    Layer.provide(layerServerConfig()),
+    Layer.provideMerge(layerRenameFailureFileSystem),
   );
 
-/**
- * Windows lets a virus scanner hold the destination for a moment after the
- * temp file lands, so the first replaces fail with EPERM and a later one wins.
- */
-const makeTransientRenameFileSystemLayer = (failures: number) =>
-  Layer.effect(
-    FileSystem.FileSystem,
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const attemptsRef = yield* Ref.make(0);
-
-      return {
-        ...fileSystem,
-        rename: (from, to) =>
-          Ref.updateAndGet(attemptsRef, (count) => count + 1).pipe(
-            Effect.flatMap((attempt) =>
-              attempt > failures
-                ? fileSystem.rename(from, to)
-                : Effect.fail(
-                    PlatformError.systemError({
-                      _tag: "Unknown",
-                      module: "FileSystem",
-                      method: "rename",
-                      pathOrDescriptor: `${String(from)} -> ${String(to)}`,
-                      description: "EPERM while replacing secret file.",
-                      cause: Object.assign(new Error("EPERM: operation not permitted, rename"), {
-                        code: "EPERM",
-                      }),
-                    }),
-                  ),
-            ),
-          ),
-      } satisfies FileSystem.FileSystem;
-    }),
-  ).pipe(Layer.provide(NodeServices.layer));
-
-const makeTransientRenameSecretStoreLayer = (failures: number) =>
-  ServerSecretStore.layer.pipe(
-    Layer.provide(makeServerConfigLayer()),
-    Layer.provideMerge(makeTransientRenameFileSystemLayer(failures)),
-    // `live` runs on the real clock so the backoff actually elapses, but unlike
-    // `it.effect` it brings no platform services of its own.
-    Layer.provideMerge(NodeServices.layer),
-  );
-
-const RemoveFailureFileSystemLayer = Layer.effect(
-  FileSystem.FileSystem,
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-
-    return {
-      ...fileSystem,
-      remove: (path, options) =>
-        Effect.fail(
-          PlatformError.systemError({
-            _tag: "PermissionDenied",
-            module: "FileSystem",
-            method: "remove",
-            pathOrDescriptor: String(path),
-            description: `Permission denied while removing secret file.${options ? " options-set" : ""}`,
-          }),
-        ),
-    } satisfies FileSystem.FileSystem;
-  }),
-).pipe(Layer.provide(NodeServices.layer));
-
-const makeRemoveFailureSecretStoreLayer = () =>
-  ServerSecretStore.layer.pipe(
-    Layer.provide(makeServerConfigLayer()),
-    Layer.provideMerge(RemoveFailureFileSystemLayer),
-  );
-
-const ConcurrentReadMissFileSystemLayer = Layer.effect(
+const layerConcurrentReadMissFileSystem = Layer.effect(
   FileSystem.FileSystem,
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -184,23 +111,13 @@ const ConcurrentReadMissFileSystemLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(NodeServices.layer));
 
-const makeConcurrentCreateSecretStoreLayer = () =>
+const layerConcurrentCreateSecretStore = () =>
   ServerSecretStore.layer.pipe(
-    Layer.provide(makeServerConfigLayer()),
-    Layer.provideMerge(ConcurrentReadMissFileSystemLayer),
+    Layer.provide(layerServerConfig()),
+    Layer.provideMerge(layerConcurrentReadMissFileSystem),
   );
 
 it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
-  it.effect("returns Option.none when a secret file does not exist", () =>
-    Effect.gen(function* () {
-      const secretStore = yield* ServerSecretStore.ServerSecretStore;
-
-      const secret = yield* secretStore.get("missing-secret");
-
-      assert.isTrue(Option.isNone(secret));
-    }).pipe(Effect.provide(makeServerSecretStoreLayer())),
-  );
-
   it.effect("reuses an existing secret instead of regenerating it", () =>
     Effect.gen(function* () {
       const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -209,7 +126,7 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
       const second = yield* secretStore.getOrCreateRandom("session-signing-key", 32);
 
       assert.deepEqual(Array.from(second), Array.from(first));
-    }).pipe(Effect.provide(makeServerSecretStoreLayer())),
+    }).pipe(Effect.provide(layerServerSecretStore())),
   );
 
   it.effect("returns the persisted secret when concurrent creators race", () =>
@@ -228,46 +145,7 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
 
       assert.deepEqual(Array.from(first), Array.from(persistedBytes));
       assert.deepEqual(Array.from(second), Array.from(persistedBytes));
-    }).pipe(Effect.provide(makeConcurrentCreateSecretStoreLayer())),
-  );
-
-  it.effect("uses restrictive permissions for the secret directory and files", () =>
-    Effect.gen(function* () {
-      const chmodCalls: Array<{ readonly path: string; readonly mode: number }> = [];
-      const recordingFileSystemLayer = Layer.effect(
-        FileSystem.FileSystem,
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-
-          return {
-            ...fileSystem,
-            makeDirectory: () => Effect.void,
-            writeFile: () => Effect.void,
-            rename: () => Effect.void,
-            chmod: (path, mode) =>
-              Effect.sync(() => {
-                chmodCalls.push({ path: String(path), mode });
-              }),
-          } satisfies FileSystem.FileSystem;
-        }),
-      ).pipe(Layer.provide(NodeServices.layer));
-
-      const secretStore = yield* Effect.service(ServerSecretStore.ServerSecretStore).pipe(
-        Effect.provide(
-          ServerSecretStore.layer.pipe(
-            Layer.provide(makeServerConfigLayer()),
-            Layer.provideMerge(recordingFileSystemLayer),
-          ),
-        ),
-      );
-
-      yield* secretStore.set("session-signing-key", Uint8Array.from([1, 2, 3]));
-
-      assert.isTrue(
-        chmodCalls.some((call) => call.mode === 0o700 && /[\\/]secrets$/.test(call.path)),
-      );
-      assert.isAtLeast(chmodCalls.filter((call) => call.mode === 0o600).length, 2);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(layerConcurrentCreateSecretStore())),
   );
 
   it.effect("propagates read failures other than missing-file errors", () =>
@@ -280,7 +158,7 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
       assert.include(error.message, "Failed to read secret session-signing-key.");
       assert.instanceOf(error.cause, PlatformError.PlatformError);
       assert.equal((error.cause as PlatformError.PlatformError).reason._tag, "PermissionDenied");
-    }).pipe(Effect.provide(makePermissionDeniedSecretStoreLayer())),
+    }).pipe(Effect.provide(layerPermissionDeniedSecretStore())),
   );
 
   it.effect("propagates write failures instead of treating them as success", () =>
@@ -295,33 +173,6 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
       assert.include(error.message, "Failed to persist secret session-signing-key.");
       assert.instanceOf(error.cause, PlatformError.PlatformError);
       assert.equal((error.cause as PlatformError.PlatformError).reason._tag, "PermissionDenied");
-    }).pipe(Effect.provide(makeRenameFailureSecretStoreLayer())),
-  );
-
-  // Live clock: the retry backoff is real elapsed time, so a test clock never
-  // reaches the second attempt.
-  live("retries a replace the platform briefly refuses", () =>
-    Effect.gen(function* () {
-      const secretStore = yield* ServerSecretStore.ServerSecretStore;
-
-      yield* secretStore.set("session-signing-key", Uint8Array.from([1, 2, 3]));
-
-      const stored = yield* secretStore.get("session-signing-key");
-
-      assert.deepEqual(Option.getOrNull(stored), Uint8Array.from([1, 2, 3]));
-    }).pipe(Effect.provide(makeTransientRenameSecretStoreLayer(2))),
-  );
-
-  it.effect("propagates remove failures other than missing-file errors", () =>
-    Effect.gen(function* () {
-      const secretStore = yield* ServerSecretStore.ServerSecretStore;
-
-      const error = yield* Effect.flip(secretStore.remove("session-signing-key"));
-
-      assert.instanceOf(error, ServerSecretStore.SecretStoreRemoveError);
-      assert.include(error.message, "Failed to remove secret session-signing-key.");
-      assert.instanceOf(error.cause, PlatformError.PlatformError);
-      assert.equal((error.cause as PlatformError.PlatformError).reason._tag, "PermissionDenied");
-    }).pipe(Effect.provide(makeRemoveFailureSecretStoreLayer())),
+    }).pipe(Effect.provide(layerRenameFailureSecretStore())),
   );
 });

@@ -1,15 +1,13 @@
-import { RelayApi } from "@t3tools/contracts/relay";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
-import { HttpClientError } from "effect/unstable/http";
+import { HttpClientError } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { relayEnvironmentClient } from "../relay/relayEnvironmentClient.ts";
+import { makeRelayEnvironmentClient } from "../relay/relayEnvironmentClient.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { RELAY_ENVIRONMENT_CREDENTIAL_SECRET, RELAY_URL_SECRET } from "./config.ts";
 
@@ -20,15 +18,7 @@ const retrySchedule = Schedule.exponential("1 second").pipe(
   Schedule.upTo({ duration: "10 minutes" }),
 );
 
-/**
- * A relay that answers 4xx has given a final answer: the route is missing on
- * the deployed relay (404), or it refuses this environment's credential
- * (401/403). Retrying cannot change any of those, and the schedule above would
- * otherwise spend ten minutes re-asking on every backend start — the label sync
- * runs at startup, so a relay without this route turned every boot into ~34
- * failed requests. Only 408/429 (timeout, rate limit) and 5xx/transport faults
- * are worth another attempt.
- */
+// Older relays lack this cosmetic route; only transient failures merit startup retries.
 export const isRetryableRelayFailure = (error: unknown): boolean => {
   if (!HttpClientError.isHttpClientError(error) || error.response === undefined) {
     // Transport faults and non-HTTP failures stay retryable.
@@ -63,10 +53,7 @@ export const synchronizeCurrentEnvironmentLabelWithRelay = Effect.fn(
   if (!relayUrl || !environmentCredential) return;
 
   const descriptor = yield* environment.getDescriptor;
-  const client = yield* HttpApiClient.make(RelayApi, {
-    baseUrl: relayUrl,
-    transformClient: relayEnvironmentClient(environmentCredential),
-  });
+  const client = yield* makeRelayEnvironmentClient({ url: relayUrl, environmentCredential });
   yield* client.server.updateEnvironmentLabel({
     params: { environmentId: descriptor.environmentId },
     payload: { label: descriptor.label },
@@ -77,16 +64,11 @@ export const synchronizeCurrentEnvironmentLabelWithRelay = Effect.fn(
 });
 
 export const runEnvironmentLabelRelaySync = Effect.fn("runEnvironmentLabelRelaySync")(function* () {
-  const environment = yield* ServerEnvironment.ServerEnvironment;
   const settings = yield* ServerSettings.ServerSettingsService;
 
   const synchronize = Effect.fn("synchronizeEnvironmentLabel")(function* (
-    environmentLabel: string,
+    _environmentLabel: string,
   ) {
-    // Apply the triggering setting before reading the descriptor. The
-    // general descriptor watcher runs independently and may not have seen
-    // this settings event yet.
-    yield* environment.setEnvironmentLabel(environmentLabel);
     yield* synchronizeCurrentEnvironmentLabelWithRelay();
   });
 

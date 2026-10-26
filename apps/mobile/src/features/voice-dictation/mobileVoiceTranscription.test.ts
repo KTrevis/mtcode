@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { transcribeMobileVoiceRecording } from "./mobileVoiceTranscription";
+import {
+  configuredMobileVoiceTranscriber,
+  transcribeMobileVoiceRecording,
+} from "./mobileVoiceTranscription";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -73,4 +76,15 @@ describe("transcribeMobileVoiceRecording", () => {
       ),
     ).rejects.toThrow("Unknown model");
   });
+});
+
+it("uses configured cloud transcription and honors preparation cancellation", async () => {
+  const config = { provider: "groq" as const, apiKey: "key", model: "whisper-large-v3-turbo" };
+  expect(configuredMobileVoiceTranscriber({ ...config, apiKey: " " })).toBeNull();
+  const transcriber = configuredMobileVoiceTranscriber(config)!;
+  const active = await transcriber.prepare({ signal: new AbortController().signal });
+  expect(active.locale).toBe("auto");
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await expect(transcriber.prepare({ signal: cancelled.signal })).rejects.toThrow();
 });

@@ -1,5 +1,6 @@
+import { makeThreadFixture } from "../test-fixtures";
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, RunId } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 
@@ -7,48 +8,33 @@ import { detectNewTurnCompletions, shouldPlayTurnCompletionChime } from "./useTu
 
 const envId = EnvironmentId.make("environment-local");
 const projId = ProjectId.make("project-1");
-const providerInstanceId = ProviderInstanceId.make("provider-1");
 
 function createMockThread(
   id: string,
   overrides?: Partial<EnvironmentThreadShell>,
 ): EnvironmentThreadShell {
-  return {
+  return makeThreadFixture({
     environmentId: envId,
     id: ThreadId.make(id),
     projectId: projId,
-    title: `Thread ${id}`,
-    modelSelection: {
-      instanceId: providerInstanceId,
-      model: "test-model",
-    },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
-    createdAt: "2026-08-15T07:00:00.000Z",
-    updatedAt: "2026-08-15T07:00:00.000Z",
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
     ...overrides,
-  };
+  });
 }
 
 describe("detectNewTurnCompletions", () => {
   it("does not trigger chime on initial snapshot or environment hydration of settled threads", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      runtime: {
+        status: "idle",
+        activeRunId: null,
+        updatedAt: "2026-08-15T07:02:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-1"),
+        status: "completed",
         requestedAt: "2026-08-15T07:01:00.000Z",
         startedAt: "2026-08-15T07:01:01.000Z",
         completedAt: "2026-08-15T07:02:00.000Z",
@@ -64,14 +50,17 @@ describe("detectNewTurnCompletions", () => {
 
   it("does not trigger chime during mid-turn checkpoints while state or session is running", () => {
     const thread = createMockThread("thread-1", {
-      session: {
+      runtime: {
         status: "running",
-        activeTurnId: TurnId.make("turn-1"),
+        activeRunId: RunId.make("turn-1"),
         updatedAt: "2026-08-15T07:01:30.000Z",
-      } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "running",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-1"),
+        status: "running",
         requestedAt: "2026-08-15T07:01:00.000Z",
         startedAt: "2026-08-15T07:01:01.000Z",
         completedAt: "2026-08-15T07:01:30.000Z",
@@ -87,10 +76,17 @@ describe("detectNewTurnCompletions", () => {
 
   it("triggers chime when a running thread settles and completes", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      runtime: {
+        status: "idle",
+        activeRunId: null,
+        updatedAt: "2026-08-15T07:02:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-1"),
+        status: "completed",
         requestedAt: "2026-08-15T07:01:00.000Z",
         startedAt: "2026-08-15T07:01:01.000Z",
         completedAt: "2026-08-15T07:02:00.000Z",
@@ -108,10 +104,17 @@ describe("detectNewTurnCompletions", () => {
 
   it("triggers chime when a previously completed thread completes a new turn", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-2"),
-        state: "completed",
+      runtime: {
+        status: "idle",
+        activeRunId: null,
+        updatedAt: "2026-08-15T07:06:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-2"),
+        status: "completed",
         requestedAt: "2026-08-15T07:05:00.000Z",
         startedAt: "2026-08-15T07:05:01.000Z",
         completedAt: "2026-08-15T07:06:00.000Z",
@@ -128,10 +131,17 @@ describe("detectNewTurnCompletions", () => {
 
   it("ignores unchanged completed threads on subsequent renders", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-2"),
-        state: "completed",
+      runtime: {
+        status: "idle",
+        activeRunId: null,
+        updatedAt: "2026-08-15T07:06:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-2"),
+        status: "completed",
         requestedAt: "2026-08-15T07:05:00.000Z",
         startedAt: "2026-08-15T07:05:01.000Z",
         completedAt: "2026-08-15T07:06:00.000Z",
@@ -148,10 +158,17 @@ describe("detectNewTurnCompletions", () => {
   it("clears tracked state when thread is archived and does not chime on unarchiving an already-settled thread", () => {
     const archivedThread = createMockThread("thread-1", {
       archivedAt: "2026-08-15T07:04:00.000Z",
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
-      latestTurn: {
-        turnId: TurnId.make("turn-2"),
-        state: "completed",
+      runtime: {
+        status: "idle",
+        activeRunId: null,
+        updatedAt: "2026-08-15T07:06:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("test-provider"),
+        providerName: null,
+        lastError: null,
+      },
+      latestRun: {
+        runId: RunId.make("turn-2"),
+        status: "completed",
         requestedAt: "2026-08-15T07:05:00.000Z",
         startedAt: "2026-08-15T07:05:01.000Z",
         completedAt: "2026-08-15T07:06:00.000Z",

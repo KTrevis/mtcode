@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off
 // This Promise adapter owns a JSON-RPC child and its timers; the enclosing Effect scope closes it.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import * as NodeReadline from "node:readline";
 import * as Schema from "effect/Schema";
 
 const Envelope = Schema.Struct({
@@ -21,18 +21,19 @@ const Account = Schema.Struct({
   account: Schema.NullOr(Schema.Struct({ type: Schema.String })),
 });
 
+const decodeEnvelope = Schema.decodeUnknownSync(Envelope);
+const decodeToolCall = Schema.decodeUnknownSync(ToolCall);
+const decodePrompt = Schema.decodeUnknownSync(Prompt);
+const decodeSdp = Schema.decodeUnknownSync(Sdp);
+const decodeFailure = Schema.decodeUnknownSync(Failure);
+const decodeThread = Schema.decodeUnknownSync(Thread);
+const decodeAccount = Schema.decodeUnknownSync(Account);
+
 const CODEX_VOICE_INSTRUCTIONS =
   "You are MT Code's voice routing bridge. For every user question or work request, call " +
   "ask_selected_agent with the complete request and relevant spoken context. The selected agent " +
   "owns reasoning, tools, files, and approvals. Never do its work yourself or use other tools. " +
   "Return its result faithfully and concisely. Never claim work succeeded when the tool failed.";
-
-/**
- * How long to hold GPT-Live's ping before answering it. A quick agent reply
- * rides back on the tool call; anything slower gets an immediate "working on
- * it" so the call stays conversational, and the reply follows as context.
- */
-const ANSWER_INLINE_MS = 8_000;
 
 /** How long a fresh ping is treated as a repeat of the question just answered. */
 const REPEAT_PING_MS = 30_000;
@@ -50,8 +51,8 @@ export interface CodexVoiceOptions {
 
 /** Owns only the child it starts. Credentials stay inside the authenticated Codex runtime. */
 export class CodexVoiceSession {
-  readonly id = randomUUID();
-  private readonly child: ChildProcessWithoutNullStreams;
+  readonly id = NodeCrypto.randomUUID();
+  private readonly child: NodeChildProcess.ChildProcessWithoutNullStreams;
   private readonly abort = new AbortController();
   private sequence = 0;
   private threadId: string | undefined;
@@ -76,7 +77,7 @@ export class CodexVoiceSession {
 
   constructor(options: CodexVoiceOptions) {
     this.options = options;
-    this.child = spawn(options.command, [...options.args], {
+    this.child = NodeChildProcess.spawn(options.command, [...options.args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
       shell: options.shell ?? false,
@@ -92,10 +93,10 @@ export class CodexVoiceSession {
     this.child.on("exit", () => {
       if (!this.closed) this.fail("Codex exited during the voice session.");
     });
-    const lines = createInterface({ input: this.child.stdout });
+    const lines = NodeReadline.createInterface({ input: this.child.stdout });
     lines.on("line", (line) => {
       try {
-        const message = Schema.decodeUnknownSync(Envelope)(JSON.parse(line));
+        const message = decodeEnvelope(JSON.parse(line));
         if (message.method && message.id !== undefined) {
           void this.handleRequest(message.id, message.method, message.params);
         } else if (typeof message.id === "number") {
@@ -106,9 +107,9 @@ export class CodexVoiceSession {
           if (message.error) request.reject(new Error(message.error.message));
           else request.resolve(message.result);
         } else if (message.method === "thread/realtime/sdp") {
-          this.ready?.resolve(Schema.decodeUnknownSync(Sdp)(message.params).sdp);
+          this.ready?.resolve(decodeSdp(message.params).sdp);
         } else if (message.method === "thread/realtime/error") {
-          this.fail(Schema.decodeUnknownSync(Failure)(message.params).message);
+          this.fail(decodeFailure(message.params).message);
         } else if (message.method === "thread/realtime/closed" && !this.closed) {
           this.fail("The Codex voice session ended. Start voice again to reconnect.");
         }
@@ -136,13 +137,7 @@ export class CodexVoiceSession {
     });
   }
 
-  /**
-   * GPT-Live can raise several handoffs for one spoken request. One that arrives
-   * while the agent is still answering joins that turn instead of being refused
-   * as "already working" — being refused is what made it retry harder. A handoff
-   * delivered after an answer runs again: by then the words may belong to a new
-   * question, and replaying a cached answer would be wrong.
-   */
+  // Concurrent voice handoffs join the active answer; a handoff after completion starts a new request.
   private ask(prompt: string): Promise<string> {
     if (this.delegation) return this.delegation;
     const delegation = this.options.askAgent(prompt, this.abort.signal);
@@ -191,16 +186,12 @@ export class CodexVoiceSession {
         throw new Error(
           "Use only ask_selected_agent. Approvals belong to the selected MT Code task.",
         );
-      const call = Schema.decodeUnknownSync(ToolCall)(params);
+      const call = decodeToolCall(params);
       if (call.tool !== "ask_selected_agent") throw new Error("Unknown voice bridge tool.");
-      const { prompt } = Schema.decodeUnknownSync(Prompt)(call.arguments);
+      const { prompt } = decodePrompt(call.arguments);
       if (!prompt.trim() || prompt.length > 32_000)
         throw new Error("The voice request is empty or too long.");
-      // GPT-Live raises the same question two or three times in a row, and the
-      // answer never rides back on the tool call — it does not reliably speak a
-      // tool result here. So: answer the first ping with a line to say, keep the
-      // duplicates quiet, and hand the agent's reply back as conversation, which
-      // it does speak.
+      // Voice does not reliably speak tool results; acknowledge once and deliver the agent answer as conversation.
       const reply = (text: string) =>
         this.send({ id, result: { success: true, contentItems: [{ type: "inputText", text }] } });
 
@@ -246,13 +237,13 @@ export class CodexVoiceSession {
         capabilities: { experimentalApi: true },
       });
       this.send({ method: "initialized" });
-      const account = Schema.decodeUnknownSync(Account)(await this.request("account/read", {}));
+      const account = decodeAccount(await this.request("account/read", {}));
       if (account.account?.type !== "chatgpt") {
         throw new Error(
           "Sign in to Codex with your ChatGPT account in Settings → Providers before starting account voice.",
         );
       }
-      const thread = Schema.decodeUnknownSync(Thread)(
+      const thread = decodeThread(
         await this.request("thread/start", {
           ephemeral: true,
           cwd: this.options.cwd,

@@ -1,16 +1,9 @@
 import type { SkyConditions } from "./skyConditions";
 import { mixColor, skyPalette, type SkyPalette } from "./skyPalette";
 
-/**
- * A live sky as SVG markup for a 96-unit-tall band, laid out the way the Night
- * sky artwork is: drawn at the header's height and continued sideways for as
- * wide as the sidebar gets, never stretched to fit. The sky, glow and stars
- * span the band; weather is composed on a 640-unit tile that repeats.
- *
- * Ids carry the `__ID__` placeholder so each mounted copy can make its own.
- */
+// A live sky as SVG markup for a 96-unit-tall band, laid out the way the Night sky artwork is: drawn at the header's height and continued sideways for as wide as the sidebar gets, never stretched to fit.
 
-export const SKY_TILE = 640;
+const SKY_TILE = 640;
 const HEIGHT = 96;
 const REPEATS = Math.ceil(8192 / SKY_TILE);
 
@@ -72,13 +65,7 @@ const CLOUD_RIGHT =
 /** [shape, x offset, y offset, scale, opacity] */
 type Bank = readonly [string, number, number, number, number];
 
-/**
- * How many of those banks the sky shows, and where. A few percent of cover is
- * one bank; the Night sky's own pair is a partly cloudy sky; beyond that more
- * of the same banks stack in behind, until an overcast sky is a deck of them.
- * The seed nudges each bank's place and size so the hours differ, without
- * ever changing the shapes themselves.
- */
+// How many of those banks the sky shows, and where.
 function cloudBanks(rand: () => number, conditions: SkyConditions): Bank[] {
   const cover = Math.max(conditions.low, conditions.mid * 0.9, conditions.high * 0.35);
   if (cover < 0.06) return [];
@@ -198,11 +185,7 @@ export function filament(seed: number, x: number, top: number, bottom: number) {
 export const trace = (points: ReadonlyArray<readonly [number, number]>) =>
   points.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join("");
 
-/**
- * A flash lighting the cloud from inside, and on some hours a thin channel
- * reaching down out of it. Never a bolt glyph: the channel wanders and forks
- * the way a real one does, and half the time there is only the glow.
- */
+// A flash lighting the cloud from inside, and on some hours a thin channel reaching down out of it.
 function lightning(seed: number, x: number) {
   const glow = `<ellipse cx="${n(x)}" cy="44" rx="110" ry="70" fill="url(#__ID__flash)"/>`;
   if (noise(seed * 3.1) < 0.5) return glow;

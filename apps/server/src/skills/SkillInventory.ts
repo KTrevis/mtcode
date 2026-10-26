@@ -14,8 +14,8 @@ import * as Schema from "effect/Schema";
 
 import { discoverClaudeSkills } from "../provider/Drivers/ClaudeSkills.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { ServerSettingsService } from "../serverSettings.ts";
 
 const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
@@ -66,7 +66,7 @@ const discoverInstanceSkills = Effect.fn("SkillInventory.discoverInstanceSkills"
   FileSystem.FileSystem | Path.Path
 > {
   const config = instance.config ?? {};
-  const processEnv = mergeProviderInstanceEnvironment(instance.environment);
+  const processEnv = yield* mergeProviderInstanceEnvironment(instance.environment);
 
   if (instance.driver === "codex") {
     const decoded = decodeCodexSettings(config);

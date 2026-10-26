@@ -5,12 +5,15 @@
  */
 import * as NodePath from "node:path";
 
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  Environment as HostProcessEnvironment,
+  Platform as HostProcessPlatform,
+} from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 /** Bundle / window names electron-builder ships for stable and nightly. */
 // MT names come first so a Munim install is found before any legacy T3 bundle
@@ -92,7 +95,7 @@ const spawnExitOk = Effect.fn("desktopLaunch.spawnExitOk")(function* (
     .exitCode(ChildProcess.make(command, [...args], WAIT_IGNORE_STDIO_OPTIONS))
     .pipe(
       Effect.map((code) => code === 0),
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 });
 
@@ -107,7 +110,7 @@ const spawnDetachedOk = Effect.fn("desktopLaunch.spawnDetachedOk")(function* (
     .pipe(
       Effect.flatMap((handle) => handle.unref.pipe(Effect.as(true))),
       Effect.scoped,
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 });
 
@@ -141,12 +144,12 @@ const discoverLinuxDesktopEntryIds = Effect.fn("desktopLaunch.discoverLinuxDeskt
 
     const entries: Array<{ readonly fileName: string; readonly contents: string }> = [];
     for (const dir of dirs) {
-      const fileNames = yield* fs.readDirectory(dir).pipe(Effect.catch(() => Effect.succeed([])));
+      const fileNames = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => []));
       for (const fileName of fileNames) {
         if (!fileName.toLowerCase().endsWith(".desktop")) continue;
         const contents = yield* fs
           .readFileString(path.join(dir, fileName))
-          .pipe(Effect.catch(() => Effect.succeed("")));
+          .pipe(Effect.orElseSucceed(() => ""));
         if (contents.length === 0) continue;
         entries.push({ fileName, contents });
       }

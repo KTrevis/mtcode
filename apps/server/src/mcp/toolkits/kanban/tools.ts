@@ -2,7 +2,7 @@ import {
   CommandId,
   KanbanCard,
   KanbanTag,
-  McpCapabilityUnavailableError,
+  OrchestratorMcpFailure,
   NonNegativeInt,
   ProjectId,
   TrimmedNonEmptyString,
@@ -11,16 +11,15 @@ import {
 import * as Schema from "effect/Schema";
 import * as Crypto from "effect/Crypto";
 import * as FileSystem from "effect/FileSystem";
-import * as Socket from "effect/unstable/socket/Socket";
-import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
-import { ServerConfig } from "../../../config.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
-import { ServerSettingsService } from "../../../serverSettings.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { Tool, Toolkit } from "effect/unstable/ai";
-
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { McpInvocationContext } from "../../McpInvocationContext.ts";
+import { Tool, Toolkit } from "effect/ai";
+import * as ProjectService from "../../../project/ProjectService.ts";
+import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
+import * as DocumentText from "../../../provider/DocumentText.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 export class KanbanTicketCreateError extends Schema.TaggedError<KanbanTicketCreateError>()(
   "KanbanTicketCreateError",
@@ -56,8 +55,13 @@ const ListTicketsTool = Tool.make("kanban_list_tickets", {
     tickets: Schema.Array(KanbanCard),
     tags: Schema.Array(KanbanTag),
   }),
-  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketListError]),
-  dependencies: [McpInvocationContext, ProjectionSnapshotQuery],
+  failure: Schema.Union([OrchestratorMcpFailure, KanbanTicketListError]),
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ProjectService.ProjectService,
+    ThreadManagement.ThreadManagementService,
+  ],
 })
   .annotate(Tool.Title, "List Kanban tickets")
   .annotate(Tool.Readonly, true)
@@ -76,8 +80,14 @@ const CreateTicketTool = Tool.make("kanban_create_ticket", {
     clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
   }),
   success: KanbanTicketCreateResult,
-  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketCreateError]),
-  dependencies: [McpInvocationContext, OrchestrationEngineService],
+  failure: Schema.Union([OrchestratorMcpFailure, KanbanTicketCreateError]),
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ProjectService.ProjectService,
+    ThreadManagement.ThreadManagementService,
+    Crypto.Crypto,
+  ],
 })
   .annotate(Tool.Title, "Create Kanban ticket")
   .annotate(Tool.Readonly, false)
@@ -110,16 +120,17 @@ const MoveTicketTool = Tool.make("kanban_move_ticket", {
     instructions: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(8_000))),
   }),
   success: KanbanTicketMoveResult,
-  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMoveError]),
+  failure: Schema.Union([OrchestratorMcpFailure, KanbanTicketMoveError]),
+  failureMode: "return" as const,
   dependencies: [
-    McpInvocationContext,
-    OrchestrationEngineService,
-    ProjectionSnapshotQuery,
-    ServerSettingsService,
-    ProviderRegistry,
-    ServerConfig,
-    EnvironmentAuth,
-    Socket.WebSocketConstructor,
+    McpInvocationContext.McpInvocationContext,
+    ProjectService.ProjectService,
+    ThreadManagement.ThreadManagementService,
+    ThreadLaunch.ThreadLaunchService,
+    DocumentText.DocumentText,
+    ServerSettings.ServerSettingsService,
+    ProviderRegistry.ProviderRegistry,
+    ServerConfig.ServerConfig,
     FileSystem.FileSystem,
     Crypto.Crypto,
   ],
@@ -156,8 +167,14 @@ const UpdateTicketTool = Tool.make("kanban_update_ticket", {
     dependsOn: KanbanCard.fields.dependsOn,
   }),
   success: KanbanTicketCreateResult,
-  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMutationError]),
-  dependencies: [McpInvocationContext, OrchestrationEngineService],
+  failure: Schema.Union([OrchestratorMcpFailure, KanbanTicketMutationError]),
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ProjectService.ProjectService,
+    ThreadManagement.ThreadManagementService,
+    Crypto.Crypto,
+  ],
 })
   .annotate(Tool.Title, "Update Kanban ticket")
   .annotate(Tool.Readonly, false)
@@ -170,8 +187,14 @@ const DeleteTicketTool = Tool.make("kanban_delete_ticket", {
     "Delete a Kanban ticket from the specified project on this environment. Requires exact projectId and ticketId. Removes only the ticket; its linked agent thread is preserved and any running agent continues. Reuse clientRequestId for retries within this provider session to return the original command receipt even after deletion.",
   parameters: TicketMutationParameters,
   success: KanbanTicketCreateResult,
-  failure: Schema.Union([McpCapabilityUnavailableError, KanbanTicketMutationError]),
-  dependencies: [McpInvocationContext, OrchestrationEngineService],
+  failure: Schema.Union([OrchestratorMcpFailure, KanbanTicketMutationError]),
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ProjectService.ProjectService,
+    ThreadManagement.ThreadManagementService,
+    Crypto.Crypto,
+  ],
 })
   .annotate(Tool.Title, "Delete Kanban ticket")
   .annotate(Tool.Readonly, false)

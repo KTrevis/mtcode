@@ -17,6 +17,7 @@ export function useKanbanMoves(
   const persistMove = useEffectEvent(onMove);
 
   // Wait for both the command and its projected project update before the next move.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Serialize remote mutations until their projected board updates arrive.
   useEffect(() => {
     const move = moves[0];
     if (busy || running.current || !move) return;

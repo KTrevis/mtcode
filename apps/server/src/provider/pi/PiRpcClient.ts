@@ -8,7 +8,7 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   isPiRpcResponse,
@@ -81,6 +81,12 @@ export interface PiRpcTransportOptions {
 }
 
 const encoder = new TextEncoder();
+const jsonString = Schema.fromJsonString(Schema.Unknown);
+const decodeJson = Schema.decodeUnknownEffect(jsonString);
+const encodeJson = Schema.encodeUnknownEffect(jsonString);
+const decodePiState = Schema.decodeUnknownEffect(PiRpcState);
+const decodePiModels = Schema.decodeUnknownEffect(PiRpcAvailableModels);
+const decodePiModel = Schema.decodeUnknownEffect(PiRpcModel);
 
 export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(function* (
   io: PiRpcTransportIo,
@@ -94,24 +100,21 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
   const writeLock = yield* Semaphore.make(1);
   const closed = yield* Ref.make(false);
   const scope = yield* Scope.Scope;
-  const jsonString = Schema.fromJsonString(Schema.Unknown);
-  const decodeJson = Schema.decodeUnknownEffect(jsonString);
-  const encodeJson = Schema.encodeUnknownEffect(jsonString);
   const decodeState = (data: unknown) =>
-    Schema.decodeUnknownEffect(PiRpcState)(data).pipe(
+    decodePiState(data).pipe(
       Effect.mapError(
         (cause) => new PiRpcProtocolError({ detail: "invalid get_state response data", cause }),
       ),
     );
   const decodeModels = (data: unknown) =>
-    Schema.decodeUnknownEffect(PiRpcAvailableModels)(data).pipe(
+    decodePiModels(data).pipe(
       Effect.mapError(
         (cause) =>
           new PiRpcProtocolError({ detail: "invalid get_available_models response data", cause }),
       ),
     );
   const decodeModel = (data: unknown) =>
-    Schema.decodeUnknownEffect(PiRpcModel)(data).pipe(
+    decodePiModel(data).pipe(
       Effect.mapError(
         (cause) => new PiRpcProtocolError({ detail: "invalid set_model response data", cause }),
       ),
@@ -228,35 +231,34 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
       ),
     );
 
-  const request = <A>(
+  const request = Effect.fn("PiRpcClient.request")(function* <A>(
     command: string,
     payload: object,
     decode: (data: unknown) => Effect.Effect<A, PiRpcError>,
-  ) =>
-    Effect.gen(function* () {
-      const id = yield* Ref.getAndUpdate(nextId, (value) => value + 1).pipe(
-        Effect.map((value) => `t3-pi-${String(value)}`),
-      );
-      const waiter = yield* Deferred.make<PiRpcResponse, PiRpcError>();
-      yield* Ref.update(pending, (current) => new Map(current).set(id, waiter));
-      yield* write({ ...payload, type: command, id }).pipe(Effect.onError(() => remove(id)));
-      const response = yield* Effect.raceFirst(
-        Deferred.await(waiter),
-        Effect.sleep(Duration.millis(timeoutMs)).pipe(
-          Effect.andThen(
-            Effect.fail(new PiRpcRequestTimeoutError({ command, requestId: id, timeoutMs })),
-          ),
+  ) {
+    const id = yield* Ref.getAndUpdate(nextId, (value) => value + 1).pipe(
+      Effect.map((value) => `t3-pi-${String(value)}`),
+    );
+    const waiter = yield* Deferred.make<PiRpcResponse, PiRpcError>();
+    yield* Ref.update(pending, (current) => new Map(current).set(id, waiter));
+    yield* write({ ...payload, type: command, id }).pipe(Effect.onError(() => remove(id)));
+    const response = yield* Effect.raceFirst(
+      Deferred.await(waiter),
+      Effect.sleep(Duration.millis(timeoutMs)).pipe(
+        Effect.andThen(
+          Effect.fail(new PiRpcRequestTimeoutError({ command, requestId: id, timeoutMs })),
         ),
-      ).pipe(Effect.ensuring(remove(id)));
-      if (!response.success) {
-        return yield* new PiRpcCommandError({
-          command,
-          requestId: id,
-          detail: response.error ?? "Pi RPC command failed",
-        });
-      }
-      return yield* decode(response.data);
-    });
+      ),
+    ).pipe(Effect.ensuring(remove(id)));
+    if (!response.success) {
+      return yield* new PiRpcCommandError({
+        command,
+        requestId: id,
+        detail: response.error ?? "Pi RPC command failed",
+      });
+    }
+    return yield* decode(response.data);
+  });
 
   const close = Ref.getAndSet(closed, true).pipe(
     Effect.flatMap((wasClosed) =>

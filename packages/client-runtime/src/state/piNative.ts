@@ -1,20 +1,18 @@
 import {
-  CommandId,
   type PiExternalCatalogSnapshot,
   type PiExternalCatalogStreamItem,
   WS_METHODS,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
-import { request, subscribe } from "../rpc/client.ts";
-import { createEnvironmentCommand, createEnvironmentSubscriptionAtomFamily } from "./runtime.ts";
+import { subscribe } from "../rpc/client.ts";
+import { createEnvironmentRpcCommand, createEnvironmentSubscriptionAtomFamily } from "./runtime.ts";
 
 export interface PiExternalCatalogState {
   readonly snapshot: PiExternalCatalogSnapshot | null;
@@ -39,17 +37,8 @@ export function reducePiExternalCatalog(
   return state.synchronized ? state : { ...state, synchronized: true };
 }
 
-function commandId(input?: CommandId) {
-  if (input !== undefined) return Effect.succeed(input);
-  return Crypto.Crypto.pipe(
-    Effect.flatMap((crypto) => crypto.randomUUIDv4),
-    Effect.orDie,
-    Effect.map(CommandId.make),
-  );
-}
-
 export function createPiExternalThreadAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
     catalog: createEnvironmentSubscriptionAtomFamily(runtime, {
@@ -78,7 +67,10 @@ export function createPiExternalThreadAtoms<R, E>(
                                 )
                               : Stream.make({ kind: "synchronized" as const })
                             ).pipe(
-                              Stream.scan(EMPTY_PI_EXTERNAL_CATALOG_STATE, reducePiExternalCatalog),
+                              Stream.scan(
+                                () => EMPTY_PI_EXTERNAL_CATALOG_STATE,
+                                reducePiExternalCatalog,
+                              ),
                             ),
                           ),
                         ),
@@ -90,17 +82,9 @@ export function createPiExternalThreadAtoms<R, E>(
           ),
         ),
     }),
-    createSession: createEnvironmentCommand(runtime, {
+    createSession: createEnvironmentRpcCommand(runtime, {
+      tag: WS_METHODS.piExternalCreateSession,
       label: "environment-data:pi-external:create-session",
-      execute: (input: { readonly cwd: string; readonly commandId?: CommandId }) =>
-        commandId(input.commandId).pipe(
-          Effect.flatMap((stableCommandId) =>
-            request(WS_METHODS.piExternalCreateSession, {
-              commandId: stableCommandId,
-              cwd: input.cwd,
-            }),
-          ),
-        ),
     }),
   };
 }

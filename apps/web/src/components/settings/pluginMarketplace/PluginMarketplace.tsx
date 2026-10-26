@@ -11,7 +11,7 @@ import {
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Alert, AlertAction, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
@@ -335,7 +335,7 @@ function MarketplacePluginCard({
 }) {
   const contents = marketplaceContentsSummary(plugin, section === "plugins" ? null : section);
   return (
-    <article className="relative flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 transition-colors has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring has-[a:focus-visible]:ring-offset-2 has-[a:focus-visible]:ring-offset-background hover:bg-foreground/4 dark:bg-card/40">
+    <article className="relative flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 transition-colors has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-ring has-[a:focus-visible]:ring-offset-2 has-[a:focus-visible]:ring-offset-background hover:bg-foreground/4 dark:bg-card/40">
       <PluginLogo plugin={plugin} />
       <div className="min-w-0 flex-1">
         <h3 className="truncate font-medium text-sm text-foreground">
@@ -448,7 +448,7 @@ function BrowseSections({
   readonly onShowInstalled: () => void;
   readonly onSelectCategory: (category: string) => void;
 }) {
-  const sections = useMemo(() => groupMarketplaceSections(plugins), [plugins]);
+  const sections = groupMarketplaceSections(plugins);
   return (
     <>
       {sections.installed.length > 0 ? (
@@ -496,7 +496,7 @@ function InstalledAndAvailable({
   readonly installedTitle: string;
   readonly availableTitle: string;
 }) {
-  const { installed, available } = useMemo(() => splitInstalledListings(plugins), [plugins]);
+  const { installed, available } = splitInstalledListings(plugins);
   return (
     <>
       {installed.length > 0 ? (
@@ -604,10 +604,12 @@ export function PluginMarketplace({
   const skillInventory = usePrimarySkillInventory(skillsRefreshKey);
   const refresh = () => void loadCatalog(true).catch(() => undefined);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Load the marketplace catalog from the environment service on mount.
   useEffect(() => {
     void loadCatalog(true).catch(() => undefined);
   }, [loadCatalog]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Refresh the remote catalog while package synchronization is active.
   useEffect(() => {
     if (!notices.some((notice) => notice.status === "syncing")) return;
     const timeout = window.setTimeout(() => {
@@ -616,6 +618,7 @@ export function PluginMarketplace({
     return () => window.clearTimeout(timeout);
   }, [loadCatalog, notices]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Debounce remote marketplace searches when the query changes.
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       void searchCatalog(query).catch(() => undefined);
@@ -623,49 +626,39 @@ export function PluginMarketplace({
     return () => window.clearTimeout(timeout);
   }, [query, searchCatalog]);
 
-  const catalogPlugins = useMemo(() => {
+  const catalogPlugins = (() => {
     if (searchHits.length === 0) return mergeMarketplaceListings(plugins);
     const knownIds = new Set(plugins.map((plugin) => plugin.id));
     return mergeMarketplaceListings([
       ...plugins,
       ...searchHits.filter((plugin) => !knownIds.has(plugin.id)),
     ]);
-  }, [plugins, searchHits]);
-  const allSkills = useMemo(
-    () => visibleSkills(skillInventory, "", harness),
-    [harness, skillInventory],
-  );
-  const matchingSkills = useMemo(
-    () => visibleSkills(skillInventory, query, harness),
-    [harness, query, skillInventory],
-  );
+  })();
+  const allSkills = visibleSkills(skillInventory, "", harness);
+  const matchingSkills = visibleSkills(skillInventory, query, harness);
   // Counts stay blank until the catalog has loaded; a "0" while loading would be a lie.
-  const counts = useMemo(
-    () =>
-      catalogStatus === "ready"
-        ? marketplaceSectionCounts(catalogPlugins, harness, allSkills?.length ?? null)
-        : EMPTY_SECTION_COUNTS,
-    [allSkills, catalogPlugins, catalogStatus, harness],
-  );
-  const categories = useMemo(
-    () =>
-      [
-        ...new Set(
-          filterMarketplacePlugins(catalogPlugins, {
-            query: "",
-            section,
-            status: "all",
-            harness,
-            category: "all",
-          }).map((plugin) => plugin.category),
-        ),
-      ].toSorted(),
-    [catalogPlugins, harness, section],
-  );
-  const filteredPlugins = useMemo(
-    () => filterMarketplacePlugins(catalogPlugins, { query, section, status, harness, category }),
-    [catalogPlugins, category, harness, query, section, status],
-  );
+  const counts =
+    catalogStatus === "ready"
+      ? marketplaceSectionCounts(catalogPlugins, harness, allSkills?.length ?? null)
+      : EMPTY_SECTION_COUNTS;
+  const categories = [
+    ...new Set(
+      filterMarketplacePlugins(catalogPlugins, {
+        query: "",
+        section,
+        status: "all",
+        harness,
+        category: "all",
+      }).map((plugin) => plugin.category),
+    ),
+  ].toSorted();
+  const filteredPlugins = filterMarketplacePlugins(catalogPlugins, {
+    query,
+    section,
+    status,
+    harness,
+    category,
+  });
   // The harness filter narrows the browse layout; search, status, and category switch to a flat
   // result list.
   const isFiltered = query.trim().length > 0 || status !== "all" || category !== "all";

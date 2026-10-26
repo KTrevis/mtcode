@@ -9,14 +9,7 @@ import {
   renderSkyAppIcon,
 } from "../artwork/appIconArtwork";
 
-/**
- * Keeps the running app's icon in step with the account's choice.
- *
- * The installed bundle keeps its own icon on disk — rewriting that would break
- * the code signature, and with it every macOS permission grant — so the pick is
- * applied to the live Dock tile (or window icon off macOS) on load and on every
- * change. Browsers have no local API and simply skip this.
- */
+// Keeps the running app's icon in step with the account's choice.
 export function useAppIcon(): void {
   const { selection, custom } = usePrimarySettings((settings) => ({
     selection: settings.appIcon,
@@ -46,6 +39,7 @@ export function useAppIcon(): void {
         ? BLUEPRINT_ICON_BACKGROUND
         : null;
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize artwork with the Electron application icon.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const setIcon = window.desktopBridge?.setAppIcon;

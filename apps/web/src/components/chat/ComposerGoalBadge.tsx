@@ -1,4 +1,4 @@
-import type { OrchestrationThreadGoal } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderGoal } from "@t3tools/contracts";
 import { memo } from "react";
 
 import { GoalChip, type GoalChipAction } from "./GoalChip";
@@ -9,7 +9,7 @@ import { GoalChip, type GoalChipAction } from "./GoalChip";
  * pause, resume, or delete it.
  */
 export const ComposerGoalBadge = memo(function ComposerGoalBadge(props: {
-  readonly goal: OrchestrationThreadGoal | null | undefined;
+  readonly goal: OrchestrationV2ProviderGoal | null | undefined;
   readonly isWorking?: boolean;
   readonly onAction?: ((action: GoalChipAction) => void) | undefined;
   readonly onEdit?: ((objective: string) => void) | undefined;

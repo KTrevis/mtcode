@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import {
   VoiceApiError,
@@ -135,13 +135,13 @@ export class VoiceSessionService extends Context.Service<
   }
 >()("t3/voice/VoiceSessionService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
 
   // The old provider credential has no consumer after this migration. Remove it
   // during service startup so upgrading does not leave an unused xAI key behind.
-  yield* secretStore.remove(LEGACY_XAI_VOICE_API_KEY_SECRET).pipe(Effect.catch(() => Effect.void));
+  yield* secretStore.remove(LEGACY_XAI_VOICE_API_KEY_SECRET).pipe(Effect.ignore);
 
   const readCredential = secretStore.get(OPENAI_REALTIME_API_KEY_SECRET).pipe(
     Effect.mapError(() => secretStoreFailure("OpenAI Realtime")),

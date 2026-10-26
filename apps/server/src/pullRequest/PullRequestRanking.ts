@@ -7,15 +7,7 @@ import * as Layer from "effect/Layer";
 
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
-/**
- * How many pull requests are judged in one prompt. The whole set is ranked however long it is —
- * a reader asking what to port does not want the tail silently dropped — so a long backlog is
- * split rather than truncated.
- *
- * Kept small because the answer has to survive a round trip through an agent CLI as structured
- * JSON, and the longer the array the more ways that goes wrong — a truncated or reshaped reply
- * fails the whole batch. A smaller batch also means one bad reply costs less of the answer.
- */
+// Small batches keep CLI JSON replies bounded without dropping the backlog tail.
 const RANKING_BATCH_SIZE = 20;
 
 /**
@@ -34,16 +26,7 @@ const RANKING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Bounded so a workspace watching a busy upstream for weeks cannot grow this without limit. */
 const RANKING_CACHE_CAPACITY = 2_000;
 
-/**
- * Keyed by what was actually judged rather than by the request: the page re-asks whenever any row
- * in the upstream moves, and without this every one of those asks was a fresh model call over
- * rows that had already been scored — which is what made ranking feel like it ran constantly.
- *
- * The model is part of the key because the judgement is the model's, not the repository's. Two
- * agents rank the same backlog differently, and that difference is the reason to switch — so a
- * switch has to show the new model's opinion rather than reuse the old one's. Each keeps its own
- * answers, so switching back is free and switching to something never used ranks afresh.
- */
+// Cache by judged content and model so updates rank only changed rows and switching models preserves distinct opinions.
 const rankingCacheKey = (
   repository: string,
   model: ModelSelection,
@@ -106,8 +89,8 @@ export const make = Effect.gen(function* () {
     }
   };
 
-  const rank: PullRequestRankingService["Service"]["rank"] = (input) =>
-    Effect.gen(function* () {
+  const rank: PullRequestRankingService["Service"]["rank"] = Effect.fn("PullRequestRanking.rank")(
+    function* (input) {
       if (input.candidates.length === 0) {
         return [];
       }
@@ -188,7 +171,8 @@ export const make = Effect.gen(function* () {
         });
       }
       return rankings;
-    });
+    },
+  );
 
   return { rank } satisfies PullRequestRankingService["Service"];
 });

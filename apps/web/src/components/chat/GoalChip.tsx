@@ -1,4 +1,4 @@
-import type { OrchestrationThreadGoal } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderGoal } from "@t3tools/contracts";
 import {
   formatGoalChipAriaLabel,
   formatGoalChipPrefix,
@@ -28,14 +28,14 @@ function goalStatusClass(status: string): string {
   if (status === "blocked") {
     return "text-destructive";
   }
-  if (status === "usageLimited") {
+  if (status === "usage_limited") {
     return "text-warning-foreground";
   }
   return "text-muted-foreground";
 }
 
 function GoalStatusIcon(props: {
-  readonly goal: OrchestrationThreadGoal;
+  readonly goal: OrchestrationV2ProviderGoal;
   readonly isWorking: boolean;
 }) {
   const className = cn("size-3.5 shrink-0", goalStatusClass(props.goal.status));
@@ -57,7 +57,7 @@ function GoalStatusIcon(props: {
       return <PauseIcon className={className} aria-hidden="true" />;
     case "blocked":
       return <BanIcon className={className} aria-hidden="true" />;
-    case "usageLimited":
+    case "usage_limited":
       return <TriangleAlertIcon className={className} aria-hidden="true" />;
     case "complete":
       return <CircleCheckIcon className={className} aria-hidden="true" />;
@@ -65,24 +65,6 @@ function GoalStatusIcon(props: {
       return <TargetIcon className={className} aria-hidden="true" />;
   }
 }
-
-export const GoalActiveMarker = memo(function GoalActiveMarker({
-  goal,
-}: {
-  readonly goal: { readonly status: string } | null | undefined;
-}) {
-  if (!threadHasActiveGoal(goal)) {
-    return null;
-  }
-  return (
-    <span
-      data-goal-active
-      className="shrink-0 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground"
-    >
-      Active
-    </span>
-  );
-});
 
 function GoalChipIconButton(props: {
   readonly action: GoalChipAction;
@@ -127,7 +109,7 @@ export const GoalChip = memo(function GoalChip({
   onEdit,
   isWorking = false,
 }: {
-  readonly goal: OrchestrationThreadGoal | null | undefined;
+  readonly goal: OrchestrationV2ProviderGoal | null | undefined;
   readonly onAction?: ((action: GoalChipAction) => void) | undefined;
   readonly onEdit?: ((objective: string) => void) | undefined;
   readonly isWorking?: boolean;
@@ -158,7 +140,7 @@ export const GoalChip = memo(function GoalChip({
           className={cn(
             "inline-flex min-w-0 cursor-pointer items-baseline gap-1 rounded-sm text-left",
             "hover:text-foreground",
-            "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+            "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           )}
           onPointerDown={(event) => {
             // Keep composer focus; the edit lands in the prompt.

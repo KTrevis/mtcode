@@ -6,13 +6,7 @@ export function resolveThreadSyncPhase(input: {
   readonly detailExists: boolean;
   readonly shellExists: boolean;
   readonly status: EnvironmentThreadStatus;
-  /**
-   * The thread subscription's last failure, if it is still unresolved. A failed
-   * subscription leaves the status on "cached"/"empty" and retries a few times a
-   * second, which is indistinguishable from a slow first sync — so without this
-   * a thread whose stream keeps erroring shows "Syncing messages..." forever and
-   * never says why.
-   */
+  // The thread subscription's last failure, if it is still unresolved.
   readonly hasError?: boolean;
 }): ThreadSyncPhase | null {
   if (!input.shellExists) {

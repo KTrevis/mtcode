@@ -1,10 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
-  HostProcessArguments,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+  Arguments as HostProcessArguments,
+  ExecutablePath as HostProcessExecutablePath,
+  Platform as HostProcessPlatform,
+} from "@t3tools/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -12,12 +12,13 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeOS from "node:os";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProcessRunner from "../processRunner.ts";
+import * as BootService from "./bootService.ts";
 import * as BootServiceWindows from "./bootServiceWindows.ts";
 import { pinnedRuntimePaths } from "./pinnedRuntime.ts";
 import {
@@ -128,6 +129,7 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
   // The data directory is what the generated script quotes, so a percent sign
   // is injected here rather than through the host executable.
   baseDirName = ".t3",
+  selectedManager = false,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -220,14 +222,38 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
       }).pipe(Effect.orDie),
   });
 
-  const service = yield* BootServiceWindows.make({
+  let heartbeat = 1;
+  const launcherFileSystem = FileSystem.FileSystem.of({
+    ...fs,
+    writeFileString: (...args) =>
+      fs.writeFileString(...args).pipe(
+        Effect.tap(() =>
+          Effect.gen(function* () {
+            if (args[0] !== stopRequestPath) return;
+            if (control.launcherStopsOnRequest) {
+              yield* fs.remove(stopRequestPath, { force: true });
+              yield* fs.remove(pidPath, { force: true });
+            } else if (control.launcherRefreshesRecord && (yield* fs.exists(pidPath))) {
+              heartbeat += 1;
+              yield* fs.utimes(pidPath, heartbeat, heartbeat);
+            }
+          }),
+        ),
+      ),
+  });
+
+  const makeInput = {
     baseDir,
     logsDir: path.join(baseDir, "userdata", "logs"),
     cliVersion: "1.2.3",
     host: { execPath },
     stopRequestTimeout: Duration.millis(30),
-  }).pipe(
+  };
+  const service = yield* (
+    selectedManager ? BootService.make(makeInput) : BootServiceWindows.make(makeInput)
+  ).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
+    Effect.provideService(FileSystem.FileSystem, launcherFileSystem),
     Effect.provide(
       Layer.mergeAll(
         Layer.succeed(HostProcessPlatform, platform),
@@ -242,29 +268,6 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
         ),
       ),
     ),
-  );
-  // Stands in for a running launcher. The real one drops its pid file when it
-  // stops, and that disappearance is the only thing the CLI accepts as proof.
-  yield* Effect.forkScoped(
-    Effect.gen(function* () {
-      while (true) {
-        yield* Effect.sleep(Duration.millis(5));
-        const asked = yield* fs.exists(stopRequestPath).pipe(Effect.orElseSucceed(() => false));
-        if (!control.launcherStopsOnRequest) {
-          // A launcher that will not stop is still alive, and a live one keeps
-          // refreshing its record. Without that it would look like a process id
-          // the system recycled, which is a different case entirely.
-          const present = yield* fs.exists(pidPath).pipe(Effect.orElseSucceed(() => false));
-          if (control.launcherRefreshesRecord && present) {
-            yield* fs.writeFileString(pidPath, control.presence).pipe(Effect.ignore);
-          }
-          continue;
-        }
-        if (!asked) continue;
-        yield* fs.remove(stopRequestPath, { force: true }).pipe(Effect.ignore);
-        yield* fs.remove(pidPath, { force: true }).pipe(Effect.ignore);
-      }
-    }),
   );
 
   return {
@@ -282,6 +285,17 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
 });
 
 it.layer(NodeServices.layer)("windows boot service", (it) => {
+  it.effect("selects the Windows manager through the shared boot service entry point", () =>
+    Effect.gen(function* () {
+      const { service } = yield* makeHarness("win32", "C:\\node.exe", ".t3", true);
+      expect((yield* service.status).kind).toBe("win32-startup-shortcut");
+      expect(yield* service.restart).toBe("skipped");
+      yield* service.install();
+      expect(yield* service.restart).toBe("restarted");
+      expect(yield* service.withStopped(Effect.succeed("repaired"))).toBe("repaired");
+    }).pipe(TestClock.withLive),
+  );
+
   it.effect("installs, reports current state, and uninstalls", () =>
     Effect.gen(function* () {
       const { service, fs, runtimeEntryPath, statePath, shortcutPath } = yield* makeHarness();
@@ -449,7 +463,6 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
     Effect.gen(function* () {
       const { service, fs, statePath, pidPath } = yield* makeHarness();
       yield* service.install();
-      // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
       const pendingState = JSON.stringify({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
         activeVersion: "1.2.3",

@@ -1,18 +1,44 @@
+import { ghosttyControlShortcutCodepoint } from "./keyCodes";
 import { describe, expect, it } from "vite-plus/test";
+import ghosttyKeyHeader from "../../../../../native/libghostty-vt/include/ghostty/vt/key/event.h?raw";
 
 import {
-  ghosttyControlShortcutCodepoint,
   ghosttyConsumedMods,
   ghosttyKeyForCode,
+  ghosttyKeyForEvent,
   ghosttyUnshiftedCodepoint,
 } from "./keyCodes";
 
 describe("ghosttyKeyForCode", () => {
-  it("keeps the tail of the pinned Ghostty key enum in order", () => {
-    expect(ghosttyKeyForCode("F25")).toBe(ghosttyKeyForCode("F24") + 1);
-    expect(ghosttyKeyForCode("PrintScreen")).toBe(ghosttyKeyForCode("FnLock") + 1);
-    expect(ghosttyKeyForCode("Pause")).toBe(ghosttyKeyForCode("ScrollLock") + 1);
-    expect(ghosttyKeyForCode("Paste")).toBe(ghosttyKeyForCode("Cut") + 1);
+  it("matches the pinned native key enum after the function keys", () => {
+    const enumBody = ghosttyKeyHeader.slice(
+      ghosttyKeyHeader.indexOf("GHOSTTY_KEY_UNIDENTIFIED"),
+      ghosttyKeyHeader.indexOf("GHOSTTY_KEY_MAX_VALUE"),
+    );
+    const keys = [...enumBody.matchAll(/GHOSTTY_KEY_([A-Z0-9_]+)/g)].map((match) => match[1]);
+    for (const [code, native] of [
+      ["F24", "F24"],
+      ["F25", "F25"],
+      ["FnLock", "FN_LOCK"],
+      ["PrintScreen", "PRINT_SCREEN"],
+      ["ScrollLock", "SCROLL_LOCK"],
+      ["Pause", "PAUSE"],
+      ["Paste", "PASTE"],
+    ]) {
+      expect(keys).toContain(native);
+      expect(ghosttyKeyForCode(code!)).toBe(keys.indexOf(native));
+    }
+  });
+});
+
+describe("ghosttyKeyForEvent", () => {
+  it("prefers recognized physical codes over logical keys", () => {
+    expect(ghosttyKeyForEvent({ code: "Delete", key: "Backspace" })).toBe(
+      ghosttyKeyForCode("Delete"),
+    );
+    expect(ghosttyKeyForEvent({ code: "NumpadEnter", key: "Enter" })).toBe(
+      ghosttyKeyForCode("NumpadEnter"),
+    );
   });
 });
 
@@ -23,7 +49,6 @@ describe("ghosttyConsumedMods", () => {
     expect(ghosttyConsumedMods(shifted)).toBe(1);
     expect(ghosttyConsumedMods({ ...shifted, ctrlKey: true })).toBe(0);
     expect(ghosttyConsumedMods({ ...shifted, key: "Tab" })).toBe(0);
-    // Deliberate: Shift+Space collapses to Space so it still types one.
     expect(ghosttyConsumedMods({ ...shifted, key: " " })).toBe(1);
   });
 });

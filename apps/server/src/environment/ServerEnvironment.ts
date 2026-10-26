@@ -4,29 +4,24 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as ServerSettings from "../serverSettings.ts";
+import * as Option from "effect/Option";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as NodeOS from "node:os";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { resolveServerInstallation } from "../cli/invocation.ts";
 import { readAgentActivityPublishingActive } from "../cloud/config.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
-import { resolveDesktopMcpPath } from "../desktopControl/desktopMcpBinary.ts";
-import { collapseHomePath } from "../pathExpansion.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
@@ -52,7 +47,6 @@ export class ServerEnvironment extends Context.Service<
   {
     readonly getEnvironmentId: Effect.Effect<EnvironmentId>;
     readonly getDescriptor: Effect.Effect<ExecutionEnvironmentDescriptor>;
-    readonly setEnvironmentLabel: (label: string) => Effect.Effect<void>;
   }
 >()("t3/environment/ServerEnvironment") {}
 
@@ -166,7 +160,7 @@ const makeIdentity = Effect.gen(function* () {
       return persisted;
     }
 
-    const generated = yield* crypto.randomUUIDv4;
+    const generated = yield* crypto.randomUUIDv4();
     yield* persistEnvironmentId(generated, "create");
     let winner = yield* readPersistedEnvironmentId;
     if (winner === null) {
@@ -188,35 +182,26 @@ const makeIdentity = Effect.gen(function* () {
   });
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironmentIdentity;
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
-  const hostEnvironment = yield* HostProcessEnvironment;
-  const environmentLabel = yield* Ref.make("");
-  const homeDirectory =
-    hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || NodeOS.homedir().trim();
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
   const machine = yield* detectServerEnvironmentMachineKind();
   const launcher = yield* resolveServiceLauncherMode();
-  // Binary presence, not the Computer Use settings toggle: the capability says
-  // the machine can serve a live view at all. The stream RPC still fails
-  // closed when desktop control is disabled in settings.
-  const desktopMcpPath = yield* resolveDesktopMcpPath().pipe(Effect.orElseSucceed(() => undefined));
   const serverSelfUpdate = resolveServerSelfUpdateCapability({
     desktopManaged: serverConfig.mode === "desktop",
     launcherManaged: launcher.managed,
   });
-  // Static is correct: the control fd is known at bootstrap, and the desktop
-  // app and its bundled server ship in one artifact, so a present fd means
-  // the app speaks the requestDesktopUpdate protocol. WSL backends never get
-  // the fd and correctly do not advertise.
+  const serverInstallation = serverSelfUpdate === null ? yield* resolveServerInstallation : null;
+  // Desktop and server ship together; a control fd guarantees requestDesktopUpdate support.
+
   const desktopAppUpdate =
     serverSelfUpdate === "desktop-managed" && serverConfig.desktopTelemetryControlFd !== undefined;
 
@@ -229,94 +214,86 @@ export const make = Effect.gen(function* () {
       ...(machine === null ? {} : { machine }),
     },
     serverVersion: packageJson.version,
-    ...(homeDirectory.length > 0 ? { homeDirectory } : {}),
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
-    // Shown as placeholders, so keep them short: `~` rather than the full home.
-    defaultDirectories: {
-      repositories: "~",
-      worktrees: collapseHomePath(serverConfig.worktreesDir),
-    },
     capabilities: {
       repositoryIdentity: true,
-      projectTransfer: true,
       connectionProbe: true,
       attachmentUploads: true,
       questionAttachments: true,
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       pullRequests: true,
+      pullRequestChecks: true,
       inlineMessageContext: true,
       requiredWorktreeBootstrap: true,
       threadSettlement: true,
-      threadMessageSearch: true,
       threadAutoSettlement: true,
       storageCleanup: true,
+      storageCleanupRun: true,
+      databaseStorage: true,
+      otlpEndpointCheck: true,
       projectWorktreeCleanup: true,
+      settledWorktreeCleanup: true,
+      worktreesDirectory: true,
       threadAutoSettlementScope: true,
       threadRestartContinuation: true,
-      scheduledTurns: true,
       projectSettingsOverrides: true,
+      projectProviderInstanceOverrides: true,
       threadSnooze: true,
-      threadGoal: true,
       environmentThemes: true,
       usageLimitSources: true,
+      providerWorkspaceSnapshotsOnDemand: true,
       usagePriceOverrides: true,
+      usageModelAliases: true,
       threadPinning: true,
       threadPinReorder: true,
-      piExternalThreads: true,
       threadActiveReorder: true,
       threadAutoSettleOptOut: true,
-      threadVisitedTracking: true,
       threadTitleRegeneration: true,
-      sourceControlSshPasswordPrompts: true,
-      providerHandoff: true,
-      threadMessageCorrection: true,
+      commandOutputStreaming: true,
+      threadVisitedTracking: true,
       threadPullRequests: true,
+      threadPullRequestWatch: true,
       pullRequestStackActions: true,
       threadPullRequestLinking: true,
+      serverResolvedCommandContext: true,
+      threadStop: true,
       environmentIcon: true,
       projectCloneTracking: true,
-      worktreeBaseDirectory: true,
-      externalConversationImport: true,
+      ignoredFileListing: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
+      ...(serverInstallation === null ? {} : { serverInstallation }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
-        ? {
-            serverSelfUpdateProgress: true,
-            serverUpdateThreadContinuation: true,
-          }
+        ? { serverSelfUpdateProgress: true }
         : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
-      ...(desktopMcpPath === undefined ? {} : { computerView: true }),
+      serverBrowser: true,
     },
   };
 
   return ServerEnvironment.of({
     getEnvironmentId: Effect.succeed(environmentId),
-    setEnvironmentLabel: (label) => Ref.set(environmentLabel, label),
-    // The publish opt-in and relay link change at runtime (`t3 connect
-    // publish`, the client settings toggle), so the capability is read per
-    // descriptor request rather than baked in at startup.
-    getDescriptor: Effect.all({
-      agentActivityPublishing: readAgentActivityPublishingActive(secrets),
-      customLabel: Ref.get(environmentLabel),
-    }).pipe(
-      Effect.map(({ agentActivityPublishing, customLabel }) => ({
+    // Publishing opt-in and relay links change at runtime; read the capability per request.
+    getDescriptor: Effect.gen(function* () {
+      const agentActivityPublishing = yield* readAgentActivityPublishingActive(secrets);
+      const settings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+      const customLabel = Option.isSome(settings)
+        ? yield* settings.value.getSettings.pipe(
+            Effect.map((snapshot) => snapshot.environmentLabel.trim()),
+            Effect.orElseSucceed(() => ""),
+          )
+        : "";
+      return {
         ...descriptor,
         label: customLabel || descriptor.label,
         capabilities: { ...descriptor.capabilities, agentActivityPublishing },
-      })),
-    ),
+      };
+    }),
   });
 });
 
-export const identityLayer = Layer.effect(ServerEnvironmentIdentity, makeIdentity);
+export const layerIdentity = Layer.effect(ServerEnvironmentIdentity, makeIdentity);
 
-/**
- * ServerEnvironment is acquired from persisted filesystem and host-process
- * state. It intentionally has no fallback Layer.succeed value: callers must
- * provide the external platform services, a ServerConfig, and the
- * ServerSecretStore backing the descriptor's publishing capability.
- */
 export const layer = Layer.effect(ServerEnvironment, make).pipe(
-  Layer.provideMerge(identityLayer),
+  Layer.provideMerge(layerIdentity),
   Layer.provide(ProcessRunner.layer),
 );

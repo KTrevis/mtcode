@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import type {
   ComputerHistoryClearScope,
@@ -121,7 +121,7 @@ function PrivacyExclusionList({
             type="button"
             variant="outline"
             size="sm"
-            className="justify-start gap-1.5"
+            className="justify-start"
             disabled={disabled}
             onClick={() => setAdding(true)}
           >
@@ -174,11 +174,14 @@ function ComputerHistoryPrivacyDialog({
   const [draftApps, setDraftApps] = useState<string[]>([...apps]);
   const [draftWebsites, setDraftWebsites] = useState<string[]>([...websites]);
 
-  useEffect(() => {
-    if (!open) return;
-    setDraftApps([...apps]);
-    setDraftWebsites([...websites]);
-  }, [open, apps, websites]);
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
+    if (open) {
+      setDraftApps([...apps]);
+      setDraftWebsites([...websites]);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,28 +193,30 @@ function ComputerHistoryPrivacyDialog({
             Computer History is on.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <PrivacyExclusionList
-              title="Exclude these apps"
-              addLabel="Add app"
-              placeholder="App name or bundle id"
-              items={draftApps}
-              onChange={setDraftApps}
-              disabled={disabled}
-            />
-            <PrivacyExclusionList
-              title="Exclude these websites"
-              addLabel="Add website"
-              placeholder="Hostname or URL fragment"
-              items={draftWebsites}
-              onChange={setDraftWebsites}
-              disabled={disabled}
-            />
+        <DialogPanel>
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PrivacyExclusionList
+                title="Exclude these apps"
+                addLabel="Add app"
+                placeholder="App name or bundle id"
+                items={draftApps}
+                onChange={setDraftApps}
+                disabled={disabled}
+              />
+              <PrivacyExclusionList
+                title="Exclude these websites"
+                addLabel="Add website"
+                placeholder="Hostname or URL fragment"
+                items={draftWebsites}
+                onChange={setDraftWebsites}
+                disabled={disabled}
+              />
+            </div>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Private-mode web browsing activity is never included in computer history.
+            </p>
           </div>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Private-mode web browsing activity is never included in computer history.
-          </p>
         </DialogPanel>
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
@@ -246,7 +251,7 @@ export function ComputerHistorySettings() {
   );
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = async () => {
     const bridge = window.desktopBridge;
     if (!bridge?.getComputerHistoryStatus || !bridge.getComputerHistoryTimeline) return;
     const [nextStatus, timeline] = await Promise.all([
@@ -255,13 +260,16 @@ export function ComputerHistorySettings() {
     ]);
     setStatus(nextStatus);
     setItems([...timeline.items]);
-  }, []);
+  };
 
+  /* oxlint-disable react/set-state-in-effect -- Refresh native daemon status and timeline while this settings view is mounted. Loading resets belong to this external request lifecycle. */
+  // oxlint-disable-next-line t3code/react-effect-budget -- Refresh native daemon status and timeline while this settings view is mounted.
   useEffect(() => {
     void refresh();
     const id = window.setInterval(() => void refresh(), 5_000);
     return () => window.clearInterval(id);
-  }, [refresh, history.enabled, history.paused]);
+  }, [refresh]);
+  /* oxlint-enable react/set-state-in-effect */
 
   const patchQueue = useRef(Promise.resolve());
   const patch = (partial: Partial<typeof history>) => {
@@ -510,7 +518,7 @@ export function ComputerHistorySettings() {
         websites={history.websites}
         disabled={!onDesktop}
         onSave={({ apps, websites }) =>
-          // Preserve existing filter modes — Done only edits the lists.
+          // Preserve existing filter modes. Done only edits the lists.
           patch({ apps, websites })
         }
       />

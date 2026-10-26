@@ -23,11 +23,12 @@ export function MonitoringDetails({
   environmentId: EnvironmentId;
   threadId: ThreadId;
 }) {
-  const stop = useAtomCommand(threadEnvironment.interruptTurn, "stop monitoring task");
+  const stop = useAtomCommand(threadEnvironment.stopBackgroundTask, "stop monitoring task");
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const running = tasks.length > 0;
+  // oxlint-disable-next-line t3code/react-effect-budget -- Keep elapsed task times synchronized with the wall clock.
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);

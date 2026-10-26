@@ -10,15 +10,16 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlSchema from "effect/sql/SqlSchema";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import {
   agentAwarenessPublishIdentity,
   eventThreadId,
@@ -76,11 +77,12 @@ function notificationBody(state: RelayAgentActivityState): string {
   }
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const environment = yield* ServerEnvironment.ServerEnvironment;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const orchestration = yield* OrchestrationEngine.OrchestrationEngineService;
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const projects = yield* ProjectService.ProjectService;
+  const orchestration = yield* Orchestrator.OrchestratorV2;
   const httpClient = yield* HttpClient.HttpClient;
   const lastStateByThread = yield* Ref.make(new Map<ThreadId, string>());
 
@@ -135,9 +137,9 @@ export const make = Effect.gen(function* () {
     const devices = yield* listDevices({});
     if (devices.length === 0) return;
 
-    const thread = yield* snapshots.getThreadShellById(threadId);
+    const thread = Option.fromNullishOr(yield* threads.getThreadShell(threadId));
     const project = Option.isSome(thread)
-      ? yield* snapshots.getProjectShellById(thread.value.projectId)
+      ? yield* projects.getById(thread.value.projectId)
       : Option.none();
     const state = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId: yield* environment.getEnvironmentId,

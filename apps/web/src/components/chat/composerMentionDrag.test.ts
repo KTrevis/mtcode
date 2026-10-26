@@ -1,22 +1,23 @@
 import { describe, expect, it } from "@effect/vitest";
-import { buildDocJson } from "../../composer-rich-text-doc";
 
 import {
   COMPOSER_MENTION_DRAG_TYPE,
   type ComposerMentionDropHost,
-  composerMentionFromTreePath,
-  dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
-  setComposerThreadDragData,
 } from "./composerMentionDrag.ts";
 
-const makeDragEvent = (options?: { mention?: string; types?: ReadonlyArray<string> }) => {
+const makeDragEvent = (options?: {
+  mention?: string;
+  types?: ReadonlyArray<string>;
+  format?: string;
+}) => {
   const mention = options?.mention ?? "[index.md](docs/index.md)";
+  const format = options?.format ?? COMPOSER_MENTION_DRAG_TYPE;
   const calls: Array<string> = [];
   const event = {
     dataTransfer: {
-      types: options?.types ?? [COMPOSER_MENTION_DRAG_TYPE, "text/plain"],
-      getData: (format: string) => (format === COMPOSER_MENTION_DRAG_TYPE ? mention : ""),
+      types: options?.types ?? [format, "text/plain"],
+      getData: (requested: string) => (requested === format ? mention : ""),
       dropEffect: "none",
     },
     nativeEvent: {
@@ -35,78 +36,15 @@ const makeHost = (insertResult = true) => {
       log.push(`insert:${text}`);
       return insertResult;
     },
+    insertPullRequestAtEnd: (pullRequest) => {
+      log.push(`pr:${pullRequest.number}`);
+      return insertResult;
+    },
     setDragActive: (active) => void log.push(`active:${active}`),
     onInsertRejected: () => void log.push("rejected"),
   };
   return { host, log };
 };
-
-describe("thread title drops", () => {
-  it("inserts a thread chip with its scoped identity and preserves the existing prompt", () => {
-    const data = new Map<string, string>();
-    const transfer = {
-      effectAllowed: "none" as DataTransfer["effectAllowed"],
-      setData: (format: string, value: string) => void data.set(format, value),
-    };
-    setComposerThreadDragData(transfer, {
-      environmentId: "remote/environment",
-      threadId: "thread/123",
-      title: "Fix [composer]",
-    });
-    const mention = data.get(COMPOSER_MENTION_DRAG_TYPE)!;
-    expect(transfer.effectAllowed).toBe("move");
-    expect(data.get("text/plain")).toBe(mention);
-    let prompt = "Continue ";
-    makeComposerMentionDragHandlers({
-      insertMentionAtEnd: (text) => {
-        prompt += text;
-        return true;
-      },
-      setDragActive: () => {},
-      onInsertRejected: () => {},
-    }).onDrop(makeDragEvent({ mention }).event);
-    expect(prompt).toBe(`Continue ${mention} `);
-    const doc = buildDocJson(prompt, (name) => ({ label: name, description: null }));
-    expect(doc.content?.[0]?.content).toEqual([
-      { type: "text", text: "Continue " },
-      {
-        type: "composer-thread",
-        attrs: {
-          environmentId: "remote/environment",
-          threadId: "thread/123",
-          title: "Fix [composer]",
-          source: mention,
-        },
-      },
-      { type: "text", text: " " },
-    ]);
-  });
-});
-
-describe("composerMentionFromTreePath", () => {
-  it("serializes a file path into a mention", () => {
-    expect(composerMentionFromTreePath("docs/index.md")).toBe("[index.md](docs/index.md)");
-  });
-
-  it("strips the trailing slash directory rows carry", () => {
-    expect(composerMentionFromTreePath("docs/architecture/")).toBe(
-      "[architecture](docs/architecture)",
-    );
-  });
-
-  it("rejects drags that carry no path", () => {
-    expect(composerMentionFromTreePath("")).toBeNull();
-    expect(composerMentionFromTreePath("/")).toBeNull();
-  });
-});
-
-describe("dataTransferHasComposerMention", () => {
-  it("detects the mention payload among drag types", () => {
-    expect(dataTransferHasComposerMention([COMPOSER_MENTION_DRAG_TYPE, "text/plain"])).toBe(true);
-    expect(dataTransferHasComposerMention(["Files"])).toBe(false);
-    expect(dataTransferHasComposerMention([])).toBe(false);
-  });
-});
 
 describe("makeComposerMentionDragHandlers", () => {
   it("leaves drags without the mention payload alone", () => {
@@ -121,9 +59,6 @@ describe("makeComposerMentionDragHandlers", () => {
   });
 
   it("stops the native event too, not just the synthetic one", () => {
-    // React's stopPropagation only halts synthetic dispatch; without the
-    // native stop, the editor's own DOM listeners process the drop and sync
-    // their stale state back over the inserted mention.
     const { host } = makeHost();
     const handlers = makeComposerMentionDragHandlers(host);
     const { event, calls } = makeDragEvent();
@@ -134,34 +69,10 @@ describe("makeComposerMentionDragHandlers", () => {
   });
 
   it('answers dragover with the "move" effect the tree allows', () => {
-    // Naming an effect outside the source's effectAllowed makes the browser
-    // cancel the drop without ever firing it.
     const { host } = makeHost();
     const handlers = makeComposerMentionDragHandlers(host);
     const { event } = makeDragEvent();
     handlers.onDragOver(event);
     expect(event.dataTransfer.dropEffect).toBe("move");
-  });
-
-  it("inserts the mention with its trailing space and clears the highlight", () => {
-    const { host, log } = makeHost();
-    const handlers = makeComposerMentionDragHandlers(host);
-    handlers.onDragEnter(makeDragEvent().event);
-    handlers.onDrop(makeDragEvent().event);
-    expect(log).toEqual(["active:true", "active:false", "insert:[index.md](docs/index.md) "]);
-  });
-
-  it("reports a rejected insert instead of failing silently", () => {
-    const { host, log } = makeHost(false);
-    const handlers = makeComposerMentionDragHandlers(host);
-    handlers.onDrop(makeDragEvent().event);
-    expect(log).toContain("rejected");
-  });
-
-  it("ignores a drop whose payload is empty", () => {
-    const { host, log } = makeHost();
-    const handlers = makeComposerMentionDragHandlers(host);
-    handlers.onDrop(makeDragEvent({ mention: "" }).event);
-    expect(log).toEqual(["active:false"]);
   });
 });

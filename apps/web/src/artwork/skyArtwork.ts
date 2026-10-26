@@ -3,15 +3,8 @@ import { skyPalette } from "./skyPalette";
 import { filament, noise, trace } from "./skyScene";
 
 export type { SkyConditions, SkyPhase, SkyWeather } from "./skyConditions";
-export const SKY_PHASES: readonly SkyPhase[] = ["dawn", "day", "dusk", "night"];
-export const SKY_WEATHER: readonly SkyWeather[] = [
-  "clear",
-  "cloudy",
-  "rain",
-  "snow",
-  "fog",
-  "storm",
-];
+const SKY_PHASES: readonly SkyPhase[] = ["dawn", "day", "dusk", "night"];
+const SKY_WEATHER: readonly SkyWeather[] = ["clear", "cloudy", "rain", "snow", "fog", "storm"];
 export const isLocalSky = (selection: string) =>
   selection === "local-day-night" || selection === "local-weather";
 const title = (value: string) => value[0]!.toUpperCase() + value.slice(1);
@@ -24,15 +17,7 @@ export const SKY_OPTIONS = SKY_PHASES.flatMap((phase) =>
   })),
 );
 
-/**
- * App icons are the shipped MT tile repainted, never a redrawn lookalike: its
- * artwork, gloss and mark stay exactly as they ship and only the colour moves.
- * Each tone of the tile is mapped onto the scene's own palette, so the icon
- * carries the same colours as that sky rather than an arbitrary hue shift.
- *
- * Six evenly spaced stops from the darkest sky to white; white keeps the mark
- * and the rim gloss at full value.
- */
+// App icons are the shipped MT tile repainted, never a redrawn lookalike: its artwork, gloss and mark stay exactly as they ship and only the colour moves.
 const mix = (from: string, to: string, amount: number) =>
   `#${[1, 3, 5]
     .map((at) => {
@@ -44,11 +29,7 @@ const mix = (from: string, to: string, amount: number) =>
     })
     .join("")}`;
 
-/**
- * How much cloud the scene shows. The tile's cloud banks cannot be removed, so
- * coverage is carried by their value: a cloudy sky lifts them toward white, a
- * clear one lets them sink back into the sky.
- */
+// How much cloud the scene shows.
 const cloudLift: Record<SkyWeather, number> = {
   clear: -0.08,
   cloudy: 0.26,
@@ -58,12 +39,7 @@ const cloudLift: Record<SkyWeather, number> = {
   storm: -0.08,
 };
 
-/**
- * Where each palette colour sits on the tile's tonal range. The sky colours are
- * packed low and the cloud colours hold the middle, because the tile's cloud
- * banks sit around half luminance: spacing the stops evenly instead drags a
- * dark sky colour across them and the banks go muddy.
- */
+// Where each palette colour sits on the tile's tonal range.
 const RAMP_POSITIONS = [0, 0.1, 0.26, 0.5, 0.74, 1] as const;
 
 /** The least each stop may sit below the next, from darkest to brightest. */
@@ -75,12 +51,7 @@ const ICON_FLOOR = 0.035;
 /** The sky's brightest tone; the mark's outline is lifted above it. */
 const SKY_CEILING = 0.84;
 
-/**
- * The mark and its outline are neutral and never take the sky's colour, and
- * they always sit above it: a bright sky otherwise lifts the tile's clouds past
- * the outline, the outline stops reading as the mark's lighter edge, and the
- * mark comes out drawn in dashes.
- */
+// The mark and its outline are neutral and never take the sky's colour, and they always sit above it: a bright sky otherwise lifts the tile's clouds past the outline, the outline stops reading as the mark's lighter edge, and the mark comes out drawn in dashes.
 export const markTone = (level: number) =>
   Math.min(1, SKY_CEILING + 0.05 + Math.max(0, (level - 0.5) / 0.5) * (1 - SKY_CEILING - 0.05));
 
@@ -96,11 +67,7 @@ const isShippedNight = (conditions: SkyConditions) => {
   return conditions.sun <= -12 && (weather === "clear" || weather === "cloudy");
 };
 
-/**
- * The sky an icon is drawn for, rounded far coarser than the sidebar's: the
- * repaint walks a million pixels, so the Dock tile moves on in steps of a few
- * degrees of sun rather than every minute.
- */
+// The sky an icon is drawn for, rounded far coarser than the sidebar's: the repaint walks a million pixels, so the Dock tile moves on in steps of a few degrees of sun rather than every minute.
 export function skyIconConditions(conditions: SkyConditions): SkyConditions {
   const step = Math.abs(conditions.sun) < 16 ? 2 : 10;
   const round = (value: number, by: number) => Math.round(value / by) * by;
@@ -134,7 +101,7 @@ export const skyIconKey = (conditions: SkyConditions) => {
   ].join("|");
 };
 
-export function skyIconRamp(conditions: SkyConditions): readonly string[] | null {
+function skyIconRamp(conditions: SkyConditions): readonly string[] | null {
   // The shipped tile already is a cloudy night, so that sky ships untouched.
   if (isShippedNight(conditions)) return null;
   const weather = skyWeatherOf(conditions);
@@ -170,11 +137,7 @@ export function skyIconRamp(conditions: SkyConditions): readonly string[] | null
   // what it falls on, which is what makes the mark look cut out.
   const ordered = stops.sort((a, b) => luminance(a) - luminance(b));
   const levels = ordered.map(luminance);
-  // Then pulled apart where they crowd. The tile's cloud layers live between
-  // the third and fourth stops, so a palette whose top tones sit within a hair
-  // of one another — midday's were 0.01 apart — paints every layer the same
-  // colour. The lower stop gives way, since the brightest has to stay near
-  // white for cloud to read as cloud.
+  // Then pulled apart where they crowd.
   for (let index = levels.length - 2; index >= 0; index--)
     levels[index] = Math.min(levels[index]!, levels[index + 1]! - CROWDING[index]!);
   // A dark sky, a rainy twilight say, has no room below to spread into, and
@@ -193,7 +156,7 @@ export function skyIconRamp(conditions: SkyConditions): readonly string[] | null
 }
 
 /** The ramp colour for a 0..1 tone, honouring where each stop sits. */
-export function sampleSkyRamp(ramp: readonly string[], level: number): string {
+function sampleSkyRamp(ramp: readonly string[], level: number): string {
   const last = ramp.length - 1;
   let index = 0;
   while (index < last - 1 && level > RAMP_POSITIONS[index + 1]!) index++;
@@ -202,14 +165,7 @@ export function sampleSkyRamp(ramp: readonly string[], level: number): string {
   return mix(ramp[index]!, ramp[index + 1]!, Math.min(1, Math.max(0, (level - from) / span)));
 }
 
-/**
- * The tone the tile's every brightness becomes, as 256 colours.
- *
- * Straight from the scene's palette: its sky colours carry the tile's sky and
- * its cloud colours carry the clouds, so a daytime sky stays a deep blue under
- * near-white cloud. The mark rides above all of it — see `markTone` — which is
- * what lets the sky use its full range without overtaking the mark's outline.
- */
+// The tone the tile's every brightness becomes, as 256 colours.
 export function skyIconLookup(conditions: SkyConditions): readonly string[] | null {
   const ramp = skyIconRamp(conditions);
   if (ramp === null) return null;
@@ -221,11 +177,7 @@ const ICON_SHAPE = { x: 104, y: 104, size: 816, radius: 190 };
 
 const iconStrike = trace(filament(11, 620, 150, 760));
 
-/**
- * Where the tile's stars and sparkles sit. Daylight and overcast skies have
- * none, so those spots take the tone of the sky around them before the repaint
- * and vanish into it; a clear or lightly clouded sky keeps them.
- */
+// Where the tile's stars and sparkles sit.
 export const TILE_STARS: ReadonlyArray<readonly [number, number]> = [
   [159, 547],
   [203, 207],
@@ -239,7 +191,7 @@ export const TILE_STARS: ReadonlyArray<readonly [number, number]> = [
 export const skyHidesStars = (conditions: SkyConditions) => skyPalette(conditions).stars < 0.3;
 
 /** Transparent 1024 overlay: what a repaint alone cannot say. */
-export function skyIconOverlaySvg(conditions: SkyConditions): string {
+function skyIconOverlaySvg(conditions: SkyConditions): string {
   const weather = skyWeatherOf(conditions);
   const tint = skyPalette(conditions).cloudA;
   let body = "";

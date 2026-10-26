@@ -1,15 +1,16 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { CommandAvailability, WindowsShellEnvironment } from "@t3tools/shared/shell";
+import * as Effect from "effect/Effect";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Observe the existing synchronous shell probe without launching the user's login shell.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
-import { assert, it } from "vite-plus/test";
+import { assert, it, vi } from "vite-plus/test";
 
-import { hydratePosixEnvironment, hydratePosixHome } from "./os-jank.ts";
+import { fixPath, hydratePosixHome } from "./os-jank.ts";
 
-it("hydrates HOME for minimal service environments from the user account", () => {
-  const env: NodeJS.ProcessEnv = {};
-
-  hydratePosixHome(env);
-
-  assert.equal(env.HOME, NodeOS.userInfo().homedir);
-});
+vi.mock("node:child_process", { spy: true });
 
 it("hydrates HOME independently of a blank process HOME", () => {
   const originalHome = process.env.HOME;
@@ -39,85 +40,114 @@ it("preserves an explicitly configured HOME", () => {
   assert.equal(env.HOME, "/custom/home");
 });
 
-it("imports the whole login-shell environment, not just PATH", () => {
-  const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      vi
+        .spyOn(NodeChildProcess, "execFileSync")
+        .mockReturnValue("__T3CODE_ENV_PATH_START__\n/opt/tools/bin\n__T3CODE_ENV_PATH_END__\n"),
+    ),
+    (probe) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
 
-  hydratePosixEnvironment(env, "linux", () => ({
-    PATH: "/home/u/.nvm/bin:/usr/bin",
-    EDITOR: "nvim",
-    GOROOT: "/home/u/.gvm/go",
-    RBENV_SHELL: "zsh",
-  }));
+        yield* fixPath().pipe(
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(HostProcess.Environment, env),
+          Effect.provide(NodeServices.layer),
+        );
 
-  assert.equal(env.EDITOR, "nvim");
-  assert.equal(env.GOROOT, "/home/u/.gvm/go");
-  assert.equal(env.RBENV_SHELL, "zsh");
-  assert.equal(env.PATH, "/home/u/.nvm/bin:/usr/bin");
-});
+        assert.equal(probe.mock.calls.length, 1);
+        assert.equal(env.PATH, "/opt/tools/bin:/usr/bin");
+      }),
+    (probe) => Effect.sync(() => probe.mockRestore()),
+  ),
+);
 
-it("keeps runtime-owned variables out of the import", () => {
-  const env: NodeJS.ProcessEnv = {
-    SHELL: "/bin/zsh",
-    PATH: "/usr/bin",
-    HOME: "/run/service-home",
-    T3CODE_NO_BROWSER: "1",
-  };
+effectIt.effect("keeps mise's PATH record with the login shell PATH", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      vi
+        .spyOn(NodeChildProcess, "execFileSync")
+        .mockReturnValue(
+          [
+            "__T3CODE_ENV_PATH_START__",
+            "/home/me/.local/bin:/mise/installs/claude/latest:/mise/shims",
+            "__T3CODE_ENV_PATH_END__",
+            "__T3CODE_ENV___MISE_DIFF_START__",
+            "mise-diff",
+            "__T3CODE_ENV___MISE_DIFF_END__",
+          ].join("\n"),
+        ),
+    ),
+    () =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
 
-  hydratePosixEnvironment(env, "linux", () => ({
-    HOME: "/home/u",
-    T3CODE_NO_BROWSER: "0",
-    PWD: "/home/u",
-    SHLVL: "3",
-    EDITOR: "nvim",
-  }));
+        yield* fixPath().pipe(
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(HostProcess.Environment, env),
+          Effect.provide(NodeServices.layer),
+        );
 
-  assert.equal(env.HOME, "/run/service-home");
-  assert.equal(env.T3CODE_NO_BROWSER, "1");
-  assert.equal(env.PWD, undefined);
-  assert.equal(env.SHLVL, undefined);
-  assert.equal(env.EDITOR, "nvim");
-});
+        assert.equal(env.__MISE_DIFF, "mise-diff");
+      }),
+    (probe) => Effect.sync(() => probe.mockRestore()),
+  ),
+);
 
-it("preserves inherited values instead of overwriting them from the login shell", () => {
-  const env: NodeJS.ProcessEnv = {
-    SHELL: "/bin/zsh",
-    PATH: "/usr/bin",
-    SSH_AUTH_SOCK: "/tmp/inherited.sock",
-    EDITOR: "vi",
-  };
+effectIt.effect("hydrates a missing JAVA_HOME from the login shell and keeps an explicit one", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      vi
+        .spyOn(NodeChildProcess, "execFileSync")
+        .mockReturnValue(
+          [
+            "__T3CODE_ENV_PATH_START__",
+            "/opt/homebrew/bin",
+            "__T3CODE_ENV_PATH_END__",
+            "__T3CODE_ENV_JAVA_HOME_START__",
+            "/opt/homebrew/opt/openjdk@17",
+            "__T3CODE_ENV_JAVA_HOME_END__",
+          ].join("\n"),
+        ),
+    ),
+    () =>
+      Effect.gen(function* () {
+        const missing: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+        const explicit: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          JAVA_HOME: "/custom/jdk",
+        };
 
-  hydratePosixEnvironment(env, "linux", () => ({
-    SSH_AUTH_SOCK: "/tmp/login-shell.sock",
-    EDITOR: "nvim",
-  }));
+        for (const env of [missing, explicit]) {
+          yield* fixPath().pipe(
+            Effect.provideService(HostProcess.Platform, "darwin"),
+            Effect.provideService(HostProcess.Environment, env),
+            Effect.provide(NodeServices.layer),
+          );
+        }
 
-  assert.equal(env.SSH_AUTH_SOCK, "/tmp/inherited.sock");
-  assert.equal(env.EDITOR, "vi");
-});
+        assert.equal(missing.JAVA_HOME, "/opt/homebrew/opt/openjdk@17");
+        assert.equal(explicit.JAVA_HOME, "/custom/jdk");
+      }),
+    (probe) => Effect.sync(() => probe.mockRestore()),
+  ),
+);
 
-it("backfills a session handle the service was launched without", () => {
-  const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+effectIt.effect("replaces a Path-spelled Windows PATH instead of adding a second key", () =>
+  Effect.gen(function* () {
+    const env: NodeJS.ProcessEnv = { Path: "C:\\Windows" };
 
-  hydratePosixEnvironment(env, "linux", () => ({ SSH_AUTH_SOCK: "/tmp/login-shell.sock" }));
+    yield* fixPath().pipe(
+      Effect.provideService(HostProcess.Platform, "win32"),
+      Effect.provideService(HostProcess.Environment, env),
+      Effect.provideService(WindowsShellEnvironment, () => Effect.succeed({ PATH: "C:\\Tools" })),
+      Effect.provideService(CommandAvailability, () => Effect.succeed(true)),
+      Effect.provide(NodeServices.layer),
+    );
 
-  assert.equal(env.SSH_AUTH_SOCK, "/tmp/login-shell.sock");
-});
-
-it("treats an inherited empty value as absent", () => {
-  const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin", EDITOR: "" };
-
-  hydratePosixEnvironment(env, "linux", () => ({ EDITOR: "nvim" }));
-
-  assert.equal(env.EDITOR, "nvim");
-});
-
-it("keeps the inherited environment when every candidate shell fails", () => {
-  const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin", EDITOR: "vi" };
-
-  hydratePosixEnvironment(env, "linux", () => {
-    throw new Error("login shell unavailable");
-  });
-
-  assert.equal(env.EDITOR, "vi");
-  assert.equal(env.PATH, "/usr/bin");
-});
+    assert.deepEqual(env, { PATH: "C:\\Tools;C:\\Windows" });
+  }),
+);

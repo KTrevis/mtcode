@@ -1,5 +1,4 @@
-import type { OrchestrationThreadGoalStatus } from "@t3tools/contracts";
-import { formatGoalStatusLabel } from "@t3tools/shared/composerTrigger";
+import type { OrchestrationV2ProviderGoalStatus } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -8,9 +7,9 @@ import { useThreadShells } from "../state/entities";
 const TOAST_ON_STATUS = {
   complete: "success",
   blocked: "error",
-  usageLimited: "warning",
+  usage_limited: "warning",
 } as const satisfies Partial<
-  Record<OrchestrationThreadGoalStatus, "success" | "error" | "warning">
+  Record<OrchestrationV2ProviderGoalStatus, "success" | "error" | "warning">
 >;
 
 type ToastableGoalStatus = keyof typeof TOAST_ON_STATUS;
@@ -19,17 +18,12 @@ function isToastableGoalStatus(status: string): status is ToastableGoalStatus {
   return status in TOAST_ON_STATUS;
 }
 
-/**
- * Watches every Thread shell's Goal and raises a toast when one settles into a
- * state the user should hear about (complete, blocked, usage-limited). Mounted
- * once at the app root so background Threads notify even when not open.
- * User-driven transitions (pause/resume/clear) already happen in front of the
- * user, so they stay silent.
- */
+// Watches every Thread shell's Goal and raises a toast when one settles into a state the user should hear about (complete, blocked, usage-limited).
 export function GoalStatusToastCoordinator() {
   const threads = useThreadShells();
   const seenStatusesRef = useRef<ReadonlyMap<string, string>>(new Map());
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Emit notifications for externally completed or blocked objectives.
   useEffect(() => {
     const previousStatuses = seenStatusesRef.current;
     const nextStatuses = new Map<string, string>();
@@ -51,8 +45,8 @@ export function GoalStatusToastCoordinator() {
       toastManager.add(
         stackedThreadToast({
           type: TOAST_ON_STATUS[goal.status],
-          title: `Objective ${formatGoalStatusLabel(goal.status).toLowerCase()}`,
-          description: goal.objectivePreview,
+          title: `Objective ${goal.status.replaceAll("_", " ").toLowerCase()}`,
+          description: goal.objective,
         }),
       );
     }

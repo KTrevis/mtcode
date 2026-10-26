@@ -74,7 +74,7 @@ export function CheckboxCombobox({
                   {onOpenItem ? (
                     <button
                       type="button"
-                      className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label={`Open ${item.label}`}
                       disabled={openingDisabled}
                       onPointerDown={(event) => event.stopPropagation()}

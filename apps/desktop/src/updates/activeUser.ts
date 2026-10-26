@@ -3,25 +3,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-/**
- * Anonymous "active user" codes the update check carries, so the update feed
- * counts people rather than installs: every device signed into the same Claude
- * or ChatGPT account sends the same code that day, and three laptops are one
- * user.
- *
- * Only the providers' opaque account ids are read -- Claude's
- * `oauthAccount.accountUuid` and Codex's ChatGPT `tokens.account_id` -- never an
- * email or a name, and never a GitHub id, which is public and could be guessed
- * back from its hash. Each id is hashed here together with the UTC date, so
- * what leaves the machine is a one-way code that means nothing without the
- * account id and changes every day: the feed can count distinct people per day
- * but cannot follow anyone from one day to the next.
- */
+// Per-day hashes deduplicate devices without sending provider account identifiers.
 export const ACTIVE_USER_HEADER = "x-mtcode-active-user";
 
 export type ProviderAccount = readonly [provider: "claude" | "codex", id: string];
 
-export function activeUserCodes(accounts: ReadonlyArray<ProviderAccount>, day: string): string[] {
+function activeUserCodes(accounts: ReadonlyArray<ProviderAccount>, day: string): string[] {
   return accounts.map(([provider, id]) =>
     NodeCrypto.createHash("sha256")
       .update(`mtcode-active-user/v1/${provider}/${day}/${id}`)

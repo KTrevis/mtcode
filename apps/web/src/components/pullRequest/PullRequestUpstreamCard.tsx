@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import { pullRequestEnvironment } from "~/state/pullRequests";
 import { GitBranchPlusIcon, LoaderIcon, SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
@@ -47,7 +49,10 @@ function PullRequestUpstreamCardImpl({
   implementing,
   picking,
 }: PullRequestUpstreamCardProps) {
-  const busy = implementing || picking;
+  const canOperate = useAtomValue(
+    pullRequestEnvironment.cherryPick.permissionAtom(entry.environmentId),
+  );
+  const busy = implementing || picking || !canOperate;
   return (
     // A div rather than a button: the card carries a button of its own, and a button inside a
     // button is neither valid nor operable by keyboard. The role and key handling put back what
@@ -84,12 +89,6 @@ function PullRequestUpstreamCardImpl({
         <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium">
           {entry.title}
         </span>
-        {/* Top right, outlined: the corner is where an action on a card is looked for, and a
-            ghost icon among muted metadata read as another detail rather than something to
-            press. Both stop the click from also opening the row underneath.
-
-            Taking the commits comes first because it is what somebody watching an upstream
-            usually wants; reimplementing is for the change whose code will not travel. */}
         <div className="flex shrink-0 items-center gap-1">
           <Tooltip>
             <TooltipTrigger
@@ -152,7 +151,7 @@ function PullRequestUpstreamCardImpl({
         <p className="line-clamp-1 text-xs text-muted-foreground">{reason}</p>
       ) : null}
 
-      <div className="mt-auto flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-auto flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
         <span className="shrink-0">#{entry.number}</span>
         {entry.author ? (
           <>

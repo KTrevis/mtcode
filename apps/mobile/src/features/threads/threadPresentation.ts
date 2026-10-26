@@ -1,9 +1,7 @@
-import type { OrchestrationLatestTurnState, OrchestrationSession } from "@t3tools/contracts";
-
 export function resolveThreadComposerPrimaryAction(input: {
   readonly hasContent: boolean;
-  readonly latestTurnState: OrchestrationLatestTurnState | null;
-  readonly sessionStatus: OrchestrationSession["status"] | null;
+  readonly latestTurnState: "completed" | "in_progress" | "error" | "interrupted" | null;
+  readonly sessionStatus: "ready" | "starting" | "running" | "error" | "closed" | null;
 }): "continue" | "send" | "stop" {
   if (
     !input.hasContent &&

@@ -28,14 +28,13 @@ export function WorkspaceGlobalShortcuts() {
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const {
-    activeDraftThread,
-    activeThread,
-    currentProjectRef,
-    defaultProjectRef,
-    handleNewThread,
-    routeThreadRef,
-  } = useHandleNewThread();
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
+    useHandleNewThread();
+  const currentProjectRef = activeThread
+    ? { environmentId: activeThread.environmentId, projectId: activeThread.projectId }
+    : activeDraftThread
+      ? { environmentId: activeDraftThread.environmentId, projectId: activeDraftThread.projectId }
+      : defaultProjectRef;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -50,6 +49,7 @@ export function WorkspaceGlobalShortcuts() {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- Global shortcuts listen for window keyboard events across workspace routes.
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;

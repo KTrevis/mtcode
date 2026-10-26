@@ -1,5 +1,5 @@
 import type { DesktopNotificationEvent, DesktopNotificationSettings } from "@t3tools/contracts";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import {
   getBrowserNotificationPermission,
@@ -8,7 +8,7 @@ import {
   type BrowserNotificationPermission,
 } from "../../browserNotifications.ts";
 import { isElectron } from "../../env.ts";
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings.ts";
+import { useClientSettings, getClientSettingsUpdater } from "../../hooks/useSettings.ts";
 import { cn } from "../../lib/utils.ts";
 import { Button } from "../ui/button.tsx";
 import { Switch } from "../ui/switch.tsx";
@@ -48,10 +48,11 @@ function useBrowserNotificationPermission() {
   const [permission, setPermission] = useState<BrowserNotificationPermission>(() =>
     isElectron ? "granted" : getBrowserNotificationPermission(),
   );
-  const refresh = useCallback(() => {
+  const refresh = () => {
     setPermission(isElectron ? "granted" : getBrowserNotificationPermission());
-  }, []);
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Subscribe to browser notification permission and window visibility changes.
   useEffect(() => {
     if (isElectron) return;
 
@@ -83,7 +84,7 @@ function useBrowserNotificationPermission() {
 
 function useDesktopNotificationSettingsModel() {
   const settings = useClientSettings((current) => current.desktopNotifications);
-  const updateClientSettings = useUpdateClientSettings();
+  const updateClientSettings = getClientSettingsUpdater();
   const browserPermission = useBrowserNotificationPermission();
   const update = (patch: Partial<DesktopNotificationSettings>) => {
     updateClientSettings((current) => ({
@@ -233,7 +234,7 @@ function SoftGroupedPanel({ model }: { readonly model: NotificationSettingsModel
         <MasterRow model={model} />
         <EnabledOptions enabled={model.settings.enabled}>
           <div className="border-t border-border/50 px-3 pt-3 pb-2 sm:px-4">
-            <p className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <p className="mb-1.5 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
               Notify me when
             </p>
             {EVENT_OPTIONS.map((option) => (
@@ -242,10 +243,10 @@ function SoftGroupedPanel({ model }: { readonly model: NotificationSettingsModel
                 className="flex cursor-pointer items-center justify-between gap-4 rounded-lg py-2 hover:bg-muted/35"
               >
                 <span>
-                  <span className="block text-sm font-medium tracking-[-0.005em] text-foreground">
+                  <span className="block text-sm font-medium tracking-normal text-foreground">
                     {option.title}
                   </span>
-                  <span className="block text-[13px] leading-[1.45] text-muted-foreground/80">
+                  <span className="block text-sm leading-normal text-muted-foreground/80">
                     {option.description}
                   </span>
                 </span>

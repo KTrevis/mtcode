@@ -3,10 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { PI_THREAD_LIFECYCLE_CUSTOM_TYPE, PiThreadLifecycleCustomEntry } from "./piNative.ts";
 
+const decodeEntry = Schema.decodeSync(PiThreadLifecycleCustomEntry);
+const decodeUnknownEntry = Schema.decodeUnknownSync(PiThreadLifecycleCustomEntry);
+
 describe("Pi thread lifecycle contract", () => {
   it("decodes the versioned custom JSONL entry", () => {
     expect(
-      Schema.decodeUnknownSync(PiThreadLifecycleCustomEntry)({
+      decodeEntry({
         type: "custom",
         id: "entry-1",
         parentId: "message-1",
@@ -24,7 +27,7 @@ describe("Pi thread lifecycle contract", () => {
 
   it("rejects unknown lifecycle versions", () => {
     expect(() =>
-      Schema.decodeUnknownSync(PiThreadLifecycleCustomEntry)({
+      decodeUnknownEntry({
         type: "custom",
         id: "entry-1",
         parentId: null,

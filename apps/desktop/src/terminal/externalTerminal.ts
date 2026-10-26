@@ -1,7 +1,8 @@
 import { EXTERNAL_TERMINALS, type OpenExternalTerminalInput } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { isCommandAvailable } from "@t3tools/shared/shell";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;

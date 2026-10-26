@@ -1,13 +1,4 @@
-/**
- * MT Code runs its desktop-control MCP server from the open-source
- * munim-computer-use project (github.com/munimtechnologies/munim-computer-use)
- * instead of carrying its own copy. This module is the one place that names
- * it: the shipped executable, the MT identity the binary is run under, the
- * release pin format, and where a dev checkout finds a binary.
- *
- * Shared by the desktop build (scripts/build-desktop-artifact.ts), the server
- * (MCP injection) and Electron main (Computer History, Chrome native host).
- */
+// Desktop packaging and provider MCP injection must use the same executable and resource paths.
 
 /** Executable name, as published by the munim-computer-use release. */
 const MUNIM_COMPUTER_USE_EXECUTABLE = "munim-computer-use";

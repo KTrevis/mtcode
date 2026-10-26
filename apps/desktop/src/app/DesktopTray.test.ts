@@ -32,7 +32,7 @@ const desktopAssetsLayer = Layer.succeed(DesktopAssets.DesktopAssets, {
     icns: Option.none(),
     png: Option.some("C:/path/to/icon.png"),
   }),
-  resolveResourcePath: () => Effect.succeed(Option.none()),
+  resolveResourcePath: () => Effect.succeedNone,
 } satisfies DesktopAssets.DesktopAssets["Service"]);
 
 const makeElectronTrayLayer = (
@@ -50,6 +50,7 @@ const makeElectronAppLayer = (onQuit?: () => Effect.Effect<void>) =>
     name: Effect.succeed("T3 Code"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    requestSingleInstanceLock: Effect.succeed(true),
     quit: onQuit ? onQuit() : Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,
@@ -79,6 +80,7 @@ const makeDesktopWindowLayer = (onRevealOrCreateMain?: () => Effect.Effect<void>
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     prepareCaptureReveal: Effect.void,
+    runMainContentsCommand: () => Effect.void,
     dispatchMenuAction: () => Effect.void,
     dispatchSnapShotEvent: () => Effect.void,
     zoomMain: () => Effect.void,

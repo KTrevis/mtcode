@@ -1,8 +1,4 @@
-import type {
-  RepositoryIdentity,
-  SourceControlProviderInfo,
-  SourceControlProviderKind,
-} from "@t3tools/contracts";
+import type { SourceControlProviderInfo, SourceControlProviderKind } from "@t3tools/contracts";
 
 export interface ChangeRequestPresentation {
   readonly icon: "github" | "gitlab" | "forgejo" | "azure-devops" | "bitbucket" | "change-request";
@@ -19,11 +15,6 @@ export interface ChangeRequestTerminology {
   readonly shortLabel: string;
   readonly singular: string;
 }
-
-export const DEFAULT_CHANGE_REQUEST_TERMINOLOGY: ChangeRequestTerminology = {
-  shortLabel: "PR",
-  singular: "pull request",
-};
 
 const CHANGE_REQUEST_URL_PATTERNS = [
   /https:\/\/[^\s<>()]+\/[^/\s<>()]+\/[^/\s<>()]+\/pull\/\d+(?:[/?#][^\s<>()]*)?/i,
@@ -116,7 +107,15 @@ export function resolveChangeRequestPresentation(
       return AZURE_DEVOPS_CHANGE_REQUEST_PRESENTATION;
     case "bitbucket":
       return BITBUCKET_CHANGE_REQUEST_PRESENTATION;
-    case "unknown":
+    case "gitcafe":
+      return {
+        ...GITHUB_CHANGE_REQUEST_PRESENTATION,
+        providerName: "GitCafe",
+        providerLongName: "GitCafe pull request",
+        checkoutCommandExample: "cafe pr checkout 123",
+        urlExample: "https://git.cafe/owner/repo/pull/42",
+      };
+    default:
       return GENERIC_CHANGE_REQUEST_PRESENTATION;
   }
 }
@@ -125,20 +124,6 @@ function resolveChangeRequestPresentationForKind(
   kind: SourceControlProviderKind,
 ): ChangeRequestPresentation {
   return resolveChangeRequestPresentation({ kind, name: "", baseUrl: "" });
-}
-
-export function getChangeRequestTerminology(
-  provider: SourceControlProviderInfo | null | undefined,
-): ChangeRequestTerminology {
-  if (!provider) {
-    return DEFAULT_CHANGE_REQUEST_TERMINOLOGY;
-  }
-
-  const presentation = resolveChangeRequestPresentation(provider);
-  return {
-    shortLabel: presentation.shortName,
-    singular: presentation.longName,
-  };
 }
 
 export function getChangeRequestTerminologyForKind(
@@ -156,169 +141,4 @@ const SCP_SSH_REMOTE_PATTERN = /^[a-zA-Z0-9._-]+@([^:/]+):/;
 export function isSshRemoteUrl(remoteUrl: string): boolean {
   const trimmed = remoteUrl.trim();
   return SCP_SSH_REMOTE_PATTERN.test(trimmed) || trimmed.toLowerCase().startsWith("ssh://");
-}
-
-/**
- * Extracts the normalized host used for provider detection. SCP-style and SSH remotes return the
- * hostname only, while other URL schemes retain explicit ports for non-default web endpoints.
- */
-function parseRemoteHost(remoteUrl: string): string | null {
-  const trimmed = remoteUrl.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  const scpMatch = SCP_SSH_REMOTE_PATTERN.exec(trimmed);
-  if (scpMatch?.[1]) {
-    return scpMatch[1].toLowerCase();
-  }
-
-  try {
-    const url = new URL(trimmed);
-    return (url.protocol === "ssh:" ? url.hostname : url.host).toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function parseHostName(host: string): string {
-  try {
-    return new URL(`https://${host}`).hostname.toLowerCase();
-  } catch {
-    return host.replace(/:\d+$/u, "").toLowerCase();
-  }
-}
-
-function toBaseUrl(host: string): string {
-  return `https://${host}`;
-}
-
-function hasDnsLabel(host: string, label: string): boolean {
-  return host.split(".").includes(label);
-}
-
-function isGitHubHost(host: string): boolean {
-  return host === "github.com" || hasDnsLabel(host, "github");
-}
-
-function isGitLabHost(host: string): boolean {
-  return host === "gitlab.com" || hasDnsLabel(host, "gitlab");
-}
-
-function isAzureDevOpsHost(host: string): boolean {
-  // `ssh.dev.azure.com` is the default Azure DevOps SSH clone host
-  // (git@ssh.dev.azure.com:v3/org/project/repo), so match any `*.dev.azure.com`
-  // subdomain, not just the bare `dev.azure.com`. Legacy hosts stay under
-  // `.visualstudio.com` (including `vs-ssh.visualstudio.com`).
-  return (
-    host === "dev.azure.com" ||
-    host.endsWith(".dev.azure.com") ||
-    host.endsWith(".visualstudio.com")
-  );
-}
-
-function isBitbucketHost(host: string): boolean {
-  return host === "bitbucket.org" || hasDnsLabel(host, "bitbucket");
-}
-
-export function detectSourceControlProviderFromRemoteUrl(
-  remoteUrl: string,
-): SourceControlProviderInfo | null {
-  const host = parseRemoteHost(remoteUrl);
-  if (!host) {
-    return null;
-  }
-  const hostname = parseHostName(host);
-
-  if (
-    hostname === "codeberg.org" ||
-    hasDnsLabel(hostname, "forgejo") ||
-    hasDnsLabel(hostname, "gitea")
-  ) {
-    return {
-      kind: "forgejo",
-      name: "Forgejo",
-      baseUrl: /^https?:/iu.test(remoteUrl.trim())
-        ? new URL(remoteUrl.trim()).origin
-        : toBaseUrl(host),
-    };
-  }
-
-  if (isGitHubHost(hostname)) {
-    return {
-      kind: "github",
-      name: hostname === "github.com" ? "GitHub" : "GitHub Self-Hosted",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  if (isGitLabHost(hostname)) {
-    return {
-      kind: "gitlab",
-      name: hostname === "gitlab.com" ? "GitLab" : "GitLab Self-Hosted",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  if (isAzureDevOpsHost(hostname)) {
-    return {
-      kind: "azure-devops",
-      name: "Azure DevOps",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  if (isBitbucketHost(hostname)) {
-    return {
-      kind: "bitbucket",
-      name: hostname === "bitbucket.org" ? "Bitbucket" : "Bitbucket Self-Hosted",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  return {
-    kind: "unknown",
-    name: host,
-    baseUrl: toBaseUrl(host),
-  };
-}
-
-/**
- * The provider-native repository selector. `displayName` is the full path below the host, which
- * is what nested GitLab groups need; owner/name is the two-segment fallback for identities
- * recorded before that field existed.
- *
- * Azure DevOps is the exception: `az repos pr list --repository` takes a repository name, and
- * takes the organisation and project from the checkout it detects — so the recorded
- * `org/project/_git/repo` path is refused outright and the whole repository reads as
- * unavailable. Its name is the last segment, which is what this hands over.
- *
- * One function because everything downstream is keyed by what it answers: the rows' own
- * `repository`, the per-repository cursors, and the detail and diff reads a row leads to.
- */
-export function sourceControlRepositorySelector(
-  identity:
-    | Pick<RepositoryIdentity, "provider" | "displayName" | "owner" | "name">
-    | null
-    | undefined,
-): string | null {
-  if (!identity) return null;
-  if (identity.provider === "azure-devops") {
-    const segments = (identity.displayName ?? "").split("/").filter((part) => part !== "_git");
-    return identity.name || segments.at(-1) || null;
-  }
-  if (identity.displayName) return identity.displayName;
-  return identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null;
-}
-
-export function canonicalRepositoryKey(key: string): string {
-  return key
-    .replace(
-      /^(?:ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com)\/v3\/([^/]+)\/([^/]+)\/([^/]+)$/u,
-      "dev.azure.com/$1/$2/_git/$3",
-    )
-    .replace(
-      /^([^.]+)\.visualstudio\.com\/(?:defaultcollection\/)?([^/]+)\/_git\/([^/]+)$/u,
-      "dev.azure.com/$1/$2/_git/$3",
-    );
 }

@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  listVoiceTranscriptionModels,
-  transcribeVoiceRecording,
-  voiceTranscriptionRequestHeaders,
-} from "./voiceTranscription";
+import { voiceTranscriptionRequestHeaders } from "./voiceTranscription";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -55,6 +51,8 @@ describe("listVoiceTranscriptionModels", () => {
       },
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { listVoiceTranscriptionModels } = await import("./voiceTranscription");
 
     await expect(
       listVoiceTranscriptionModels({ provider: "openai", apiKey: "client-key" }),
@@ -77,6 +75,8 @@ describe("listVoiceTranscriptionModels", () => {
       },
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { transcribeVoiceRecording } = await import("./voiceTranscription");
 
     await expect(
       transcribeVoiceRecording(new Blob(["audio"], { type: "audio/webm" }), {

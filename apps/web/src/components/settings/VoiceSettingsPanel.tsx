@@ -12,8 +12,8 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useEffect, useState } from "react";
+import { AsyncResult } from "effect/reactivity";
+import { useState } from "react";
 
 import { usePrimaryEnvironment } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
@@ -90,11 +90,13 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     reportFailure: false,
   });
   const [apiKey, setApiKey] = useState("");
-  const [configured, setConfigured] = useState(false);
+  const [configured, setConfigured] = useState(queriedStatus?.configured ?? false);
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [parallelApiKey, setParallelApiKey] = useState("");
-  const [parallelConfigured, setParallelConfigured] = useState(false);
+  const [parallelConfigured, setParallelConfigured] = useState(
+    queriedParallelStatus?.configured ?? false,
+  );
   const [parallelBusy, setParallelBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [parallelFeedback, setParallelFeedback] = useState<string | null>(null);
   const traceSessions = useVoiceTraceStore((state) => state.sessions);
@@ -129,13 +131,16 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const setTurnEagerness = useVoiceSettingsStore((state) => state.setTurnEagerness);
   const setNoiseReduction = useVoiceSettingsStore((state) => state.setNoiseReduction);
 
-  useEffect(() => {
-    if (queriedStatus) setConfigured(queriedStatus.configured);
-  }, [queriedStatus]);
-
-  useEffect(() => {
-    if (queriedParallelStatus) setParallelConfigured(queriedParallelStatus.configured);
-  }, [queriedParallelStatus]);
+  const [credentialSnapshot, setCredentialSnapshot] = useState(queriedStatus);
+  if (credentialSnapshot !== queriedStatus) {
+    setCredentialSnapshot(queriedStatus);
+    setConfigured(queriedStatus?.configured ?? false);
+  }
+  const [parallelSnapshot, setParallelSnapshot] = useState(queriedParallelStatus);
+  if (parallelSnapshot !== queriedParallelStatus) {
+    setParallelSnapshot(queriedParallelStatus);
+    setParallelConfigured(queriedParallelStatus?.configured ?? false);
+  }
 
   const save = async () => {
     if (!environmentId || apiKey.trim().length === 0 || busy) return;
@@ -235,7 +240,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   return (
     <SettingsPageContainer>
       <div>
-        <h1 className="text-xl font-semibold tracking-[-0.02em]">Voice</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Voice</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Choose how voice connects to {APP_DISPLAY_NAME}.
         </p>
@@ -343,7 +348,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
               title="API key"
               description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The app uses it to mint short-lived browser credentials.`}
               status={
-                <span className={configured ? "text-emerald-600 dark:text-emerald-400" : undefined}>
+                <span className={configured ? "text-success" : undefined}>
                   {configured ? "Configured" : "Not configured"}
                 </span>
               }
@@ -394,8 +399,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                   </Button>
                   <Button
                     size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
+                    variant="ghost-destructive"
                     onClick={() => void remove()}
                     disabled={!environmentId || !configured || busy !== null}
                   >
@@ -416,11 +420,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
               title="API key"
               description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The voice agent uses Parallel Search and Extract through server-side tools.`}
               status={
-                <span
-                  className={
-                    parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined
-                  }
-                >
+                <span className={parallelConfigured ? "text-success" : undefined}>
                   {parallelConfigured ? "Configured" : "Not configured"}
                 </span>
               }
@@ -475,8 +475,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                   </Button>
                   <Button
                     size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
+                    variant="ghost-destructive"
                     onClick={() => void removeParallel()}
                     disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
                   >
@@ -513,9 +512,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                       <SelectItem key={option.value} value={option.value}>
                         <div>
                           <div>{option.label}</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            {option.description}
-                          </div>
+                          <div className="text-2xs text-muted-foreground">{option.description}</div>
                         </div>
                       </SelectItem>
                     ))}
@@ -730,14 +727,12 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                     session.status === "error"
                       ? "size-2 rounded-full bg-destructive"
                       : session.status === "active"
-                        ? "size-2 rounded-full bg-emerald-500"
+                        ? "size-2 rounded-full bg-success"
                         : "size-2 rounded-full bg-muted-foreground/45"
                   }
                 />
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                  {session.title}
-                </span>
-                <time className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{session.title}</span>
+                <time className="shrink-0 text-2xs text-muted-foreground">
                   {new Date(session.startedAt).toLocaleString()}
                 </time>
               </summary>

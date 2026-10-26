@@ -1,4 +1,5 @@
 import {
+  AuthSettingsWriteScope,
   ENVIRONMENT_MACHINE_KINDS,
   isEnvironmentMachineKind,
   resolveEnvironmentMachineKind,
@@ -6,8 +7,8 @@ import {
   type ServerConfig,
 } from "@t3tools/contracts";
 
-import { useEnvironmentOperateAccess } from "../../hooks/useEnvironmentOperateAccess";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { useEnvironmentScope } from "../../state/session";
 import { ENVIRONMENT_MACHINE_KIND_LABELS, EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   MenuItem,
@@ -19,12 +20,8 @@ import {
   MenuSubTrigger,
 } from "../ui/menu";
 
-/**
- * Why the picker is inert, in the order the user can do something about it.
- * Null means it can be changed.
- */
 export function resolveEnvironmentIconPickerLock(input: {
-  readonly serverConfig: ServerConfig | null;
+  readonly serverConfig: Pick<ServerConfig, "environment"> | null;
   readonly operateAccess: "granted" | "denied" | "pending";
 }): string | null {
   if (input.serverConfig === null) {
@@ -33,31 +30,24 @@ export function resolveEnvironmentIconPickerLock(input: {
   if (input.serverConfig.environment.capabilities.environmentIcon !== true) {
     return "This environment's server is too old to keep an icon. Update it to choose one.";
   }
-  if (input.operateAccess === "denied") {
+  if (input.operateAccess !== "granted") {
     return "Your session on this environment cannot change its settings.";
   }
   return null;
 }
 
-/**
- * "Icon" submenu for an environment's row menu. Lists the machine kinds with
- * the server's own detection marked, so the user can tell whether detection
- * got it right before overriding. Picking the detected kind clears the
- * override. Locked environments show the reason as a disabled item instead of
- * hiding the submenu, so the current icon still reads.
- */
 export function EnvironmentIconMenu({
   environmentId,
   serverConfig,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly serverConfig: ServerConfig | null;
+  readonly serverConfig: Pick<ServerConfig, "environment"> | null;
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const operateAccess = useEnvironmentOperateAccess(environmentId);
+  const operateAccess = useEnvironmentScope(environmentId, AuthSettingsWriteScope)
+    ? "granted"
+    : "denied";
   const lock = resolveEnvironmentIconPickerLock({ serverConfig, operateAccess });
-  // With no detection the server falls back to "server", so picking that
-  // kind clears the override the same way picking the detected kind does.
   const detected = serverConfig?.environment.platform.machine ?? "server";
   const resolved = resolveEnvironmentMachineKind(serverConfig);
 

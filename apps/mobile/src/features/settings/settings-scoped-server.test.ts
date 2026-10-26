@@ -11,6 +11,7 @@ import {
   planMobileScopedSettingsClear,
   planMobileScopedSettingsPatch,
   resolveMobileSettingsTargets,
+  uniformMobileSetting,
 } from "./settings-scoped-server";
 
 const firstId = "first" as EnvironmentId;
@@ -18,10 +19,46 @@ const secondId = "second" as EnvironmentId;
 const firstProject = "first-project" as ProjectId;
 const secondProject = "second-project" as ProjectId;
 
+describe("mobile usage-limit settings across environments", () => {
+  it.each(["autoResumeLimitedThreads", "snoozeLimitedThreads"] as const)(
+    "shows %s as mixed and can enable it everywhere without changing other settings",
+    (key) => {
+      const targets = resolveMobileSettingsTargets(
+        [
+          environment(firstId, { ...DEFAULT_SERVER_SETTINGS, [key]: true }),
+          environment(secondId, { ...DEFAULT_SERVER_SETTINGS, [key]: false }),
+        ],
+        null,
+      );
+
+      expect(uniformMobileSetting(targets, key)).toBeNull();
+      const writes = planMobileScopedSettingsPatch(targets, false, { [key]: true });
+      expect(writes).toEqual([
+        { environmentId: firstId, patch: { [key]: true } },
+        { environmentId: secondId, patch: { [key]: true } },
+      ]);
+      const updatedTargets = targets.map((target) => ({
+        ...target,
+        settings: {
+          ...target.settings,
+          [key]:
+            writes.find((write) => write.environmentId === target.environment.environmentId)?.patch[
+              key
+            ] ?? target.settings[key],
+        },
+      }));
+      expect(uniformMobileSetting(updatedTargets, key)).toBe(true);
+      expect(uniformMobileSetting(targets.slice(0, 1), key)).toBe(true);
+      expect(uniformMobileSetting(targets.slice(1), key)).toBe(false);
+      expect(uniformMobileSetting([], key)).toBeNull();
+    },
+  );
+});
+
 function environment(
   environmentId: EnvironmentId,
   settings: ServerSettings,
-  supportsScope = false,
+  supportsScope = true,
 ): SettingsTarget {
   return {
     environmentId,
@@ -39,7 +76,7 @@ describe("mobile project settings scope", () => {
     "filters settlement scope per server with project scope %s",
     (projectSelected) => {
       const capable = environment(firstId, DEFAULT_SERVER_SETTINGS, true);
-      const legacy = environment(secondId, DEFAULT_SERVER_SETTINGS);
+      const legacy = environment(secondId, DEFAULT_SERVER_SETTINGS, false);
       const targets = resolveMobileSettingsTargets(
         [capable, legacy],
         projectSelected
@@ -87,7 +124,7 @@ describe("mobile project settings scope", () => {
     };
     const secondSettings: ServerSettings = {
       ...DEFAULT_SERVER_SETTINGS,
-      responseStreamingMode: "token",
+      responseStreamingMode: "turn",
       projectSettingsOverrides: {},
     };
     const targets = resolveMobileSettingsTargets(
@@ -116,7 +153,7 @@ describe("mobile project settings scope", () => {
       },
     ]);
     expect(firstSettings.responseStreamingMode).toBe("paragraph");
-    expect(secondSettings.responseStreamingMode).toBe("token");
+    expect(secondSettings.responseStreamingMode).toBe("turn");
   });
 
   it("removes a project override when a picker sends null for a key that cannot store it", () => {

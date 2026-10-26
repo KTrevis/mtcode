@@ -1,37 +1,19 @@
-/**
- * Windows boot service. Everything in this file is the Windows path.
- *
- * Windows has no systemd, so the equivalent of the user unit is a shortcut in
- * the per-user Startup folder. The shell (`explorer.exe`) runs that shortcut at
- * every sign-in. The shortcut points at PowerShell, PowerShell spawns the
- * launcher with its console hidden, then PowerShell exits.
- *
- * Three differences from the Linux path are deliberate and load bearing:
- *
- * - Nothing supervises the launcher, so the launcher restarts its own child.
- *   The generated logon script sets `SERVICE_SELF_SUPERVISE_ENV` to say so.
- * - Nothing captures the launcher's output, so the logon script redirects it
- *   through the command shell (`cmd.exe`) rather than the launcher opening it.
- * - Windows has no SIGTERM, so stopping goes through a request file that the
- *   launcher watches. That stop is not graceful: the child is terminated
- *   without running its shutdown finalizer.
- */
+// Startup shortcuts require launcher supervision and file acknowledgements because Windows has no service manager here.
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 import {
-  HostProcessArchitecture,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+  Architecture as HostProcessArchitecture,
+  Platform as HostProcessPlatform,
+} from "@t3tools/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import * as NodeOS from "node:os";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -44,6 +26,7 @@ import {
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
+  SERVICE_LAUNCHER_CONTEXT_ENV,
   SERVICE_PID_FILE,
   SERVICE_STATE_FILE,
   decodeServiceLauncherPresence,
@@ -60,7 +43,7 @@ import {
     blinks once at sign-in, because a console launched from a shortcut takes its
     title from the shortcut. "Server" rather than "Code" because the desktop app
     is a separate thing the user may also start. */
-export const SHORTCUT_NAME = "T3 Code Server";
+const SHORTCUT_NAME = "T3 Code Server";
 export const SHORTCUT_FILE = `${SHORTCUT_NAME}.lnk`;
 const STARTUP_SCRIPT_FILE = "service-startup.ps1";
 const SHORTCUT_SCRIPT_FILE = "service-shortcut.ps1";
@@ -84,14 +67,7 @@ const POWERSHELL_TIMEOUT = Duration.seconds(30);
 const powershellPath = (systemRoot: string) =>
   `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 
-/**
- * Windows only. The command shell expands `%VAR%` on its command line, even
- * inside double quotes, and there is no escape that works there. A path holding
- * a percent sign would therefore be rewritten before the launcher ever starts,
- * silently, with a successful install and nothing running. The Linux renderer
- * guards the same hazard for systemd in `escapeSystemdSpecifiers`; here the only
- * honest option is to refuse.
- */
+// cmd expands percent variables even inside quoted paths, so these paths cannot be passed safely.
 export function findPercentInPaths(
   paths: ReadonlyArray<readonly [label: string, value: string]>,
 ): string | undefined {
@@ -234,14 +210,7 @@ export function renderShortcutScript(plan: WindowsBootServicePlan): string {
   ].join("\n");
 }
 
-/**
- * Windows only. Parses the two lines the Probe action writes.
- *
- * Returns undefined when either line is missing. Defaulting to false would read
- * as "the entry is not disabled", so a probe that failed to run would look
- * exactly like a probe that passed, and the install would sail past a check it
- * never actually performed.
- */
+// An incomplete probe must fail closed; missing flags do not prove that startup is enabled.
 export function parseProbeOutput(stdout: string): WindowsPreflight | undefined {
   const read = (key: string) => {
     const match = new RegExp(`^${key}=(True|False)\\s*$`, "im").exec(stdout)?.[1];
@@ -273,19 +242,20 @@ export interface WindowsBootServiceInput {
 export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
   input: WindowsBootServiceInput,
 ) {
-  const hostExecPath = yield* HostProcessExecutablePath;
   const platform = yield* HostProcessPlatform;
   const arch = yield* HostProcessArchitecture;
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
     yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
   );
+  const runningInsideService = Option.isSome(
+    yield* Config.String(SERVICE_LAUNCHER_CONTEXT_ENV).pipe(Config.option),
+  );
   const appData = yield* Config.String("APPDATA").pipe(Config.withDefault(""));
   const systemRoot = yield* Config.String("SystemRoot").pipe(Config.withDefault("C:\\Windows"));
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
-  const host = input.host ?? { execPath: hostExecPath };
 
   const startupDir = path.join(
     appData,
@@ -432,17 +402,7 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     return findings;
   });
 
-  /**
-   * Windows only. Asks a running launcher to stop, because Windows has no
-   * SIGTERM. The stop is not graceful: the launcher terminates its child
-   * without letting it run its shutdown finalizer.
-   *
-   * The pid file is what makes the answer unambiguous. Its absence means no
-   * launcher is running, and its disappearance means one stopped. Treating a
-   * vanished request file as proof instead would let a slow launcher look
-   * stopped, and the install would then rewrite the runtime underneath it and
-   * start a second server on the same database.
-   */
+  // Only disappearance of the PID record acknowledges a stop; the request alone cannot authorize runtime replacement.
   const pidRecordMtime = fs.stat(pidPath).pipe(
     Effect.map((info) => Option.map(info.mtime, (mtime) => mtime.getTime())),
     Effect.orElseSucceed(() => Option.none<number>()),
@@ -453,22 +413,19 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     // sharing violation while the launcher rewrites its record, must not be
     // read as proof the launcher is gone, or the install writes over a live one.
     const recorded = yield* fs.readFileString(pidPath).pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catch((error) =>
         error.reason._tag === "NotFound"
           ? Effect.succeed(Option.none<string>())
           : Effect.fail(new BootService.BootServiceInstallError({ cause: error })),
       ),
     );
-    if (Option.isNone(recorded)) return false;
+    if (Option.isNone(recorded)) {
+      yield* fs.remove(stopRequestPath, { force: true }).pipe(Effect.ignore);
+      return false;
+    }
     const presence = decodeServiceLauncherPresence(recorded.value);
-    // Only trust the process id while the record is from this boot. Ids are
-    // recycled across reboots, so an old file can name an unrelated live
-    // process, and waiting on that would never finish.
-    // An old timestamp is not evidence of death. A laptop that slept wakes with
-    // a live launcher whose last heartbeat is ancient, and clearing its record
-    // would start a second server on one database. So this only asks whether the
-    // holder could be ours; the wait below settles whether it really is.
+    // Boot identity rejects recycled PIDs; only subsequent heartbeat observations distinguish a stale record from sleep.
     const recordMtimeBefore = yield* pidRecordMtime;
     const live =
       presence !== undefined &&
@@ -498,11 +455,7 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
       const stillRunning = yield* fs.exists(pidPath).pipe(Effect.orElseSucceed(() => true));
       if (!stillRunning) return true;
     }
-    // Nothing stopped. The wait was longer than several heartbeats, so a record
-    // that never moved belongs to a process that is not our launcher at all,
-    // which happens when the operating system recycles the id. Clear it and let
-    // the caller proceed. A record that did move is a launcher that is alive and
-    // simply will not stop, and writing over that one must not happen.
+    // An unchanged heartbeat belongs to a dead or recycled owner; a changing one forbids replacing its runtime.
     const recordMtimeAfter = yield* pidRecordMtime;
     const neverRefreshed =
       Option.isNone(recordMtimeAfter) ||
@@ -519,11 +472,7 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     });
   });
 
-  /** Windows only. A copy of the Linux install's pinned-runtime step, which
-      validates the runtime by asking it for its own version. It is identical,
-      and it is duplicated rather than extracted because pulling it out of the
-      Linux `make` would restructure the systemd path. That path is deliberately
-      left alone. Fix bugs here and in bootService.ts together. */
+  // Keep runtime validation consistent with the other boot service managers.
   const installPinnedRuntime = ensurePinnedRuntimeInstalled({
     baseDir: input.baseDir,
     version: input.cliVersion,
@@ -574,110 +523,107 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     ),
   );
 
-  const install: BootService.BootService["Service"]["install"] = (options) =>
-    Effect.gen(function* () {
-      yield* requireWindows;
-      yield* fs
-        .makeDirectory(input.logsDir, { recursive: true })
-        .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
+  const install: BootService.BootService["Service"]["install"] = Effect.fn(
+    "cloud.boot_service_windows.install",
+  )(function* (options) {
+    yield* requireWindows;
+    yield* fs
+      .makeDirectory(input.logsDir, { recursive: true })
+      .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
 
-      const percentIn = findPercentInPaths([
-        ["the t3 runtime", runtimePaths.entryPath],
-        // Named with the variable that moves it, because the shared message
-        // deliberately gives no relocation advice of its own.
-        ["the T3 Code data directory (T3CODE_HOME)", plan.baseDir],
-        ["the T3 Code log directory", plan.logPath],
-      ]);
-      if (percentIn !== undefined) {
-        return yield* new BootService.BootServicePathHasPercentError({ pathLabel: percentIn });
-      }
+    const percentIn = findPercentInPaths([
+      ["the t3 runtime", runtimePaths.entryPath],
+      // Named with the variable that moves it, because the shared message
+      // deliberately gives no relocation advice of its own.
+      ["the T3 Code data directory (T3CODE_HOME)", plan.baseDir],
+      ["the T3 Code log directory", plan.logPath],
+    ]);
+    if (percentIn !== undefined) {
+      return yield* new BootService.BootServicePathHasPercentError({ pathLabel: percentIn });
+    }
 
-      // Write the shortcut script first so the preflight has something to run.
-      // It lives under the data directory, so nothing user-visible changes yet.
-      yield* writeDurably(shortcutScriptPath, renderShortcutScript(plan));
-      const checks = yield* preflight;
-      if (!checks.shellRunning) {
-        // Not fatal. Running a different shell is a deliberate choice, and it is
-        // the user's to make. Saying nothing would leave them with a service that
-        // silently never starts.
-        yield* Console.warn(
-          "Windows Explorer is not running, and it is what starts Startup folder entries.\n" +
-            "If you use a different shell, T3 Code may never start when you sign in.",
-        );
-      }
-      if (checks.entryDisabled) {
-        return yield* new BootService.BootServiceStartupEntryDisabledError({
-          shortcutName: SHORTCUT_NAME,
+    // Write the shortcut script first so the preflight has something to run.
+    // It lives under the data directory, so nothing user-visible changes yet.
+    yield* writeDurably(shortcutScriptPath, renderShortcutScript(plan));
+    const checks = yield* preflight;
+    if (!checks.shellRunning) {
+      // Not fatal. Running a different shell is a deliberate choice, and it is
+      // the user's to make. Saying nothing would leave them with a service that
+      // silently never starts.
+      yield* Console.warn(
+        "Windows Explorer is not running, and it is what starts Startup folder entries.\n" +
+          "If you use a different shell, T3 Code may never start when you sign in.",
+      );
+    }
+    if (checks.entryDisabled) {
+      return yield* new BootService.BootServiceStartupEntryDisabledError({
+        shortcutName: SHORTCUT_NAME,
+      });
+    }
+
+    // Prepare every immutable artifact before stopping a running launcher.
+    yield* installPinnedRuntime;
+
+    const installed = yield* fs
+      .exists(unitPath)
+      .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
+    // Before anything is stopped. This guard exists to protect an in-flight
+    // remote update, and terminating the launcher first would interrupt the
+    // very thing it is guarding.
+    const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
+    if (Option.isSome(previousStateText) && serviceStateHasPendingUpdate(previousStateText.value)) {
+      return yield* new BootService.BootServiceUpdatePendingError();
+    }
+    // An older CLI must not silently replace a newer service.
+    if (installed && Option.isSome(previousStateText)) {
+      const installedVersion = serviceStateActiveVersion(previousStateText.value);
+      if (
+        installedVersion !== undefined &&
+        options?.allowDowngrade !== true &&
+        compareExactServiceVersions(input.cliVersion, installedVersion) < 0
+      ) {
+        return yield* new BootService.BootServiceDowngradeRefusedError({
+          installedVersion,
+          targetVersion: input.cliVersion,
         });
       }
+    }
 
-      // Prepare every immutable artifact before stopping a running launcher.
-      yield* installPinnedRuntime;
+    // Keyed on the pid file, never on the shortcut. A launcher outlives a
+    // manually deleted shortcut, and starting a second one alongside it would
+    // put two servers on the same database.
+    const stopped = yield* requestStop;
 
-      const installed = yield* fs
-        .exists(unitPath)
-        .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
-      // Before anything is stopped. This guard exists to protect an in-flight
-      // remote update, and terminating the launcher first would interrupt the
-      // very thing it is guarding.
-      const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
-      if (
-        Option.isSome(previousStateText) &&
-        serviceStateHasPendingUpdate(previousStateText.value)
-      ) {
-        return yield* new BootService.BootServiceUpdatePendingError();
-      }
-      // Same downgrade guard as the systemd/launchd path (upstream #5302): an
-      // older CLI must not silently replace a newer service.
-      if (installed && Option.isSome(previousStateText)) {
-        const installedVersion = serviceStateActiveVersion(previousStateText.value);
-        if (
-          installedVersion !== undefined &&
-          options?.allowDowngrade !== true &&
-          compareExactServiceVersions(input.cliVersion, installedVersion) < 0
-        ) {
-          return yield* new BootService.BootServiceDowngradeRefusedError({
-            installedVersion,
-            targetVersion: input.cliVersion,
-          });
-        }
-      }
-
-      // Keyed on the pid file, never on the shortcut. A launcher outlives a
-      // manually deleted shortcut, and starting a second one alongside it would
-      // put two servers on the same database.
-      const stopped = yield* requestStop;
-
-      yield* Effect.gen(function* () {
-        yield* writeDurably(
-          statePath,
-          // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned document.
-          `${JSON.stringify(
-            {
-              protocol: SERVICE_LAUNCHER_PROTOCOL,
-              activeVersion: input.cliVersion,
-            } satisfies ServiceState,
-            null,
-            2,
-          )}\n`,
-        );
-        yield* writeDurably(startupScriptPath, renderStartupScript(plan));
-
-        yield* runShortcutScript("creating the Windows Startup shortcut", "Install");
-        // Start last. No administrative state write occurs after this succeeds.
-        yield* runPowerShellScript("starting the service", startupScriptPath);
-      }).pipe(
-        Effect.tapError(() =>
-          installed || stopped
-            ? runPowerShellScript(
-                "restarting the service after a failed update",
-                startupScriptPath,
-              ).pipe(Effect.ignore)
-            : Effect.void,
-        ),
+    yield* Effect.gen(function* () {
+      yield* writeDurably(
+        statePath,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned document.
+        `${JSON.stringify(
+          {
+            protocol: SERVICE_LAUNCHER_PROTOCOL,
+            activeVersion: input.cliVersion,
+          } satisfies ServiceState,
+          null,
+          2,
+        )}\n`,
       );
-      return plan satisfies BootService.BootServicePlan;
-    }).pipe(Effect.withSpan("cloud.boot_service_windows.install"));
+      yield* writeDurably(startupScriptPath, renderStartupScript(plan));
+
+      yield* runShortcutScript("creating the Windows Startup shortcut", "Install");
+      // Start last. No administrative state write occurs after this succeeds.
+      yield* runPowerShellScript("starting the service", startupScriptPath);
+    }).pipe(
+      Effect.tapError(() =>
+        installed || stopped
+          ? runPowerShellScript(
+              "restarting the service after a failed update",
+              startupScriptPath,
+            ).pipe(Effect.ignore)
+          : Effect.void,
+      ),
+    );
+    return plan satisfies BootService.BootServicePlan;
+  });
 
   const uninstall: BootService.BootService["Service"]["uninstall"] = Effect.gen(function* () {
     yield* requireWindows;
@@ -765,14 +711,39 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     // Nothing installed here is nothing of ours to restart. The generated
     // startup script is the artifact that proves this base directory owns it.
     const script = yield* fs.readFileString(startupScriptPath).pipe(Effect.option);
-    if (Option.isNone(script) || script.value !== renderStartupScript(plan)) return false;
+    if (Option.isNone(script) || script.value !== renderStartupScript(plan))
+      return "skipped" as const;
+    if (runningInsideService) {
+      const restartProgram = `[IO.File]::WriteAllText(${quotePowerShellLiteral(stopRequestPath)}, ''); $deadline = (Get-Date).AddSeconds(30); while (Test-Path -LiteralPath ${quotePowerShellLiteral(pidPath)}) { if ((Get-Date) -gt $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; & ${quotePowerShellLiteral(startupScriptPath)}`;
+      const encoded = Buffer.from(restartProgram, "utf16le").toString("base64");
+      yield* runStep("queuing the service restart", powershell, [
+        "-NoProfile",
+        "-Command",
+        `Start-Process -FilePath ${quotePowerShellLiteral(powershell)} -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand',${quotePowerShellLiteral(encoded)}`,
+      ]);
+      return "queued" as const;
+    }
     yield* requestStop;
     yield* runPowerShellScript("restarting the service", startupScriptPath);
-    return true;
+    return "restarted" as const;
   }).pipe(Effect.withSpan("cloud.boot_service_windows.restart"));
 
-  return BootService.BootService.of({ install, restart, uninstall, status });
+  const withStopped = Effect.fn("cloud.boot_service_windows.with_stopped")(function* <A, E, R>(
+    operation: Effect.Effect<A, E, R>,
+  ): Effect.fn.Return<A, E | BootService.BootServiceError, R> {
+    if (platform !== "win32") return yield* operation;
+    const script = yield* fs.readFileString(startupScriptPath).pipe(Effect.option);
+    if (Option.isNone(script) || script.value !== renderStartupScript(plan))
+      return yield* operation;
+    return yield* Effect.acquireUseRelease(
+      requestStop,
+      () => operation,
+      (wasRunning, exit) => {
+        if (!wasRunning) return Effect.void;
+        const start = runPowerShellScript("restoring the service", startupScriptPath);
+        return Exit.isFailure(exit) ? Effect.ignore(start) : start;
+      },
+    );
+  });
+  return BootService.BootService.of({ install, restart, withStopped, uninstall, status });
 });
-
-export const layer = (input: WindowsBootServiceInput) =>
-  Layer.effect(BootService.BootService, make(input));

@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - drives a real Codex-shaped child process from a temp dir.
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, expect, it } from "@effect/vitest";
 import { CodexVoiceSession } from "./CodexVoiceSession.ts";
 
@@ -14,18 +15,37 @@ async function fixture(
   mode: string,
   askAgent: (prompt: string, signal: AbortSignal) => Promise<string>,
 ) {
-  const dir = await mkdtemp(join(tmpdir(), "codex-voice-test-"));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
-  const script = join(dir, "app-server");
-  const spokenPath = join(dir, "spoken.json");
-  await writeFile(
+  const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "codex-voice-test-"));
+  cleanups.push(() => NodeFSP.rm(dir, { recursive: true, force: true }));
+  const script = NodePath.join(dir, "app-server");
+  const spokenPath = NodePath.join(dir, "spoken.json");
+  const handledPath = NodePath.join(dir, "handled.json");
+  const waitForWrite = (name: string) =>
+    new Promise<void>((resolve) => {
+      const watcher = NodeFS.watch(dir, (_event, filename) => {
+        if (filename === name) {
+          watcher.close();
+          resolve();
+        }
+      });
+      cleanups.push(() => watcher.close());
+    });
+  const handled = waitForWrite("handled.json");
+  const spoken = waitForWrite("spoken.json");
+  await NodeFSP.writeFile(
     script,
     `
 import { createInterface } from 'node:readline';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, renameSync } from 'node:fs';
+let replies = 0;
+const write = (path, value) => { writeFileSync(path+'.tmp',value); renameSync(path+'.tmp',path); };
 const send = (v) => process.stdout.write(JSON.stringify(v)+'\\n');
 createInterface({input:process.stdin}).on('line', l => {
   const m=JSON.parse(l);
+  if(typeof m.id === 'string' && m.id.startsWith('tool-')) {
+    replies += 1;
+    if(replies === ${JSON.stringify(mode === "repeat" ? 3 : 1)}) write(${JSON.stringify(handledPath)}, 'done');
+  }
   if(m.method==='initialize') send({id:m.id,result:{}});
   if(m.method==='account/read') send({id:m.id,result:{account:{type:${JSON.stringify(mode === "apikey" ? "apiKey" : "chatgpt")}}}});
   if(m.method==='thread/start') send({id:m.id,result:{thread:{id:'test-thread'}}});
@@ -42,7 +62,7 @@ createInterface({input:process.stdin}).on('line', l => {
       }
     }
   }
-  if(m.method==='thread/realtime/appendSpeech') { send({id:m.id,result:{}}); writeFileSync(${JSON.stringify(spokenPath)}, JSON.stringify(m.params)); }
+  if(m.method==='thread/realtime/appendSpeech') { send({id:m.id,result:{}}); write(${JSON.stringify(spokenPath)}, JSON.stringify(m.params)); }
   if(m.method==='thread/realtime/stop') process.exit(0);
 });
 process.stdin.on('end',()=>process.exit(0));
@@ -56,7 +76,7 @@ process.stdin.on('end',()=>process.exit(0));
     askAgent,
   });
   cleanups.push(() => session.close());
-  return { session, spokenPath };
+  return { session, spokenPath, handled, spoken };
 }
 
 it("waits for the SDP notification and routes a tool request to the selected agent", async () => {
@@ -77,12 +97,12 @@ it("waits for the SDP notification and routes a tool request to the selected age
 
 it("keeps a repeat ping quiet instead of asking the agent twice", async () => {
   const asked: string[] = [];
-  const { session } = await fixture("repeat", async (prompt) => {
+  const { session, handled } = await fixture("repeat", async (prompt) => {
     asked.push(prompt);
     return "Claude's answer";
   });
   await session.start("offer-sdp");
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await handled;
   expect(asked).toHaveLength(1);
 });
 
@@ -92,12 +112,12 @@ it("runs one turn when GPT-Live repeats a handoff for the same request", async (
   const answer = new Promise<string>((resolve) => {
     release = resolve;
   });
-  const { session } = await fixture("repeat", async () => {
+  const { session, handled } = await fixture("repeat", async () => {
     asked += 1;
     return answer;
   });
   await session.start("offer-sdp");
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await handled;
   release("Claude's answer");
   await answer;
   expect(asked).toBe(1);
@@ -108,15 +128,15 @@ it("hands the agent reply back into the conversation", async () => {
   const answer = new Promise<string>((resolve) => {
     release = resolve;
   });
-  const { session, spokenPath } = await fixture("ok", () => answer);
+  const { session, spokenPath, handled, spoken } = await fixture("ok", () => answer);
   await session.start("offer-sdp");
-  // Past the inline window: the call is told to wait, not handed the answer.
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  await handled;
   release("17 times 23 is 391.");
   await answer;
-  await expect
-    .poll(async () => JSON.parse(await readFile(spokenPath, "utf8")).text, { timeout: 8_000 })
-    .toContain("17 times 23 is 391.");
+  await spoken;
+  expect(JSON.parse(await NodeFSP.readFile(spokenPath, "utf8")).text).toContain(
+    "17 times 23 is 391.",
+  );
 });
 
 it("does not mistake an RPC acknowledgement for a working voice connection", async () => {

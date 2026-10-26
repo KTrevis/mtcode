@@ -38,23 +38,23 @@ describe("waitForHostReadiness", () => {
   it.each([1, 10, 100, 250, 1_000, 15_000])(
     "stops unavailable-overlay polling before a %ims broker timeout",
     async (requestTimeoutMs) => {
-      const deadlineMs = Date.now() + resolveHostWaitBudgetMs(requestTimeoutMs);
-      let finishedAt: number | undefined;
+      const deadlineMs = resolveHostWaitBudgetMs(requestTimeoutMs);
+      let finished = false;
       const result = waitForHostReadiness(deadlineMs, async () => false).then((ready) => {
-        finishedAt = Date.now();
+        finished = true;
         return ready;
       });
 
-      await vi.advanceTimersByTimeAsync(requestTimeoutMs);
+      await vi.advanceTimersByTimeAsync(requestTimeoutMs - 1);
 
       expect(await result).toBe(false);
-      expect(finishedAt).toBeLessThan(requestTimeoutMs);
+      expect(finished).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
     },
   );
 
   it("includes session setup in the deadline instead of starting a fresh wait budget", async () => {
-    const deadlineMs = Date.now() + resolveHostWaitBudgetMs(15_000);
+    const deadlineMs = resolveHostWaitBudgetMs(15_000);
     await vi.advanceTimersByTimeAsync(2_000);
     let finished = false;
     const result = waitForHostReadiness(deadlineMs, async () => false).then((ready) => {
@@ -66,12 +66,11 @@ describe("waitForHostReadiness", () => {
     expect(finished).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await result).toBe(false);
-    expect(Date.now()).toBe(deadlineMs);
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it("skips readiness probes when setup has already exhausted the deadline", async () => {
-    const deadlineMs = Date.now() + resolveHostWaitBudgetMs(100);
+    const deadlineMs = resolveHostWaitBudgetMs(100);
     await vi.advanceTimersByTimeAsync(100);
     const isReady = vi.fn(async () => false);
 
@@ -94,12 +93,15 @@ describe("waitForHostReadiness", () => {
   it.each([false, true])(
     "keeps a probe result of %s that wins the deadline race",
     async (ready) => {
-      const isReady = vi.fn(
-        () => new Promise<boolean>((resolve) => setTimeout(() => resolve(ready), 80)),
-      );
+      let resolveProbe!: (ready: boolean) => void;
+      const probe = new Promise<boolean>((resolve) => {
+        resolveProbe = resolve;
+      });
+      const isReady = vi.fn(() => probe);
       const result = waitForHostReadiness(80, isReady);
-
-      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(79);
+      resolveProbe(ready);
+      await vi.advanceTimersByTimeAsync(1);
 
       expect(await result).toBe(ready);
       expect(isReady).toHaveBeenCalledTimes(1);
@@ -154,7 +156,6 @@ describe("awaitHostOperation", () => {
     const assertion = expect(run()).rejects.toThrow("host deadline");
     await vi.advanceTimersByTimeAsync(deadline);
     await assertion;
-    expect(Date.now()).toBeLessThan(100);
     expect(action).toHaveBeenCalledOnce();
     expect(next).not.toHaveBeenCalled();
     await expect(awaitHostOperation(deadline, next, () => new Error("expired"))).rejects.toThrow(

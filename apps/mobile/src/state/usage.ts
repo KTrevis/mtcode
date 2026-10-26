@@ -1,3 +1,6 @@
+import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
+import { AuthDiagnosticsReadScope } from "@t3tools/contracts";
+import { environmentSession, readEnvironmentScope } from "./session";
 /**
  * Multi-environment usage state.
  *
@@ -19,7 +22,7 @@ import {
 import { needsCursorKeychainAccess, refreshUsage } from "@t3tools/client-runtime/state/usage";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { appAtomRegistry } from "./atom-registry";
@@ -38,6 +41,7 @@ export interface EnvironmentUsageStatus extends EnvironmentUsageOption {
   readonly isConnected: boolean;
   /** A connected usage query failed. Connection coverage uses `phase`. */
   readonly error: string | null;
+  readonly canReadDiagnostics: boolean;
   readonly summary: UsageSummary | null;
   readonly needsCursorKeychainAccess: boolean;
 }
@@ -69,6 +73,22 @@ const usageByWindowAtom = Atom.family((key: string) =>
     for (const option of options) {
       const { environmentId } = option;
       const connectionResult = get(environmentCatalog.stateAtom(environmentId));
+      const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
+      const access = resolveUsageAccess({
+        connectionPhase: option.phase,
+        session: Option.getOrNull(AsyncResult.value(sessionResult)),
+        hasSessionError: sessionResult._tag === "Failure",
+      });
+      if (!access.canReadDiagnostics) {
+        environments.push({
+          ...option,
+          ...access,
+          isConnected: option.phase === "connected",
+          summary: null,
+          needsCursorKeychainAccess: false,
+        });
+        continue;
+      }
       // Keep reading the environment-scoped atom while disconnected so a prior
       // successful value remains visible. Wait through the first connection attempt,
       // then treat retries as terminal coverage so a down machine cannot block the UI.
@@ -77,6 +97,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
       const failed = option.phase === "connected" && result._tag === "Failure";
       environments.push({
         ...option,
+        canReadDiagnostics: true,
         isPending:
           (option.phase === "available" && connectionResult.waiting) ||
           option.phase === "connecting" ||
@@ -169,7 +190,9 @@ export function useUsage(
         server: serverEnvironment,
         presentations: environmentPresentations,
         environmentIds: selectedEnvironments.flatMap(({ environmentId, phase }) =>
-          phase === "connected" ? [environmentId] : [],
+          phase === "connected" && readEnvironmentScope(environmentId, AuthDiagnosticsReadScope)
+            ? [environmentId]
+            : [],
         ),
         input: nextInput ?? (JSON.parse(windowKey) as UsageAtomKey).input,
       }),

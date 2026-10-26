@@ -1,82 +1,13 @@
 import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
 
-// Protocol 3 requires the standalone executable layout. Bump when runtimePaths
-// or the installed runtime tree changes incompatibly; launchers survive self-updates.
+// Bump for incompatible runtime layout changes; launchers survive self-updates. Protocol 3 requires standalone executables.
 export const SERVICE_LAUNCHER_PROTOCOL = 3 as const;
 export const SERVICE_LAUNCHER_CONTEXT_ENV = "T3_SERVICE_LAUNCHER_CONTEXT";
+export const SERVICE_ENV_FILE = "service.env";
 export const SERVICE_STATE_FILE = "service-state.json";
-/** Written by the launcher just before an explicit stop kills its child, so
-    the child can tell "the service is going away" from "the launcher is about
-    to start my replacement" while a pending update is recorded. */
+/** Written before explicit stop to distinguish shutdown from update handoff. */
 export const SERVICE_STOP_MARKER_FILE = ".service-stopping";
-/** Windows only. Set by the generated logon script because a Startup folder
-    shortcut has no supervisor. systemd never sets it, so the Linux launcher
-    keeps failing fast and letting `Restart=always` bring the whole unit back. */
-export const SERVICE_SELF_SUPERVISE_ENV = "T3_SERVICE_SELF_SUPERVISE";
-/** Windows only. Written by the CLI to ask a self-supervising launcher to stop,
-    because Windows has no SIGTERM. The launcher deletes it once it has stopped,
-    which is how the CLI learns the stop finished. */
-export const SERVICE_STOP_REQUEST_FILE = ".service-stop-request";
-/** Windows only. Holds a self-supervising launcher's process id while it runs.
-    It is what lets the CLI tell "the service stopped" apart from "no service was
-    running" and from "it is still running and did not answer". Without it, an
-    install could rewrite the runtime under a live launcher and end up with two
-    servers on one database. */
-export const SERVICE_PID_FILE = ".service-pid";
-
-/**
- * Windows only. What the pid file records.
- *
- * A process id alone is not enough. The file survives a crash or a hard reboot,
- * and the operating system reuses process ids freely, so an old file can name a
- * live process that has nothing to do with T3 Code. Believing it would leave the
- * launcher refusing to start for as long as that stranger runs. Recording when
- * the machine booted makes any file written before this boot obviously stale.
- */
-export interface ServiceLauncherPresence {
-  readonly pid: number;
-  readonly bootTimeMs: number;
-  /**
-   * The server the launcher is currently running, when it has one.
-   *
-   * Windows has no equivalent of `KillMode=mixed`, so a launcher killed
-   * outright leaves its server behind. Recording the child means whoever takes
-   * the record over can put that orphan down before starting its own, instead
-   * of quietly ending up with two servers on one database.
-   */
-  readonly childPid?: number;
-}
-
-/** Boot time is derived from uptime, which drifts by a little between reads. */
-export const SAME_BOOT_TOLERANCE_MS = 60_000;
-
-export function encodeServiceLauncherPresence(presence: ServiceLauncherPresence): string {
-  const child = presence.childPid === undefined ? "" : ` ${presence.childPid}`;
-  return `${presence.pid} ${presence.bootTimeMs}${child}\n`;
-}
-
-export function decodeServiceLauncherPresence(text: string): ServiceLauncherPresence | undefined {
-  const [rawPid, rawBoot, rawChild] = text.trim().split(/\s+/);
-  const pid = Number(rawPid);
-  const bootTimeMs = Number(rawBoot);
-  if (!Number.isInteger(pid) || pid <= 0 || !Number.isFinite(bootTimeMs)) return undefined;
-  const childPid = rawChild === undefined ? Number.NaN : Number(rawChild);
-  return Number.isInteger(childPid) && childPid > 0
-    ? { pid, bootTimeMs, childPid }
-    : { pid, bootTimeMs };
-}
-
-/** False when the file predates this boot, whatever process now holds that id. */
-export function serviceLauncherPresenceIsFromThisBoot(
-  presence: ServiceLauncherPresence,
-  currentBootTimeMs: number,
-): boolean {
-  return Math.abs(presence.bootTimeMs - currentBootTimeMs) <= SAME_BOOT_TOLERANCE_MS;
-}
-/** Written by `t3 update` when the unit was repointed at a new version but the
-    running service was deliberately left on the old one. The launcher removes
-    it when it starts (whoever restarted the service), so while it exists the
-    service is known to be behind its unit and status reports it that way. */
+/** Marks a repointed unit whose service still runs the old version; launcher startup clears it. */
 export const SERVICE_RESTART_PENDING_FILE = ".restart-pending";
 
 export interface PendingServiceUpdate {
@@ -95,7 +26,6 @@ export interface ServiceState {
   readonly update?: ServiceUpdateRecord;
 }
 
-/** Context is copied from launcher-owned state when a child is spawned. */
 export interface ServiceLauncherContext {
   readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
   readonly childVersion: string;
@@ -133,7 +63,6 @@ const EXACT_SERVICE_VERSION = new RegExp(
   `^${SEMVER_NUMBER}\\.${SEMVER_NUMBER}\\.${SEMVER_NUMBER}(?:-${SEMVER_PRERELEASE}(?:\\.${SEMVER_PRERELEASE})*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$`,
 );
 
-/** Accepts exact SemVer only: never dist-tags or ranges passed to npm or filesystem paths. */
 export const isExactServiceVersion = (version: string): boolean =>
   EXACT_SERVICE_VERSION.test(version);
 
@@ -173,7 +102,6 @@ function decodeServiceUpdate(value: unknown): ServiceUpdateRecord | undefined {
   return undefined;
 }
 
-/** SemVer precedence for exact versions. Build metadata is ignored. */
 export function compareExactServiceVersions(left: string, right: string): number {
   const parse = (version: string) => {
     const withoutBuild = version.split("+", 1)[0] ?? version;
@@ -243,7 +171,6 @@ export function parseServiceState(value: string): ServiceState | undefined {
   }
 }
 
-/** Detects an in-flight update across launcher protocol versions before replacing its state. */
 export function serviceStateHasPendingUpdate(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -253,7 +180,6 @@ export function serviceStateHasPendingUpdate(value: string): boolean {
   }
 }
 
-/** Reads the active version across launcher protocol revisions for downgrade protection. */
 export function serviceStateActiveVersion(value: string): string | undefined {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -329,4 +255,42 @@ export function decodeServiceLauncherParentMessage(
   return value.type === "committed" && typeof value.updateId === "string"
     ? { type: value.type, updateId: value.updateId }
     : undefined;
+}
+
+export const SERVICE_SELF_SUPERVISE_ENV = "T3_SERVICE_SELF_SUPERVISE";
+
+export const SERVICE_STOP_REQUEST_FILE = ".service-stop-request";
+
+export const SERVICE_PID_FILE = ".service-pid";
+
+export interface ServiceLauncherPresence {
+  readonly pid: number;
+  readonly bootTimeMs: number;
+  // Windows lacks KillMode=mixed; keep the child identity so a replacement launcher can stop its orphan first.
+  readonly childPid?: number;
+}
+
+const SAME_BOOT_TOLERANCE_MS = 60_000;
+
+export function encodeServiceLauncherPresence(presence: ServiceLauncherPresence): string {
+  const child = presence.childPid === undefined ? "" : ` ${presence.childPid}`;
+  return `${presence.pid} ${presence.bootTimeMs}${child}\n`;
+}
+
+export function decodeServiceLauncherPresence(text: string): ServiceLauncherPresence | undefined {
+  const [rawPid, rawBoot, rawChild] = text.trim().split(/\s+/);
+  const pid = Number(rawPid);
+  const bootTimeMs = Number(rawBoot);
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isFinite(bootTimeMs)) return undefined;
+  const childPid = rawChild === undefined ? Number.NaN : Number(rawChild);
+  return Number.isInteger(childPid) && childPid > 0
+    ? { pid, bootTimeMs, childPid }
+    : { pid, bootTimeMs };
+}
+
+export function serviceLauncherPresenceIsFromThisBoot(
+  presence: ServiceLauncherPresence,
+  currentBootTimeMs: number,
+): boolean {
+  return Math.abs(presence.bootTimeMs - currentBootTimeMs) <= SAME_BOOT_TOLERANCE_MS;
 }

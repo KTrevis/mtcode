@@ -138,13 +138,7 @@ export function computerViewCaptureIntervalMs(frameRate: number | undefined): nu
   return Math.max(Math.round(1000 / 30), Math.round(1000 / frameRate));
 }
 
-/**
- * Viewer input to desktop-MCP tool call. The viewer process runs the desktop
- * MCP in remote-control mode, where every one of these drives the machine's
- * real pointer and keyboard rather than being routed to a window in the
- * background -- so a plain pointer move is a `hover`, and the wheel carries the
- * coordinates it should act over.
- */
+// Viewer input drives the real pointer in remote-control mode, so pointer moves map to hover with screen coordinates.
 export function computerViewToolCall(input: ComputerViewInput): DesktopMcpToolCall {
   switch (input.type) {
     case "move":

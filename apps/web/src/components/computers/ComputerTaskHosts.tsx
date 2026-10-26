@@ -1,4 +1,4 @@
-"use client";
+import { useStableCallback } from "../../hooks/useStableCallback";
 
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
@@ -15,10 +15,10 @@ import {
   type ComputerTaskSendResult,
   type ComputerTaskStreamEvent,
   type EnvironmentId,
-  type OrchestrationShellSnapshot,
+  type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import { useContext, useEffect, useState } from "react";
 
 import { environmentCatalog } from "~/connection/catalog";
 import { newMessageId, newThreadId } from "~/lib/utils";
@@ -102,10 +102,8 @@ function createComputerTaskRequestConsumerAtom<E>(options: {
 
 export function ComputerTaskHosts() {
   const { environments } = useEnvironments();
-  const computers = useMemo(
-    () => environments.map((environment) => computerPeerFromPresentation(environment)),
-    [environments],
-  );
+  const computers = (() =>
+    environments.map((environment) => computerPeerFromPresentation(environment)))();
   if (environments.length === 0) return null;
   return (
     <>
@@ -136,12 +134,13 @@ function ComputerTaskHost(props: {
   const thisPresentation = useAtomValue(environmentPresentations.presentationAtom(environmentId));
   useAtomValue(environmentSnapshotAtom(environmentId));
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Refresh the environment’s MCP computer catalog when connection or peer identities change.
   useEffect(() => {
     if (thisPresentation?.connection.phase !== "connected") return;
     void sync({ environmentId, input: { clientId, computers } });
   }, [clientId, computers, environmentId, sync, thisPresentation?.connection.phase]);
 
-  const handleRequest = useCallback(
+  const handleRequest = useStableCallback(
     async (request: ComputerTaskSendRequest): Promise<ComputerTaskSendResult> => {
       const targetId = request.computer.environmentId;
       const livePresentation = registry
@@ -200,18 +199,18 @@ function ComputerTaskHost(props: {
         projectId: matched.id,
       };
     },
-    [registry, retryNow, startTurn],
   );
 
-  const consumerAtom = useMemo(
-    () =>
-      createComputerTaskRequestConsumerAtom({
-        requestsAtom,
-        clientId,
-        handle: handleRequest,
-        respond: (response) => respond({ environmentId, input: response }),
-      }),
-    [clientId, environmentId, handleRequest, requestsAtom, respond],
+  const respondToRequest = useStableCallback((response: Parameters<typeof respond>[0]["input"]) =>
+    respond({ environmentId, input: response }),
+  );
+  const [consumerAtom] = useState(() =>
+    createComputerTaskRequestConsumerAtom({
+      requestsAtom,
+      clientId,
+      handle: handleRequest,
+      respond: respondToRequest,
+    }),
   );
   useAtomValue(consumerAtom);
   return null;
@@ -220,7 +219,7 @@ function ComputerTaskHost(props: {
 async function waitForTargetSnapshot(
   registry: AtomRegistry.AtomRegistry,
   targetId: EnvironmentId,
-): Promise<OrchestrationShellSnapshot> {
+): Promise<OrchestrationV2ShellSnapshot> {
   const deadline = Date.now() + TARGET_READY_TIMEOUT_MS;
   let lastPhase: string | null = null;
   while (Date.now() < deadline) {

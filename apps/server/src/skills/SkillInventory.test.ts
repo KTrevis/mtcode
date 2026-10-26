@@ -75,13 +75,15 @@ it.layer(NodeServices.layer)("discoverGlobalSkillInventory", (it) => {
       const inventory = yield* discoverGlobalSkillInventory().pipe(
         Effect.provide(
           ServerSettings.layerTest({
-            providers: {
-              codex: decodeCodexSettings({ homePath: path.join(tempDirectory, "empty-codex") }),
-              claudeAgent: decodeClaudeSettings({
-                homePath: path.join(tempDirectory, "empty-claude"),
-              }),
-            },
             providerInstances: {
+              [ProviderInstanceId.make("codex")]: {
+                driver: ProviderDriverKind.make("codex"),
+                enabled: false,
+              },
+              [ProviderInstanceId.make("claudeAgent")]: {
+                driver: ProviderDriverKind.make("claudeAgent"),
+                enabled: false,
+              },
               [ProviderInstanceId.make("codex_work")]: {
                 driver: ProviderDriverKind.make("codex"),
                 displayName: "Codex Work",
@@ -144,13 +146,15 @@ it.layer(NodeServices.layer)("discoverGlobalSkillInventory", (it) => {
       const inventory = yield* discoverGlobalSkillInventory().pipe(
         Effect.provide(
           ServerSettings.layerTest({
-            providers: {
-              codex: decodeCodexSettings({ homePath: path.join(tempDirectory, "legacy-codex") }),
-              claudeAgent: decodeClaudeSettings({
-                homePath: path.join(tempDirectory, "legacy-claude"),
-              }),
-            },
             providerInstances: {
+              [ProviderInstanceId.make("codex")]: {
+                driver: ProviderDriverKind.make("codex"),
+                enabled: false,
+              },
+              [ProviderInstanceId.make("claudeAgent")]: {
+                driver: ProviderDriverKind.make("claudeAgent"),
+                enabled: false,
+              },
               [ProviderInstanceId.make("codex_env")]: {
                 driver: ProviderDriverKind.make("codex"),
                 environment: [{ name: "CODEX_HOME", value: codexHome, sensitive: false }],
@@ -184,21 +188,18 @@ it.layer(NodeServices.layer)("discoverGlobalSkillInventory", (it) => {
 
   it.effect("ignores unsupported provider instances", () =>
     Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const tempDirectory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-skill-inventory-empty-",
-      });
       const inventory = yield* discoverGlobalSkillInventory().pipe(
         Effect.provide(
           ServerSettings.layerTest({
-            providers: {
-              codex: decodeCodexSettings({ homePath: path.join(tempDirectory, "codex") }),
-              claudeAgent: decodeClaudeSettings({
-                homePath: path.join(tempDirectory, "claude"),
-              }),
-            },
             providerInstances: {
+              [ProviderInstanceId.make("codex")]: {
+                driver: ProviderDriverKind.make("codex"),
+                enabled: false,
+              },
+              [ProviderInstanceId.make("claudeAgent")]: {
+                driver: ProviderDriverKind.make("claudeAgent"),
+                enabled: false,
+              },
               [ProviderInstanceId.make("opencode")]: {
                 driver: ProviderDriverKind.make("opencode"),
                 config: {},

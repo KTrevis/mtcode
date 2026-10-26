@@ -1,4 +1,5 @@
 import { createClerkBridge } from "@clerk/electron";
+import * as NodeURL from "node:url";
 import { storage } from "@clerk/electron/storage";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,21 +13,15 @@ import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/code
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { HostProcessArguments } from "@t3tools/shared/hostProcess";
+import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import * as DesktopWindow from "../window/DesktopWindow.ts";
-import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import {
-  applyPendingDesktopProtocolUrl,
-  extractDesktopProtocolUrl,
-  isDesktopClerkOAuthCallback,
-  isDesktopProtocolUrl,
-  queuePendingDesktopProtocolUrl,
-} from "./desktopProtocolUrl.ts";
+import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -64,7 +59,7 @@ export class DesktopClerk extends Context.Service<
       never,
       | ElectronApp.ElectronApp
       | ElectronWindow.ElectronWindow
-      | DesktopWindow.DesktopWindow
+      | DesktopWebLinks.DesktopWebLinks
       | Scope.Scope
     >;
   }
@@ -94,6 +89,7 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
 function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
+    manageSingleInstanceLock: false,
     passkeys: true,
     renderer: {
       scheme: ElectronProtocol.getDesktopScheme(isDevelopment),
@@ -102,22 +98,31 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   });
 }
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // Electron scopes the single-instance lock to the userData directory and
-  // creates that directory when the lock is acquired. The SDK bridge takes
-  // the lock at creation, so userData must already point at the real
-  // directory here — under the default productName-derived path, acquiring
-  // the lock would create "T3 Code (Alpha)" and make the legacy-install
-  // detection in resolveUserDataPath match on fresh installs.
-  const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath;
+  // Must not yield: the bridge registers a scheme Electron rejects once ready.
+  const userDataPath = yield* DesktopUserData.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
 
-  const bridge = yield* Effect.acquireRelease(
+  // Clerk skips the profile lock on macOS. Interrupt before runtime construction because quit is asynchronous.
+  if (!(yield* electronApp.requestSingleInstanceLock)) {
+    yield* electronApp.quit;
+    return yield* Effect.interrupt;
+  }
+
+  const pendingSecondInstances: Array<readonly string[]> = [];
+  let handleSecondInstance = (argv: readonly string[]) => {
+    pendingSecondInstances.push(argv);
+  };
+  yield* electronApp.on("second-instance", (_event: unknown, argv: readonly string[]) => {
+    handleSecondInstance(argv);
+  });
+
+  yield* Effect.acquireRelease(
     Effect.try({
       try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
       catch: (cause) =>
@@ -143,76 +148,9 @@ export const make = Effect.gen(function* () {
     configure: Effect.gen(function* () {
       const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
-
-      // The SDK bridge holds Electron's single-instance lock (acquired at
-      // bridge creation) so OAuth deep-link callbacks on Windows/Linux are
-      // forwarded to the running app. In a secondary instance the bridge has
-      // already begun quitting the app; app.quit() is asynchronous, so stop
-      // bootstrap here before whenReady can fire.
-      if (!bridge.isPrimaryInstance) {
-        yield* electronApp.quit;
-        return yield* Effect.interrupt;
-      }
-
-      const desktopWindow = yield* DesktopWindow.DesktopWindow;
-      const context = yield* Effect.context<
-        ElectronWindow.ElectronWindow | DesktopWindow.DesktopWindow
-      >();
+      const webLinks = yield* DesktopWebLinks.DesktopWebLinks;
+      const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
       const runPromise = Effect.runPromiseWith(context);
-      const createMainGate = yield* Semaphore.make(1);
-
-      const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
-      const revealAndDispatch = Effect.fn("desktop.clerk.revealAndDispatchProtocolUrl")(function* (
-        url: string | null,
-      ) {
-        // The SDK resolves its pending OAuth request in the existing renderer.
-        // Reloading that renderer here destroys the flow before session activation.
-        if (url !== null && isDesktopClerkOAuthCallback(url, scheme)) {
-          url = null;
-        }
-        // Registered main only. currentMainOrFirst can be the WSL splash.
-        const mainWindow = yield* electronWindow.main;
-        if (Option.isSome(mainWindow)) {
-          yield* electronWindow.reveal(mainWindow.value);
-          if (url !== null) {
-            yield* Effect.sync(() => {
-              // Queue then apply so a later waiter cannot load a stale
-              // fiber-local URL over a newer deep link, and createMain cannot
-              // replay the older pending slot.
-              queuePendingDesktopProtocolUrl(url);
-              applyPendingDesktopProtocolUrl(mainWindow.value);
-            });
-          }
-          return;
-        }
-
-        if (url !== null) {
-          queuePendingDesktopProtocolUrl(url);
-          // Serialize so concurrent open-url / second-instance events cannot
-          // each pass the empty-main check and create two untracked windows.
-          yield* createMainGate.withPermits(1)(
-            Effect.gen(function* () {
-              const existing = yield* electronWindow.main;
-              if (Option.isSome(existing)) {
-                yield* electronWindow.reveal(existing.value);
-                yield* Effect.sync(() => {
-                  applyPendingDesktopProtocolUrl(existing.value);
-                });
-                return;
-              }
-              // Opens the real main when the backend is already ready (macOS
-              // with no windows). Otherwise createMain applies the queued URL.
-              yield* desktopWindow.createMainIfBackendReady.pipe(Effect.ignore);
-            }),
-          );
-          return;
-        }
-
-        const fallbackWindow = yield* electronWindow.currentMainOrFirst;
-        if (Option.isSome(fallbackWindow)) {
-          yield* electronWindow.reveal(fallbackWindow.value);
-        }
-      });
 
       const startProviderAuthHandoff = (value: string | undefined) => {
         if (!value) return false;
@@ -258,30 +196,48 @@ export const make = Effect.gen(function* () {
         );
         return true;
       };
-      const args = yield* HostProcessArguments;
-      args.some((value) => startProviderAuthHandoff(value));
-      // ChatGPT sign-in hand-offs and returns to provider setup are claimed
-      // first; anything else is a desktop deep link for the main window.
-      yield* electronApp.on("open-url", (event, url) => {
-        if (typeof url !== "string") return;
-        if (startProviderAuthHandoff(url) || resumeProviderAuth(url)) {
-          (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
-          return;
-        }
-        if (environment.platform !== "darwin" || !isDesktopProtocolUrl(url, scheme)) {
-          return;
-        }
-        (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
-        void runPromise(revealAndDispatch(url));
+      const openAppLink = (value: string | undefined) => {
+        if (!value || promptLinkAppPath(value) === null) return false;
+        void runPromise(webLinks.receive(value));
+        return true;
+      };
+      const args = yield* HostProcess.Arguments;
+      args.some((value) => startProviderAuthHandoff(value) || openAppLink(value));
+      const openWebLink = (url: string) => {
+        if (!DesktopWebLinks.isWebLink(url)) return false;
+        void runPromise(webLinks.receive(url));
+        return true;
+      };
+      yield* electronApp.on("open-url", (event: { preventDefault: () => void }, url: string) => {
+        if (
+          startProviderAuthHandoff(url) ||
+          resumeProviderAuth(url) ||
+          openWebLink(url) ||
+          openAppLink(url)
+        )
+          event.preventDefault();
       });
-
-      yield* electronApp.on("second-instance", (_event, argv) => {
-        const values = Array.isArray(argv) ? argv.filter(isStringArg) : [];
-        if (values.some((value) => startProviderAuthHandoff(value) || resumeProviderAuth(value))) {
-          return;
-        }
-        void runPromise(revealAndDispatch(extractDesktopProtocolUrl(values, scheme)));
+      yield* electronApp.on("open-file", (event: { preventDefault: () => void }, path: string) => {
+        if (!DesktopWebLinks.isWebPageFile(path)) return;
+        event.preventDefault();
+        void runPromise(webLinks.receive(NodeURL.pathToFileURL(path).href));
       });
+      handleSecondInstance = (argv) => {
+        if (
+          argv?.some(
+            (value) =>
+              startProviderAuthHandoff(value) || resumeProviderAuth(value) || openAppLink(value),
+          )
+        )
+          return;
+        void runPromise(
+          Effect.gen(function* () {
+            const mainWindow = yield* electronWindow.currentMainOrFirst;
+            if (Option.isSome(mainWindow)) yield* electronWindow.reveal(mainWindow.value);
+          }),
+        );
+      };
+      for (const argv of pendingSecondInstances.splice(0)) handleSecondInstance(argv);
     }).pipe(Effect.withSpan("desktop.clerk.configure")),
   });
 });

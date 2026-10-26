@@ -1,8 +1,9 @@
+import { useStableCallback } from "./useStableCallback";
 import {
   resolveVoiceTranscriptionAction,
   type VoiceTranscriptionAction,
 } from "@t3tools/shared/voiceTranscription";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { transcribeVoiceRecording, type VoiceTranscriptionConfig } from "../lib/voiceTranscription";
 
@@ -49,12 +50,8 @@ export function useVoiceTranscription({
   const onTranscriptInsertRef = useRef(onTranscriptInsert);
   const onTranscriptSendRef = useRef(onTranscriptSend);
   const startRef = useRef<() => Promise<void>>(async () => undefined);
-  statusRef.current = status;
-  configRef.current = config;
-  onTranscriptInsertRef.current = onTranscriptInsert;
-  onTranscriptSendRef.current = onTranscriptSend;
 
-  const cleanupCapture = useCallback(() => {
+  const cleanupCapture = useStableCallback(() => {
     for (const interval of intervalsRef.current) window.clearInterval(interval);
     intervalsRef.current = [];
     if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
@@ -64,8 +61,9 @@ export function useVoiceTranscription({
     void audioContextRef.current?.close();
     audioContextRef.current = null;
     recorderRef.current = null;
-  }, []);
+  });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Release microphone tracks and timers when the recorder unmounts.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -81,24 +79,18 @@ export function useVoiceTranscription({
     };
   }, [cleanupCapture]);
 
-  const stop = useCallback(
-    (action: Exclude<VoiceTranscriptionAction, "abort"> = "insert") => {
-      terminalActionRef.current = resolveVoiceTranscriptionAction(
-        terminalActionRef.current,
-        action,
-      );
-      if (startingRef.current) {
-        // Permission acquisition is already in flight. Preserve the requested
-        // action and apply it as soon as MediaRecorder starts.
-        return;
-      }
-      const recorder = recorderRef.current;
-      if (recorder?.state === "recording") recorder.stop();
-    },
-    [cleanupCapture],
-  );
+  const stop = (action: Exclude<VoiceTranscriptionAction, "abort"> = "insert") => {
+    terminalActionRef.current = resolveVoiceTranscriptionAction(terminalActionRef.current, action);
+    if (startingRef.current) {
+      // Permission acquisition is already in flight. Preserve the requested
+      // action and apply it as soon as MediaRecorder starts.
+      return;
+    }
+    const recorder = recorderRef.current;
+    if (recorder?.state === "recording") recorder.stop();
+  };
 
-  const cancel = useCallback(() => {
+  const cancel = () => {
     terminalActionRef.current = "abort";
     if (startingRef.current) {
       cancelStartingRef.current = true;
@@ -120,9 +112,9 @@ export function useVoiceTranscription({
     }
     const recorder = recorderRef.current;
     if (recorder?.state === "recording") recorder.stop();
-  }, [cleanupCapture]);
+  };
 
-  const start = useCallback(async () => {
+  const start = async () => {
     if (startingRef.current) {
       if (cancelStartingRef.current) restartAfterCancellationRef.current = true;
       return;
@@ -293,8 +285,15 @@ export function useVoiceTranscription({
           : "Could not start the microphone.",
       );
     }
-  }, [cleanupCapture]);
-  startRef.current = start;
+  };
+  // oxlint-disable-next-line t3code/react-effect-budget -- Recorder events retain these callbacks across renders, including while transcription is in flight.
+  useLayoutEffect(() => {
+    statusRef.current = status;
+    configRef.current = config;
+    onTranscriptInsertRef.current = onTranscriptInsert;
+    onTranscriptSendRef.current = onTranscriptSend;
+    startRef.current = start;
+  });
 
   return { status, elapsedMs, levels, error, start, stop, cancel } as const;
 }

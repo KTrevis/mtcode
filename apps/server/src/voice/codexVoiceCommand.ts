@@ -10,9 +10,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
-import { codexAppServerArgs, resolveCodexLaunchArgs } from "../provider/Layers/codexLaunchArgs.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
+import { codexAppServerArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 
 const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
@@ -43,7 +43,10 @@ export const resolveCodexVoiceCommand = Effect.fn("voice.resolveCodexVoiceComman
   const [, instance] = selected;
   const config = decodeCodexSettings(instance.config ?? {});
   if (Option.isNone(config)) return Option.none();
-  const environment = mergeProviderInstanceEnvironment(instance.environment ?? [], hostEnvironment);
+  const environment = yield* mergeProviderInstanceEnvironment(
+    instance.environment ?? [],
+    hostEnvironment,
+  );
   const layout = yield* resolveCodexHomeLayout(config.value);
   const launchArgs = resolveCodexLaunchArgs(config.value.launchArgs, environment);
   return Option.some({

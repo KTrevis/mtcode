@@ -373,7 +373,7 @@ export class SupervisorClient extends Context.Service<
 >()("t3/piNative/SupervisorClient") {
   static readonly layer = Layer.sync(SupervisorClient, makeSupervisorClient);
 }
-export function makeSupervisorClient(): SupervisorClient["Service"] {
+function makeSupervisorClient(): SupervisorClient["Service"] {
   const capabilityCacheMs = 1_000;
   let capabilityCache: SupervisorCapabilityProbe | undefined;
   let capabilityCacheExpiry: NodeJS.Timeout | undefined;
@@ -402,12 +402,13 @@ export function makeSupervisorClient(): SupervisorClient["Service"] {
     return listInFlight;
   };
   return SupervisorClient.of({
-    list: () =>
+    list: Effect.fn("SupervisorClient.list")(() =>
       Effect.tryPromise({
         try: () => listEnvelope().then((value) => value.runtimes),
         catch: mapError,
       }),
-    probeCapabilities: (refresh = false) =>
+    ),
+    probeCapabilities: Effect.fn("SupervisorClient.probeCapabilities")((refresh = false) =>
       Effect.tryPromise({
         try: () =>
           !refresh && capabilityCache !== undefined
@@ -415,12 +416,14 @@ export function makeSupervisorClient(): SupervisorClient["Service"] {
             : listEnvelope().then((value) => value.capabilities),
         catch: mapError,
       }),
-    dispatch: (command) =>
+    ),
+    dispatch: Effect.fn("SupervisorClient.dispatch")((command) =>
       Effect.tryPromise({
         try: () => request("dispatch", { command }) as Promise<SupervisorCommandReceipt>,
         catch: mapError,
       }),
-    claimManaged: (claim) =>
+    ),
+    claimManaged: Effect.fn("SupervisorClient.claimManaged")((claim) =>
       Effect.acquireRelease(
         Effect.tryPromise({ try: openManagedConnection, catch: mapError }),
         (connection) => Effect.sync(connection.close),
@@ -465,6 +468,7 @@ export function makeSupervisorClient(): SupervisorClient["Service"] {
           }),
         ),
       ),
+    ),
     subscribe: (runtimeId, cursor) =>
       Stream.fromAsyncIterable(subscribe(runtimeId, cursor), mapError),
   });

@@ -5,7 +5,6 @@
  */
 import { COMPUTER_VIEW_MAX_FRAME_RATE, ComputerViewQuality } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { useCallback, useMemo } from "react";
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 
@@ -33,7 +32,7 @@ export interface ComputerViewSettings {
 
 export const COMPUTER_VIEW_FRAME_RATES = [2, 5, 8, 15, 30] as const;
 
-export const DEFAULT_COMPUTER_VIEW_SETTINGS: ComputerViewSettings = {
+const DEFAULT_COMPUTER_VIEW_SETTINGS: ComputerViewSettings = {
   scaleToFit: true,
   highDpi: true,
   smoothScaling: true,
@@ -71,10 +70,8 @@ export function useComputerViewSettings(): readonly [
     StoredComputerViewSettings,
     typeof StoredComputerViewSettings.Encoded
   >(COMPUTER_VIEW_SETTINGS_KEY, NO_STORED_SETTINGS, StoredComputerViewSettings);
-  const settings = useMemo(() => ({ ...DEFAULT_COMPUTER_VIEW_SETTINGS, ...stored }), [stored]);
-  const update = useCallback(
-    (patch: Partial<ComputerViewSettings>) => setStored((current) => ({ ...current, ...patch })),
-    [setStored],
-  );
+  const settings = { ...DEFAULT_COMPUTER_VIEW_SETTINGS, ...stored };
+  const update = (patch: Partial<ComputerViewSettings>) =>
+    setStored((current) => ({ ...current, ...patch }));
   return [settings, update] as const;
 }

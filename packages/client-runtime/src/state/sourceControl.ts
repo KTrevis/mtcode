@@ -6,25 +6,29 @@ import {
   type SourceControlSshPasswordPromptRequest,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import {
   createAtomCommandScheduler,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
-  createRuntimeCommand,
+  createEnvironmentRuntimeCommand,
   runInEnvironment,
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { EnvironmentCacheStore } from "../platform/persistence.ts";
-import { config as environmentConfig, request, runStream } from "../rpc/client.ts";
+import * as Persistence from "../platform/persistence.ts";
+import {
+  config as environmentConfig,
+  requestGuarded as request,
+  runStreamGuarded as runStream,
+} from "../rpc/client.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 import { consumeSshPromptedOperation } from "./sshPasswordPrompts.ts";
 
 export function createSourceControlEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | EnvironmentCacheStore | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | Persistence.EnvironmentCacheStore | R, E>,
 ) {
   const commandScheduler = createAtomCommandScheduler();
   return {
@@ -36,7 +40,8 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:source-control:repository",
       tag: WS_METHODS.sourceControlLookupRepository,
     }),
-    cloneRepository: createRuntimeCommand(runtime, {
+    cloneRepository: createEnvironmentRuntimeCommand(runtime, {
+      tag: WS_METHODS.sourceControlCloneRepository,
       label: "environment-data:source-control:clone-repository",
       scheduler: commandScheduler,
       concurrency: {
@@ -101,13 +106,12 @@ export function createSourceControlEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
-    // Every clone the environment tracks. Empty until a clone starts; a
-    // finished clone drops out after a grace period, a failed one stays.
     projectClones: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:source-control:project-clones",
       tag: WS_METHODS.subscribeProjectClones,
     }),
-    publishRepository: createRuntimeCommand(runtime, {
+    publishRepository: createEnvironmentRuntimeCommand(runtime, {
+      tag: WS_METHODS.sourceControlPublishRepository,
       label: "environment-data:source-control:publish-repository",
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,

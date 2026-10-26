@@ -1,5 +1,6 @@
+import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import type { ComposerPathSearchTarget } from "@t3tools/client-runtime/state/threads";
 import {
-  formatProviderSkillDisplayName,
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
@@ -15,6 +16,7 @@ import {
 import {
   BlocksIcon,
   FolderIcon,
+  MessagesSquareIcon,
   PackageIcon,
   SettingsIcon,
   UserRoundIcon,
@@ -36,6 +38,7 @@ export type ComposerCommandItem =
       type: "path";
       path: string;
       pathKind: ProjectEntry["kind"];
+      searchTarget: ComposerPathSearchTarget;
       label: string;
       description: string;
     }
@@ -112,7 +115,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
     >
       <ComposerBanner.Surface
         ref={listRef}
-        className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
+        className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
         {props.items.length > 0 ? (
@@ -200,6 +203,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           kind={props.item.pathKind}
           theme={props.resolvedTheme}
         />
+      ) : null}
+      {props.item.type === "thread" ? (
+        <MessagesSquareIcon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />
       ) : null}
       {pullRequestPresentation ? (
         <pullRequestPresentation.Icon

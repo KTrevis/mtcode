@@ -77,6 +77,7 @@ export function LocalSkySettings() {
   const [busy, setBusy] = useState(false);
   const pending = useRef<AbortController | null>(null);
   const mounted = useRef(true);
+  // oxlint-disable-next-line t3code/react-effect-budget -- Abort the active geocoding request when the settings view unmounts.
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -132,16 +133,6 @@ export function LocalSkySettings() {
     }
   };
 
-  /**
-   * Approximate location from the IP address, for when the device's own
-   * location service is unavailable or refused. City-level is all this
-   * artwork needs: it decides which sky to paint, not where you are.
-   *
-   * Several providers, tried in order, because the free tiers here are
-   * rate-limited per address and a single one goes silent without warning --
-   * the first attempt at this shipped with one and it was already returning
-   * 429 for a home connection.
-   */
   const locateByNetwork = async (): Promise<SkyLocation | null> => {
     const controller = new AbortController();
     pending.current = controller;
@@ -176,9 +167,6 @@ export function LocalSkySettings() {
     setMessage(null);
     // The device's own service first: it is the more accurate answer and the
     // one that needs no third party. Everything else falls back to the IP,
-    // which is the difference between the button working and not -- Linux
-    // desktops, machines with location services off, and a browser where the
-    // prompt was dismissed all land here.
     const fromDevice = await new Promise<SkyLocation | null>((resolve) => {
       if (!navigator.geolocation) {
         resolve(null);
@@ -209,9 +197,9 @@ export function LocalSkySettings() {
   return (
     <div className="w-full max-w-sm space-y-2 text-left text-xs">
       <p className="text-muted-foreground">
-        Use a city or this device’s location — and if the device will not say, its network address
-        is looked up instead. Approximate coordinates are sent to Open-Meteo for daylight and
-        weather, and saved only on this device.
+        Use a city or this device’s location. and if the device will not say, its network address is
+        looked up instead. Approximate coordinates are sent to Open-Meteo for daylight and weather,
+        and saved only on this device.
       </p>
       <div className="flex gap-2">
         <input

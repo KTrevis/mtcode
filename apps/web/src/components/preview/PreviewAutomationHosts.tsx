@@ -1,6 +1,6 @@
 "use client";
 
-import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -23,8 +23,9 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Atom } from "effect/unstable/reactivity";
+import { useContext, useEffect, useRef, useState } from "react";
+import { useStableCallback } from "~/hooks/useStableCallback";
+import { Atom } from "effect/reactivity";
 import { useShallow } from "zustand/react/shallow";
 
 import {
@@ -306,35 +307,28 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
       Object.keys(state.byTabId).filter((tabId) => state.byTabId[tabId]?.visible),
     ),
   );
-  const liveTabs = useMemo(
-    () =>
-      Object.entries(previewSessions).flatMap(([key, state]) => {
-        const ref = parseScopedThreadKey(key);
-        if (ref?.environmentId !== environmentId) return [];
-        return Object.values(state.sessions)
-          .filter((tab) => state.desktopByTabId[tab.tabId]?.hasWebContents)
-          .map((tab) => ({
-            threadId: ref.threadId,
-            tabId: tab.tabId,
-            visible: visibleRuntimeTabIds.includes(
-              previewRuntimeTabId(ref, state.serverEpoch, tab.tabId),
-            ),
-          }));
-      }),
-    [environmentId, previewSessions, visibleRuntimeTabIds],
-  );
+  const liveTabs = Object.entries(previewSessions).flatMap(([key, state]) => {
+    const ref = parseScopedThreadKey(key);
+    if (ref?.environmentId !== environmentId) return [];
+    return Object.values(state.sessions)
+      .filter((tab) => state.desktopByTabId[tab.tabId]?.hasWebContents)
+      .map((tab) => ({
+        threadId: ref.threadId,
+        tabId: tab.tabId,
+        visible: visibleRuntimeTabIds.includes(
+          previewRuntimeTabId(ref, state.serverEpoch, tab.tabId),
+        ),
+      }));
+  });
   const lastFocusReportRef = useRef<string | null>(null);
   const registry = useContext(RegistryContext);
   const [automationClientId] = useState(createPreviewAutomationClientId);
-  const initialAutomationHost = useMemo<PreviewAutomationHostState>(
-    () => ({
-      clientId: automationClientId,
-      environmentId,
-      supportedOperations: [...PREVIEW_AUTOMATION_OPERATIONS],
-      supportsOpenProfile: true,
-    }),
-    [automationClientId, environmentId],
-  );
+  const initialAutomationHost: PreviewAutomationHostState = {
+    clientId: automationClientId,
+    environmentId,
+    supportedOperations: [...PREVIEW_AUTOMATION_OPERATIONS],
+    supportsOpenProfile: true,
+  };
   const automationRequestsAtom = previewEnvironment.automationRequests({
     environmentId,
     input: initialAutomationHost,
@@ -360,7 +354,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   const automationConnectionId = useAtomValue(automationConnectionAtom);
   const presentationSuppressedRuntimeTabsRef = useRef(new Map<string, Set<string>>());
 
-  const handleRequest = useCallback(
+  const handleRequest = useStableCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
       // Session sync and tab creation consume the same budget as overlay registration.
       const hostDeadlineMs = Date.now() + resolveHostWaitBudgetMs(request.timeoutMs);
@@ -873,40 +867,27 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         browserActivity.release?.();
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
-  const setRequestHandler = useAtomSet(requestHandlerAtom);
-  useEffect(() => {
-    setRequestHandler({ handle: handleRequest });
-  }, [handleRequest, setRequestHandler]);
 
-  const automationRequestConsumerAtom = useMemo(
-    () =>
-      createPreviewAutomationRequestConsumerAtom({
-        requestsAtom: automationRequestsAtom,
-        clientId: automationClientId,
-        connectionAtom: automationConnectionAtom,
-        environmentId,
-        requestHandlerAtom,
-        respond: (response) =>
-          respondToAutomation({
-            environmentId,
-            input: response,
-          }),
-        label: `preview:automation-host:${environmentId}:${automationClientId}`,
-      }),
-    [
-      automationClientId,
-      automationConnectionAtom,
-      automationRequestsAtom,
-      requestHandlerAtom,
-      respondToAutomation,
+  const [automationRequestConsumerAtom] = useState(() =>
+    createPreviewAutomationRequestConsumerAtom({
+      requestsAtom: automationRequestsAtom,
+      clientId: automationClientId,
+      connectionAtom: automationConnectionAtom,
       environmentId,
-    ],
+      requestHandlerAtom,
+      respond: (response) =>
+        respondToAutomation({
+          environmentId,
+          input: response,
+        }),
+      label: `preview:automation-host:${environmentId}:${automationClientId}`,
+    }),
   );
   useAtomValue(automationRequestConsumerAtom);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Report browser focus, visibility, and live tabs to the remote automation broker.
   useEffect(() => {
     const report = () => {
       if (!automationConnectionId) return;

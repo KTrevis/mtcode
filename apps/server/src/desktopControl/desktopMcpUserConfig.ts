@@ -1,17 +1,4 @@
-/**
- * User-config precedence for the bundled desktop MCP server (MT Code fork).
- *
- * Providers auto-inject the bundled `mt-desktop` server into every session
- * (see desktopMcpLaunch.ts). When the user's own Claude config already defines
- * a server with that name, the user's definition wins: injection is skipped so
- * the SDK-supplied entry cannot shadow theirs.
- *
- * Claude Code reads MCP servers from `<cwd>/.mcp.json` (project scope) and
- * from `.claude.json` under `CLAUDE_CONFIG_DIR` (or `HOME` when unset): the
- * top-level `mcpServers` map (user scope) and `projects[<cwd>].mcpServers`
- * (local scope). Read failures and malformed JSON count as "not defined" so a
- * broken config never hides the bundled tools.
- */
+// User-defined mt-desktop entries in Claude project, local, or user configuration override bundled injection.
 import { DESKTOP_MCP_SERVER_NAME } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

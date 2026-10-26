@@ -1,3 +1,5 @@
+import { type SshPasswordPromptHandler } from "./sshPasswordPrompts.ts";
+import { runStreamInEnvironment } from "./runtime.ts";
 import {
   EnvironmentId,
   type EnvironmentId as EnvironmentIdType,
@@ -7,6 +9,7 @@ import {
   type GitRunStackedActionResult,
   GitStackedAction,
   type ThreadId,
+  type ProjectId,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -15,18 +18,13 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { EnvironmentCacheStore } from "../platform/persistence.ts";
-import { config as environmentConfig, runStream } from "../rpc/client.ts";
-import {
-  createRuntimeCommand,
-  runInEnvironment,
-  type AtomCommand,
-  type AtomCommandResult,
-} from "./runtime.ts";
-import { resolveSshPasswordPrompt, type SshPasswordPromptHandler } from "./sshPasswordPrompts.ts";
+import * as Persistence from "../platform/persistence.ts";
+import { runStreamGuarded, RpcPermissionGuard } from "../rpc/client.ts";
+import { createRuntimeCommand, type AtomCommand, type AtomCommandResult } from "./runtime.ts";
+import { createCommandPermissions } from "./commandPermissions.ts";
 import { vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 
@@ -79,8 +77,8 @@ export interface RunVcsStackedActionInput {
   readonly commitMessage?: string;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
-  /** The thread the action runs beside; the server links a pull request it creates to it. */
   readonly threadId?: ThreadId;
+  readonly projectId?: ProjectId;
   readonly onProgress?: (event: GitActionProgressEvent) => void;
   readonly onSshPasswordPrompt?: SshPasswordPromptHandler;
 }
@@ -181,7 +179,7 @@ const EMPTY_VCS_ACTION_ATOM = Atom.make(EMPTY_VCS_ACTION_STATE).pipe(
   Atom.withLabel("vcs-action:null"),
 );
 
-export function getVcsActionTargetKey(target: VcsActionTarget): string | null {
+function getVcsActionTargetKey(target: VcsActionTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
@@ -259,7 +257,12 @@ export function normalizeVcsActionProgressEvent(
   };
 }
 
-export function consumeVcsActionProgress<E, R, PromptError = never, PromptRequirements = never>(
+export const consumeVcsActionProgress = Effect.fn("VcsAction.consumeProgress")(function* <
+  E,
+  R,
+  PromptError = never,
+  PromptRequirements = never,
+>(
   stream: Stream.Stream<GitActionProgressEvent, E, R>,
   input: {
     readonly target: ResolvedVcsActionTarget;
@@ -271,75 +274,73 @@ export function consumeVcsActionProgress<E, R, PromptError = never, PromptRequir
       request: Extract<GitActionProgressEvent, { readonly kind: "ssh_password_prompt" }>["request"],
     ) => Effect.Effect<void, PromptError, PromptRequirements>;
   },
-): Effect.Effect<
+): Effect.fn.Return<
   GitRunStackedActionResult,
   E | PromptError | VcsActionExecutionError,
   R | PromptRequirements
 > {
-  return Effect.gen(function* () {
-    const resolutionFailed = yield* Deferred.make<never, PromptError>();
-    let terminalEvent: GitActionProgressEvent | null = null;
-    const consume = stream.pipe(
-      Stream.runForEach((event) => {
-        if (event.kind === "ssh_password_prompt") {
-          if (event.actionId !== input.transportActionId || event.cwd !== input.target.cwd) {
-            return Effect.void;
-          }
-          const resolvePrompt = input.resolveSshPasswordPrompt;
-          if (resolvePrompt === undefined) {
-            return Effect.void;
-          }
-          return resolvePrompt(event.request).pipe(
-            Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
-            Effect.forkChild({ startImmediately: true }),
-            Effect.asVoid,
-          );
-        }
-        const normalized = normalizeVcsActionProgressEvent(
-          input.target,
-          input.transportActionId,
-          input.actionId,
-          event,
-        );
-        if (normalized === null) {
+  const resolutionFailed = yield* Deferred.make<never, PromptError>();
+  let terminalEvent: GitActionProgressEvent | null = null;
+  const consume = stream.pipe(
+    Stream.runForEach((event) => {
+      if (event.kind === "ssh_password_prompt") {
+        if (event.actionId !== input.transportActionId || event.cwd !== input.target.cwd) {
           return Effect.void;
         }
-        if (normalized.kind === "action_finished" || normalized.kind === "action_failed") {
-          terminalEvent = normalized;
+        const resolvePrompt = input.resolveSshPasswordPrompt;
+        if (resolvePrompt === undefined) {
+          return Effect.void;
         }
-        return input.onProgress(normalized);
-      }),
-      Effect.flatMap(() => {
-        if (terminalEvent?.kind === "action_finished") {
-          return Effect.succeed(terminalEvent.result);
-        }
-        if (terminalEvent?.kind === "action_failed") {
-          return Effect.fail<VcsActionExecutionError>(
-            new VcsActionRemoteFailureError({
-              actionId: input.actionId,
-              transportActionId: input.transportActionId,
-              action: terminalEvent.action,
-              environmentId: input.target.environmentId,
-              cwd: input.target.cwd,
-              phase: terminalEvent.phase,
-              remoteMessageLength: terminalEvent.message.length,
-            }),
-          );
-        }
+        return resolvePrompt(event.request).pipe(
+          Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
+          Effect.forkChild({ startImmediately: true }),
+          Effect.asVoid,
+        );
+      }
+      const normalized = normalizeVcsActionProgressEvent(
+        input.target,
+        input.transportActionId,
+        input.actionId,
+        event,
+      );
+      if (normalized === null) {
+        return Effect.void;
+      }
+      if (normalized.kind === "action_finished" || normalized.kind === "action_failed") {
+        terminalEvent = normalized;
+      }
+      return input.onProgress(normalized);
+    }),
+    Effect.flatMap(() => {
+      if (terminalEvent?.kind === "action_finished") {
+        return Effect.succeed(terminalEvent.result);
+      }
+      if (terminalEvent?.kind === "action_failed") {
         return Effect.fail<VcsActionExecutionError>(
-          new VcsActionMissingTerminalEventError({
+          new VcsActionRemoteFailureError({
             actionId: input.actionId,
             transportActionId: input.transportActionId,
-            action: input.action,
+            action: terminalEvent.action,
             environmentId: input.target.environmentId,
             cwd: input.target.cwd,
+            phase: terminalEvent.phase,
+            remoteMessageLength: terminalEvent.message.length,
           }),
         );
-      }),
-    );
-    return yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
-  });
-}
+      }
+      return Effect.fail<VcsActionExecutionError>(
+        new VcsActionMissingTerminalEventError({
+          actionId: input.actionId,
+          transportActionId: input.transportActionId,
+          action: input.action,
+          environmentId: input.target.environmentId,
+          cwd: input.target.cwd,
+        }),
+      );
+    }),
+  );
+  return yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
+});
 
 export function applyVcsActionProgressEvent(
   current: VcsActionState,
@@ -417,14 +418,17 @@ export function applyVcsActionProgressEvent(
       };
     case "action_finished":
       return {
-        ...EMPTY_VCS_ACTION_STATE,
+        ...current,
+        isRunning: true,
         actionId: event.actionId,
         action: event.action,
         operation: "run_change_request",
+        error: null,
       };
     case "action_failed":
       return {
-        ...EMPTY_VCS_ACTION_STATE,
+        ...current,
+        isRunning: true,
         actionId: event.actionId,
         action: event.action,
         operation: "run_change_request",
@@ -436,7 +440,7 @@ export function applyVcsActionProgressEvent(
 }
 
 export function createVcsActionManager<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | EnvironmentCacheStore | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | Persistence.EnvironmentCacheStore | R, E>,
 ) {
   const runStackedActionCommands = new Map<
     string,
@@ -458,7 +462,7 @@ export function createVcsActionManager<R, E>(
     const target = targetKey === null ? null : parseVcsActionTargetKey(targetKey);
     const stateAtom = targetKey === null ? EMPTY_VCS_ACTION_ATOM : vcsActionStateAtom(targetKey);
     const command = createRuntimeCommand<
-      EnvironmentRegistry | EnvironmentCacheStore | R,
+      EnvironmentRegistry | Persistence.EnvironmentCacheStore | R,
       E,
       RunVcsStackedActionInput,
       GitRunStackedActionResult,
@@ -467,15 +471,16 @@ export function createVcsActionManager<R, E>(
       label: `vcs-action:run-stacked:${commandKey}`,
       scheduler: vcsCommandScheduler,
       concurrency: { mode: "serial", key: () => commandKey },
-      execute: (input: RunVcsStackedActionInput, registry) => {
+      execute: Effect.fn("VcsAction.runStackedAction")(function* (
+        input: RunVcsStackedActionInput,
+        registry,
+      ) {
         if (target === null) {
-          return Effect.fail(
-            new VcsActionUnavailableError({
-              operation: "run_change_request",
-              environmentId: requestedTarget.environmentId,
-              cwd: requestedTarget.cwd,
-            }),
-          );
+          return yield* new VcsActionUnavailableError({
+            operation: "run_change_request",
+            environmentId: requestedTarget.environmentId,
+            cwd: requestedTarget.cwd,
+          });
         }
         const transportActionId = createVcsActionTransportId(target, input.actionId);
         registry.set(
@@ -495,46 +500,45 @@ export function createVcsActionManager<R, E>(
           ...(input.featureBranch ? { featureBranch: true } : {}),
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
           ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         };
-        return runInEnvironment(
-          target.environmentId,
-          Effect.gen(function* () {
-            const method =
-              input.onSshPasswordPrompt !== undefined &&
-              (yield* environmentConfig).environment.capabilities
-                .sourceControlSshPasswordPrompts === true
-                ? WS_METHODS.gitRunStackedActionWithPrompts
-                : WS_METHODS.gitRunStackedAction;
-            return yield* consumeVcsActionProgress(runStream(method, rpcInput), {
-              target,
-              transportActionId,
-              actionId: input.actionId,
-              action: input.action,
-              ...(input.onSshPasswordPrompt === undefined
-                ? {}
-                : {
-                    resolveSshPasswordPrompt: (request) =>
-                      resolveSshPasswordPrompt(request, input.onSshPasswordPrompt!),
-                  }),
-              onProgress: (event) =>
-                Effect.sync(() => {
-                  const current = registry.get(stateAtom);
-                  if (current.actionId !== input.actionId) {
-                    return;
-                  }
-                  registry.set(stateAtom, applyVcsActionProgressEvent(current, event));
-                  if (input.onProgress !== undefined) {
-                    try {
-                      input.onProgress(event);
-                    } catch {
-                      // Presentation callbacks must not fail the source-control operation.
-                    }
-                  }
-                }),
-            });
-          }),
+        const clearOwnedState = Effect.sync(() => {
+          const current = registry.get(stateAtom);
+          if (current.actionId === input.actionId) {
+            registry.set(stateAtom, EMPTY_VCS_ACTION_STATE);
+          }
+        });
+        return yield* consumeVcsActionProgress(
+          runStreamInEnvironment(
+            target.environmentId,
+            runStreamGuarded(WS_METHODS.gitRunStackedAction, rpcInput),
+          ),
+          {
+            target,
+            transportActionId,
+            actionId: input.actionId,
+            action: input.action,
+            onProgress: (event) =>
+              Effect.sync(() => {
+                const current = registry.get(stateAtom);
+                if (current.actionId !== input.actionId) {
+                  return;
+                }
+                registry.set(stateAtom, applyVcsActionProgressEvent(current, event));
+                if (input.onProgress !== undefined) {
+                  try {
+                    input.onProgress(event);
+                  } catch {}
+                }
+              }),
+          },
         ).pipe(
+          Effect.provideService(RpcPermissionGuard, {
+            authorize: (id, method, payload) =>
+              createCommandPermissions(runtime, method).authorize(registry, id, payload),
+          }),
           Effect.ensuring(invalidateCachedVcsRefs(registry, target)),
+          Effect.tap(() => clearOwnedState),
           Effect.tapError((error) =>
             Effect.sync(() => {
               const current = registry.get(stateAtom);
@@ -546,8 +550,9 @@ export function createVcsActionManager<R, E>(
               }
             }),
           ),
+          Effect.onInterrupt(() => clearOwnedState),
         );
-      },
+      }),
     });
     runStackedActionCommands.set(commandKey, command);
     return command;

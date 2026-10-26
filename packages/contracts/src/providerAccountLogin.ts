@@ -1,26 +1,8 @@
-/**
- * Provider account sign-in contracts.
- *
- * Drivers that can authenticate their CLI from inside T3 Code (Codex via its
- * app-server login routes, Claude via `claude setup-token`) advertise the
- * modes they support on the provider snapshot; clients start a login with
- * `server.loginProviderAccount` and render the streamed events. The flow is
- * interactive: the server owns the CLI process, the client owns the browser
- * and (for paste-back flows) the code entry.
- */
 import * as Schema from "effect/Schema";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
 
-/**
- * How the user proves account ownership.
- *
- * - `oauth` — browser flow against a callback server on the environment.
- *   Right when the browser runs on the same machine as the server.
- * - `deviceCode` — user enters a one-time code on the provider's site.
- *   Works when the client is remote from the environment.
- * - `apiKey` — non-interactive; the key is stored by the provider CLI.
- */
+// Device codes work across machines; OAuth callbacks require a reachable environment.
 export const ProviderAccountLoginMode = Schema.Literals(["oauth", "deviceCode", "apiKey"]);
 export type ProviderAccountLoginMode = typeof ProviderAccountLoginMode.Type;
 

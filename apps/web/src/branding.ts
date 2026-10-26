@@ -43,3 +43,5 @@ export const APP_DISPLAY_VERSION = formatDisplayedAppVersion({
   version: APP_VERSION,
   stripNightlyPrerelease: !APP_HAS_UPDATE_TRACKS,
 });
+
+export const DESKTOP_DOWNLOAD_URL = "https://t3.codes/download";

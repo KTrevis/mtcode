@@ -1,4 +1,4 @@
-import type { OrchestrationThreadGoalShell } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderGoal } from "@t3tools/contracts";
 import {
   formatGoalChipPrefix,
   GOAL_PAUSE_HINT,
@@ -8,7 +8,7 @@ import {
 } from "@t3tools/shared/composerTrigger";
 import { Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 
 export type { GoalChipAction };
 
@@ -16,7 +16,7 @@ function goalStatusClass(status: string): string {
   if (status === "blocked") {
     return "text-red-600 dark:text-red-400";
   }
-  if (status === "usageLimited") {
+  if (status === "usage_limited") {
     return "text-amber-700 dark:text-amber-400";
   }
   return "text-foreground-muted";
@@ -26,7 +26,7 @@ export function GoalChip({
   goal,
   onAction,
 }: {
-  readonly goal: OrchestrationThreadGoalShell | null | undefined;
+  readonly goal: OrchestrationV2ProviderGoal | null | undefined;
   readonly onAction?: ((action: GoalChipAction) => void) | undefined;
 }) {
   if (goal == null) {
@@ -37,13 +37,13 @@ export function GoalChip({
   const actions = onAction == null ? [] : goalChipActions(goal.status);
 
   return (
-    <View className="px-4 pb-2" accessibilityLabel={`${chipPrefix}: ${goal.objectivePreview}`}>
+    <View className="px-4 pb-2" accessibilityLabel={`${chipPrefix}: ${goal.objective}`}>
       <View className="self-start max-w-[80%] rounded-md border border-border bg-card px-2 py-1">
         <Text className="text-xs text-foreground-muted" numberOfLines={1}>
           <Text className={`text-xs font-t3-medium ${goalStatusClass(goal.status)}`}>
             {chipPrefix}:
           </Text>
-          {`  ${goal.objectivePreview}`}
+          {`  ${goal.objective}`}
         </Text>
         {actions.length > 0 ? (
           <View className="mt-1 flex-row flex-wrap gap-x-3 gap-y-1">

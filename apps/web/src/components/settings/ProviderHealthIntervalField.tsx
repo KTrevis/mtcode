@@ -20,13 +20,6 @@ interface ProviderHealthIntervalFieldProps {
   readonly onCommit: (interval: Duration.Duration) => void;
 }
 
-/**
- * Keeps typing local and normalizes on commit (blur, Enter, or a stepper
- * click), so a partially typed value below the minimum is never persisted as
- * "disabled" mid-edit. An empty field reverts to the saved value instead of
- * committing, which also keeps a stepper press on a cleared field to a single
- * commit.
- */
 export function ProviderHealthIntervalField({
   valueSeconds,
   label,

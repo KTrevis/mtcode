@@ -6,8 +6,7 @@ import {
   type ProjectIconColor,
   type ProjectIconOverride,
 } from "@t3tools/contracts";
-import { DynamicIcon, type IconName } from "lucide-react/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useState } from "react";
 import {
   filterProjectIconNames,
   firstEmoji,
@@ -16,6 +15,7 @@ import {
   projectIconColorClassName,
 } from "../../projectIconOptions";
 import { cn } from "~/lib/utils";
+import { lucideIconByName } from "../../lib/lucideIconByName";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -30,8 +30,13 @@ import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 
-const DEFAULT_ICON: IconName = "folder-code";
+const DEFAULT_ICON = "folder-code";
 const isMonogramText = Schema.is(ProjectMonogramText);
+
+function PickerIcon({ name }: { name: string }) {
+  const icon = lucideIconByName(name);
+  return icon ? createElement(icon, { className: "size-5" }) : null;
+}
 
 function iconLabel(name: string): string {
   return name
@@ -53,10 +58,36 @@ export function ProjectIconPickerDialog({
   readonly onOpenChange: (open: boolean) => void;
   readonly onSelect: (icon: ProjectIconOverride) => void;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPopup className="w-full sm:w-[32rem]">
+        {/* The popup mounts per open, so the draft below starts from `current` each time. */}
+        <ProjectIconPickerBody
+          current={current}
+          projectName={projectName}
+          onClose={() => onOpenChange(false)}
+          onSelect={onSelect}
+        />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function ProjectIconPickerBody({
+  current,
+  projectName,
+  onClose,
+  onSelect,
+}: {
+  readonly current: ProjectIconOverride | null;
+  readonly projectName: string;
+  readonly onClose: () => void;
+  readonly onSelect: (icon: ProjectIconOverride) => void;
+}) {
   const automatic = deriveProjectIdentity(projectName);
   const [mode, setMode] = useState<ProjectIconOverride["kind"]>(current?.kind ?? "lucide");
-  const [iconName, setIconName] = useState<IconName>(
-    current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON,
+  const [iconName, setIconName] = useState<string>(
+    current?.kind === "lucide" ? current.name : DEFAULT_ICON,
   );
   const [color, setColor] = useState<ProjectIconColor>(
     current && current.kind !== "emoji" ? current.color : automatic.color,
@@ -67,22 +98,8 @@ export function ProjectIconPickerDialog({
   const [emoji, setEmoji] = useState(current?.kind === "emoji" ? current.emoji : "💻");
   const [query, setQuery] = useState("");
   const [customEmoji, setCustomEmoji] = useState("");
-  const previousOpenRef = useRef(false);
 
-  useEffect(() => {
-    if (open && !previousOpenRef.current) {
-      setMode(current?.kind ?? "lucide");
-      setIconName(current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON);
-      setColor(current && current.kind !== "emoji" ? current.color : automatic.color);
-      setLetters(current?.kind === "monogram" ? current.text : automatic.monogram);
-      setEmoji(current?.kind === "emoji" ? current.emoji : "💻");
-      setQuery("");
-      setCustomEmoji("");
-    }
-    previousOpenRef.current = open;
-  }, [current, open, automatic.color, automatic.monogram]);
-
-  const icons = useMemo(() => filterProjectIconNames(query), [query]);
+  const icons = filterProjectIconNames(query);
   const selectedColorClassName = projectIconColorClassName(color);
   const monogram = letters.normalize("NFKC").trim().toUpperCase();
   const validMonogram = isMonogramText(monogram);
@@ -95,17 +112,17 @@ export function ProjectIconPickerDialog({
           ? { kind: "lucide", name: iconName, color }
           : { kind: "emoji", emoji },
     );
-    onOpenChange(false);
+    onClose();
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="w-full sm:w-[32rem]">
-        <DialogHeader>
-          <DialogTitle>Choose project icon</DialogTitle>
-          <DialogDescription>Choose an icon, emoji, or monogram.</DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="flex min-h-0 flex-col">
+    <>
+      <DialogHeader>
+        <DialogTitle>Choose project icon</DialogTitle>
+        <DialogDescription>Choose an icon, emoji, or monogram.</DialogDescription>
+      </DialogHeader>
+      <DialogPanel>
+        <div className="flex min-h-0 flex-col">
           <ToggleGroup
             aria-label="Icon type"
             variant="segmented"
@@ -131,7 +148,7 @@ export function ProjectIconPickerDialog({
                     aria-label={option.label}
                     aria-pressed={color === option.value}
                     className={cn(
-                      "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       color === option.value && "border-foreground/64",
                     )}
                     onClick={() => setColor(option.value)}
@@ -161,13 +178,13 @@ export function ProjectIconPickerDialog({
                       aria-label={iconLabel(name)}
                       aria-pressed={iconName === name}
                       className={cn(
-                        "flex aspect-square items-center justify-center rounded-md border border-transparent outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex aspect-square items-center justify-center rounded-md border border-transparent outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         iconName === name && "border-border bg-accent",
                         selectedColorClassName,
                       )}
                       onClick={() => setIconName(name)}
                     >
-                      <DynamicIcon name={name} className="size-5" />
+                      <PickerIcon name={name} />
                     </button>
                   ))}
                 </div>
@@ -211,7 +228,7 @@ export function ProjectIconPickerDialog({
                       aria-label={option.label}
                       aria-pressed={emoji === option.emoji}
                       className={cn(
-                        "flex aspect-square items-center justify-center rounded-md border border-transparent text-xl outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex aspect-square items-center justify-center rounded-md border border-transparent text-xl outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         emoji === option.emoji && "border-border bg-accent",
                       )}
                       onClick={() => setEmoji(option.emoji)}
@@ -239,16 +256,16 @@ export function ProjectIconPickerDialog({
               </div>
             </>
           )}
-        </DialogPanel>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={mode === "monogram" && !validMonogram}>
-            Save icon
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+        </div>
+      </DialogPanel>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={save} disabled={mode === "monogram" && !validMonogram}>
+          Save icon
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

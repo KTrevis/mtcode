@@ -42,6 +42,5 @@ describe("external pi catalog reducer", () => {
     });
 
     expect(merged?.threads).toEqual([]);
-    expect(merged?.externalOmittedThreadCount).toBe(0);
   });
 });

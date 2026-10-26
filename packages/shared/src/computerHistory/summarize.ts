@@ -38,7 +38,7 @@ function collectApplications(events: ReadonlyArray<ComputerHistoryEvent>): strin
 
 function eventLabel(event: ComputerHistoryEvent): string {
   const app = event.app?.name ?? event.app?.bundleIdentifier ?? "Unknown app";
-  const window = event.window?.title ? ` — ${event.window.title}` : "";
+  const window = event.window?.title ? `. ${event.window.title}` : "";
   const ax =
     event.ax?.description || event.ax?.value
       ? ` (${[event.ax.description, event.ax.value].filter(Boolean).join(": ")})`

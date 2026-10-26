@@ -88,19 +88,6 @@ export function splitInlineVisualizations(text: string): InlineVisualizationPart
   return parts;
 }
 
-export function textReferencesInlineVisualizationPath(text: string, path: string): boolean {
-  return splitInlineVisualizations(text).some(
-    (part) => part.kind === "visualization" && part.path === path,
-  );
-}
-
-export function stripInlineVisualizations(text: string): string {
-  return splitInlineVisualizations(text)
-    .filter((part) => part.kind === "markdown")
-    .map((part) => part.text)
-    .join("\n");
-}
-
 function isSafeAbsoluteHtmlPath(path: string): boolean {
   const normalized = path.replace(/\\/gu, "/");
   return (

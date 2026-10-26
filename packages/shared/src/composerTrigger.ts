@@ -28,7 +28,7 @@ export const BUILT_IN_GOAL_SLASH_COMMANDS = [
   {
     command: "goal pause",
     label: "/goal pause",
-    description: "Pause — prevent the next Continuation",
+    description: "Pause. prevent the next Continuation",
   },
   {
     command: "goal resume",
@@ -187,14 +187,6 @@ export function formatGoalActivityLabel(kind: string): string | null {
   }
 }
 
-export function isBuiltInGoalSlashCommand(command: string): boolean {
-  return command === "goal" || command.startsWith("goal ");
-}
-
-export function composerTextForGoalSlashCommand(command: string): string {
-  return command === "goal" ? "/goal " : `/${command}`;
-}
-
 export function truncateGoalObjectivePreview(objective: string): string {
   if (objective.length <= GOAL_OBJECTIVE_PREVIEW_MAX_CHARS) {
     return objective;
@@ -233,7 +225,7 @@ export interface ComposerThreadReference {
   readonly title: string;
 }
 
-export const COMPOSER_THREAD_REFERENCE_SCHEME = "t3-thread:";
+const COMPOSER_THREAD_REFERENCE_SCHEME = "t3-thread:";
 
 export function parseComposerThreadLink(
   destination: string,
@@ -277,13 +269,29 @@ function isWhitespace(char: string): boolean {
   return char === " " || char === "\n" || char === "\t" || char === "\r";
 }
 
+/** A second slash makes the whole word a path, even when the caret precedes that slash. */
+export function isPathWord(
+  text: string,
+  wordStart: number,
+  cursor: number,
+  isWhitespaceChar: (char: string) => boolean,
+): boolean {
+  let wordEnd = cursor;
+  while (wordEnd < text.length && !isWhitespaceChar(text[wordEnd] ?? "")) {
+    wordEnd += 1;
+  }
+  return text.slice(wordStart + 1, wordEnd).includes("/");
+}
+
 /**
- * Detect an active trigger (@path, $skill, /command) at the cursor position.
- *
- * Accepts an optional `isWhitespaceChar` override so callers with inline
- * placeholder characters (e.g. terminal context chips on web) can treat
- * those as token boundaries.
+ * `$5`, `€9.99` and `$10k` are money, not skills. Matches the amounts the inline skill
+ * token regexes already refuse to render as skills, plus the punctuation prose puts after
+ * one (`$10k.`, `($5)`).
  */
+export function isCurrencyAmountQuery(query: string): boolean {
+  return /^\.?[0-9][0-9,._]*(?:[kKmMbBtT]|[eE][0-9]+)?[.,;:!?)]*$/.test(query);
+}
+
 export function detectComposerTrigger(
   text: string,
   cursorInput: number,
@@ -295,6 +303,9 @@ export function detectComposerTrigger(
 
   if (linePrefix.startsWith("/")) {
     const commandMatch = /^\/(\S*)$/.exec(linePrefix);
+    if (commandMatch && isPathWord(text, lineStart, cursor, isWhitespaceChar ?? isWhitespace)) {
+      return null;
+    }
     if (commandMatch) {
       const commandQuery = commandMatch[1] ?? "";
       if (commandQuery.toLowerCase() === "model") {
@@ -332,33 +343,30 @@ export function detectComposerTrigger(
   const tokenStart = tokenIdx + 1;
 
   const token = text.slice(tokenStart, cursor);
-  const skillPrefix = /^\p{Sc}/u.exec(token);
-  if (skillPrefix) {
+  if (token.startsWith("/")) {
+    if (isPathWord(text, tokenStart, cursor, wsCheck)) return null;
     return {
-      kind: "skill",
-      query: token.slice(skillPrefix[0].length),
-      rangeStart: tokenStart,
-      rangeEnd: cursor,
-    };
-  }
-  // Upstream's pull-request picker and this fork's cross-thread reference
-  // picker both hang off `#`. A purely numeric ref (`#123`) is a pull request;
-  // anything else (including a bare `#`) opens the thread picker.
-  const pullRequestMatch = /^#(\p{N}+)$/u.exec(token);
-  if (pullRequestMatch)
-    return {
-      kind: "pull-request",
-      query: pullRequestMatch[1] ?? "",
-      rangeStart: tokenStart,
-      rangeEnd: cursor,
-    };
-  if (token.startsWith("#")) {
-    return {
-      kind: "thread",
+      kind: "slash-command",
       query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
     };
+  }
+  const pullRequestMatch = /^#(\p{N}+)$/u.exec(token);
+  if (pullRequestMatch)
+    return {
+      kind: "pull-request",
+      query: pullRequestMatch[1]!,
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
+  if (token.startsWith("#"))
+    return { kind: "thread", query: token.slice(1), rangeStart: tokenStart, rangeEnd: cursor };
+  const skillPrefix = /^\p{Sc}/u.exec(token);
+  if (skillPrefix) {
+    const query = token.slice(skillPrefix[0].length);
+    if (isCurrencyAmountQuery(query)) return null;
+    return { kind: "skill", query, rangeStart: tokenStart, rangeEnd: cursor };
   }
   if (!token.startsWith("@")) {
     return null;

@@ -1,5 +1,5 @@
 import type { SourceControlSshPasswordPromptRequest } from "@t3tools/contracts";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "./ui/button";
 import {
@@ -30,17 +30,14 @@ export function useSshPasswordRequest() {
     readonly resolve: (password: string | null) => void;
   } | null>(null);
 
-  const request = useCallback(
-    (nextPrompt: SourceControlSshPasswordPromptRequest) =>
-      new Promise<string | null>((resolve) => {
-        pendingRef.current?.resolve(null);
-        pendingRef.current = { requestId: nextPrompt.requestId, resolve };
-        setPrompt(nextPrompt);
-      }),
-    [],
-  );
+  const request = (nextPrompt: SourceControlSshPasswordPromptRequest) =>
+    new Promise<string | null>((resolve) => {
+      pendingRef.current?.resolve(null);
+      pendingRef.current = { requestId: nextPrompt.requestId, resolve };
+      setPrompt(nextPrompt);
+    });
 
-  const resolve = useCallback((requestId: string, password: string | null) => {
+  const resolve = (requestId: string, password: string | null) => {
     const pending = pendingRef.current;
     if (pending?.requestId !== requestId) {
       return;
@@ -48,15 +45,16 @@ export function useSshPasswordRequest() {
     pendingRef.current = null;
     setPrompt(null);
     pending.resolve(password);
-  }, []);
+  };
 
-  const cancel = useCallback(() => {
+  const cancel = () => {
     const pending = pendingRef.current;
     pendingRef.current = null;
     setPrompt(null);
     pending?.resolve(null);
-  }, []);
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize pending SSH prompts with cancellation, DOM focus, and expiration.
   useEffect(() => () => pendingRef.current?.resolve(null), []);
 
   return { prompt, request, resolve, cancel } as const;
@@ -94,6 +92,7 @@ export function SshPasswordRequestDialog({
   const isRespondingRef = useRef(false);
   const formId = useId();
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize pending SSH prompts with cancellation, DOM focus, and expiration.
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       inputRef.current?.focus();
@@ -104,6 +103,7 @@ export function SshPasswordRequestDialog({
     };
   }, []);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize pending SSH prompts with cancellation, DOM focus, and expiration.
   useEffect(() => {
     const interval = window.setInterval(() => {
       setNow(Date.now());
@@ -180,7 +180,7 @@ export function SshPasswordRequestDialog({
             passed to the SSH process for this attempt and is not saved by ${APP_DISPLAY_NAME}.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-3" scrollFade={false}>
+        <DialogPanel scrollFade={false}>
           <form
             className="space-y-3"
             id={formId}

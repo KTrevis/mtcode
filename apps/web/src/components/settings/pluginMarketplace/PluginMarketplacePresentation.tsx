@@ -20,7 +20,7 @@ const HARNESS_ICONS: Readonly<Record<MarketplaceHarnessId, Icon>> = {
 
 const FALLBACK_LOGO_STYLES = [
   "bg-blue-500/16 text-blue-700 dark:text-blue-300",
-  "bg-emerald-500/16 text-emerald-700 dark:text-emerald-300",
+  "bg-success/16 text-emerald-700 dark:text-emerald-300",
   "bg-violet-500/16 text-violet-700 dark:text-violet-300",
   "bg-amber-500/16 text-amber-700 dark:text-amber-300",
   "bg-rose-500/16 text-rose-700 dark:text-rose-300",
@@ -118,6 +118,7 @@ export function PluginLogo({
     readonly pluginId: string;
     readonly sources: ReadonlyArray<string>;
   } | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- Read a local plugin logo from the host when its catalog entry becomes visible.
   useEffect(() => {
     if (!plugin.hasLocalLogo || plugin.logoDataUrl) return;
     let active = true;
@@ -218,10 +219,10 @@ export function HarnessSupportBadges({
                   role="img"
                   aria-label={label}
                   className={cn(
-                    "overflow-visible bg-background/68 text-muted-foreground",
+                    "overflow-visible  ",
                     compact
-                      ? "size-5 min-w-5 px-0 sm:size-5 sm:h-5 sm:min-w-5"
-                      : "h-auto min-h-5 py-1 pr-2 pl-1 sm:h-auto",
+                      ? "size-5 min-w-5  sm:size-5 sm:h-5 sm:min-w-5"
+                      : "h-auto min-h-5    sm:h-auto",
                   )}
                 />
               }

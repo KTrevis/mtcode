@@ -7,9 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type WheelEvent as ReactWheelEvent,
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -79,14 +77,12 @@ function ServerThreadTabItem({
 }) {
   const itemRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const threadRef = useMemo(
-    () => scopeThreadRef(tab.environmentId, tab.threadId),
-    [tab.environmentId, tab.threadId],
-  );
+  const threadRef = scopeThreadRef(tab.environmentId, tab.threadId);
   const shell = useThreadShell(threadRef);
   const title = shell?.title || tab.title || "Thread";
   const fullLabel = tab.projectName ? `${tab.projectName} · ${title}` : title;
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Keep the active tab visible in the horizontal DOM scroller.
   useEffect(() => {
     if (isActive && itemRef.current) {
       itemRef.current.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -95,7 +91,7 @@ function ServerThreadTabItem({
 
   const isRenaming = isActive && renamingTitle !== null && renamingTitle !== undefined;
 
-  const handleActivationClick = useCallback(() => {
+  const handleActivationClick = () => {
     if (isActive) {
       if (triggerRef.current && onOpenThreadMenu) {
         onOpenThreadMenu(triggerRef.current.getBoundingClientRect());
@@ -103,7 +99,7 @@ function ServerThreadTabItem({
     } else {
       onActivate();
     }
-  }, [isActive, onActivate, onOpenThreadMenu]);
+  };
 
   return (
     <div
@@ -149,7 +145,7 @@ function ServerThreadTabItem({
           aria-label={fullLabel}
           aria-haspopup={isActive ? "menu" : undefined}
           onClick={handleActivationClick}
-          className="group/tab-trigger flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/tab-trigger flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <ProjectFavicon
             project={{
@@ -174,20 +170,24 @@ function ServerThreadTabItem({
         </button>
       )}
 
-      <Button
-        size="icon-micro"
-        variant="ghost-muted"
-        aria-label={`Close ${title}`}
-        onClick={onClose}
+      <span
         className={cn(
-          "shrink-0",
+          "inline-flex",
           isActive
             ? "opacity-60 hover:opacity-100"
-            : "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
+            : "opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100",
         )}
       >
-        <X className="size-3" />
-      </Button>
+        <Button
+          size="icon-micro"
+          variant="ghost-muted"
+          aria-label={`Close ${title}`}
+          onClick={onClose}
+          className="shrink-0"
+        >
+          <X className="size-3" />
+        </Button>
+      </span>
     </div>
   );
 }
@@ -225,6 +225,7 @@ export function WorkspaceTabs({
 
   const isDraftActive = !activeThreadId || Boolean(draftId);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize foreground thread navigation into the persistent tab history.
   useEffect(() => {
     if (!activeThreadId) return;
     openTab({
@@ -247,7 +248,7 @@ export function WorkspaceTabs({
     openTab,
   ]);
 
-  const effectiveTabs = useMemo(() => {
+  const effectiveTabs = (() => {
     if (
       !activeThreadId ||
       tabs.some(
@@ -267,193 +268,155 @@ export function WorkspaceTabs({
       faviconPath: activeProjectFaviconPath,
     };
     return [currentTab, ...tabs];
-  }, [
-    activeProjectCwd,
-    activeProjectFaviconPath,
-    activeProjectName,
-    activeThreadEnvironmentId,
-    activeThreadId,
-    activeThreadTitle,
-    tabs,
-  ]);
+  })();
 
-  const handleNavigateToTab = useCallback(
-    (tab: WorkspaceTab) => {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: { environmentId: tab.environmentId, threadId: tab.threadId },
-      });
-    },
-    [navigate],
-  );
+  const handleNavigateToTab = (tab: WorkspaceTab) => {
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: tab.environmentId, threadId: tab.threadId },
+    });
+  };
 
-  const handleCloseTab = useCallback(
-    (tab: WorkspaceTab, event?: ReactMouseEvent) => {
-      event?.stopPropagation();
-      event?.preventDefault();
+  const handleCloseTab = (tab: WorkspaceTab, event?: ReactMouseEvent) => {
+    event?.stopPropagation();
+    event?.preventDefault();
 
-      const nextActive = closeTab(tab.key);
-      if (tab.key === currentTabKey) {
-        if (nextActive) {
-          handleNavigateToTab(nextActive);
-        } else {
-          onNewTab();
-        }
+    const nextActive = closeTab(tab.key);
+    if (tab.key === currentTabKey) {
+      if (nextActive) {
+        handleNavigateToTab(nextActive);
+      } else {
+        onNewTab();
       }
-    },
-    [closeTab, currentTabKey, handleNavigateToTab, onNewTab],
-  );
+    }
+  };
 
-  const handleTabAuxClick = useCallback(
-    (event: ReactMouseEvent, tab: WorkspaceTab) => {
-      if (event.button === 1) {
-        event.preventDefault();
-        event.stopPropagation();
-        handleCloseTab(tab);
-      }
-    },
-    [handleCloseTab],
-  );
-
-  const handleTabContextMenu = useCallback(
-    async (event: ReactMouseEvent, tab: WorkspaceTab) => {
-      const api = readLocalApi();
-      if (!api) return;
-
+  const handleTabAuxClick = (event: ReactMouseEvent, tab: WorkspaceTab) => {
+    if (event.button === 1) {
       event.preventDefault();
       event.stopPropagation();
+      handleCloseTab(tab);
+    }
+  };
 
-      const tabIndex = effectiveTabs.findIndex((t) => t.key === tab.key);
-      if (tabIndex < 0) return;
+  const handleTabContextMenu = async (event: ReactMouseEvent, tab: WorkspaceTab) => {
+    const api = readLocalApi();
+    if (!api) return;
 
-      const items = [
-        { id: "close", label: "Close" },
-        {
-          id: "close-others",
-          label: "Close others",
-          disabled: effectiveTabs.length <= 1,
-        },
-        {
-          id: "close-to-right",
-          label: "Close to the right",
-          disabled: tabIndex >= effectiveTabs.length - 1,
-        },
-        {
-          id: "close-all",
-          label: "Close all",
-          disabled: effectiveTabs.length === 0,
-        },
-        {
-          id: "toggle-pin",
-          label: tab.pinned ? "Unpin tab" : "Pin tab",
-        },
-      ];
+    event.preventDefault();
+    event.stopPropagation();
 
-      const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
-      switch (action) {
-        case "close":
-          handleCloseTab(tab);
-          break;
-        case "close-others": {
-          closeOtherTabs(tab.key);
-          const remainingTabs = useWorkspaceTabsStore.getState().tabs;
-          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
-          if (!isCurrentStillOpen) {
-            handleNavigateToTab(tab);
-          }
-          break;
+    const tabIndex = effectiveTabs.findIndex((t) => t.key === tab.key);
+    if (tabIndex < 0) return;
+
+    const items = [
+      { id: "close", label: "Close" },
+      {
+        id: "close-others",
+        label: "Close others",
+        disabled: effectiveTabs.length <= 1,
+      },
+      {
+        id: "close-to-right",
+        label: "Close to the right",
+        disabled: tabIndex >= effectiveTabs.length - 1,
+      },
+      {
+        id: "close-all",
+        label: "Close all",
+        disabled: effectiveTabs.length === 0,
+      },
+      {
+        id: "toggle-pin",
+        label: tab.pinned ? "Unpin tab" : "Pin tab",
+      },
+    ];
+
+    const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
+    switch (action) {
+      case "close":
+        handleCloseTab(tab);
+        break;
+      case "close-others": {
+        closeOtherTabs(tab.key);
+        const remainingTabs = useWorkspaceTabsStore.getState().tabs;
+        const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+        if (!isCurrentStillOpen) {
+          handleNavigateToTab(tab);
         }
-        case "close-to-right": {
-          closeTabsToRight(tab.key);
-          const remainingTabs = useWorkspaceTabsStore.getState().tabs;
-          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
-          if (!isCurrentStillOpen) {
-            handleNavigateToTab(tab);
-          }
-          break;
-        }
-        case "close-all": {
-          closeAllTabs();
-          const { tabs: remainingTabs, activeTabKey } = useWorkspaceTabsStore.getState();
-          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
-          if (!isCurrentStillOpen) {
-            const nextActiveTab = remainingTabs.find((t) => t.key === activeTabKey);
-            if (nextActiveTab) {
-              handleNavigateToTab(nextActiveTab);
-            } else {
-              onNewTab();
-            }
-          }
-          break;
-        }
-        case "toggle-pin":
-          togglePinTab(tab.key);
-          break;
-        case null:
-          break;
+        break;
       }
-    },
-    [
-      closeAllTabs,
-      closeOtherTabs,
-      closeTabsToRight,
-      currentTabKey,
-      effectiveTabs,
-      handleCloseTab,
-      handleNavigateToTab,
-      onNewTab,
-      togglePinTab,
-    ],
-  );
+      case "close-to-right": {
+        closeTabsToRight(tab.key);
+        const remainingTabs = useWorkspaceTabsStore.getState().tabs;
+        const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+        if (!isCurrentStillOpen) {
+          handleNavigateToTab(tab);
+        }
+        break;
+      }
+      case "close-all": {
+        closeAllTabs();
+        const { tabs: remainingTabs, activeTabKey } = useWorkspaceTabsStore.getState();
+        const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+        if (!isCurrentStillOpen) {
+          const nextActiveTab = remainingTabs.find((t) => t.key === activeTabKey);
+          if (nextActiveTab) {
+            handleNavigateToTab(nextActiveTab);
+          } else {
+            onNewTab();
+          }
+        }
+        break;
+      }
+      case "toggle-pin":
+        togglePinTab(tab.key);
+        break;
+      case null:
+        break;
+    }
+  };
 
-  const handleDragStart = useCallback((e: ReactDragEvent, tabKey: string) => {
+  const handleDragStart = (e: ReactDragEvent, tabKey: string) => {
     e.dataTransfer.setData("text/plain", tabKey);
     e.dataTransfer.effectAllowed = "move";
     setDraggedKey(tabKey);
-  }, []);
+  };
 
-  const handleDragOver = useCallback((e: ReactDragEvent, tabKey: string) => {
+  const handleDragOver = (e: ReactDragEvent, tabKey: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setDragOverKey(tabKey);
-  }, []);
+  };
 
-  const handleDragLeave = useCallback((tabKey: string) => {
+  const handleDragLeave = (tabKey: string) => {
     setDragOverKey((prev) => (prev === tabKey ? null : prev));
-  }, []);
+  };
 
-  const handleDrop = useCallback(
-    (e: ReactDragEvent, targetKey: string) => {
-      e.preventDefault();
-      if (draggedKey && draggedKey !== targetKey) {
-        reorderTabs(draggedKey, targetKey);
-      }
-      setDraggedKey(null);
-      setDragOverKey(null);
-    },
-    [draggedKey, reorderTabs],
-  );
-
-  const handleDragEnd = useCallback(() => {
+  const handleDrop = (e: ReactDragEvent, targetKey: string) => {
+    e.preventDefault();
+    if (draggedKey && draggedKey !== targetKey) {
+      reorderTabs(draggedKey, targetKey);
+    }
     setDraggedKey(null);
     setDragOverKey(null);
-  }, []);
+  };
 
-  const handleWheel = useCallback((e: ReactWheelEvent<HTMLDivElement>) => {
+  const handleDragEnd = () => {
+    setDraggedKey(null);
+    setDragOverKey(null);
+  };
+
+  const handleWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
     if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
     const viewport = e.currentTarget.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (!viewport) return;
     viewport.scrollLeft += e.deltaY;
-  }, []);
+  };
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-workspace-tabs="">
-      <ScrollArea
-        hideScrollbars
-        scrollFade
-        className="min-w-0 flex-1 rounded-none"
-        data-workspace-tab-list=""
-      >
+      <ScrollArea hideScrollbars scrollFade className="min-w-0 flex-1 " data-workspace-tab-list="">
         <div
           onWheel={handleWheel}
           className="flex h-full w-max min-w-full items-center gap-1 py-0.5"
@@ -468,7 +431,7 @@ export function WorkspaceTabs({
                   data-tab-key="new-thread"
                   onClick={onNewTab}
                   className={cn(
-                    "group/tab relative flex h-7 max-w-40 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors duration-150 [-webkit-app-region:no-drag] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                    "group/tab relative flex h-7 max-w-40 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors duration-150 [-webkit-app-region:no-drag] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     isDraftActive
                       ? "border border-border/80 bg-accent text-foreground shadow-2xs font-medium"
                       : "border border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",

@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@t3tools/contracts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 
@@ -64,17 +65,7 @@ function commitFile(cwd: string, path: string, contents: string, message: string
   });
 }
 
-/**
- * An upstream repository with a change request open on it, and a fork of it that has moved on.
- *
- * `refs/pull/<n>/head` is written by hand because that is exactly what GitHub publishes and what
- * the pick fetches — a branch would not do, since a fork can only reach a change request through
- * that ref.
- *
- * The fetch source is found by matching a remote against `host/repository`, so the fixture spells
- * those two as the upstream checkout's own path: the service treats them as opaque names for a
- * repository, and a local path is what a remote pointing at this one normalizes to.
- */
+// GitHub exposes fork PR heads through refs/pull/<n>/head; local remote paths stand in for host/repository.
 function makeFixture(input: { readonly forkChange: string | null }) {
   return Effect.gen(function* () {
     const upstream = yield* makeTempDir("t3code-cherry-pick-upstream-");
@@ -106,7 +97,7 @@ function makeFixture(input: { readonly forkChange: string | null }) {
       fork,
       request: {
         cwd: fork,
-        provider: "github" as const,
+        provider: SourceControlProviderKind.make("github"),
         host: upstream.slice(0, upstream.length - repository.length - 1),
         repository,
         number: 7,
@@ -284,7 +275,7 @@ it.layer(TestLayer)("UpstreamTake", (it) => {
       const service = yield* cherryPickService;
 
       const failure = yield* service
-        .cherryPick({ ...fixture.request, provider: "bitbucket" })
+        .cherryPick({ ...fixture.request, provider: SourceControlProviderKind.make("bitbucket") })
         .pipe(Effect.flip);
 
       expect(failure.detail).toContain("does not publish");

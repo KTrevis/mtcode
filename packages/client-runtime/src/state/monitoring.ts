@@ -1,10 +1,13 @@
+import * as DateTime from "effect/DateTime";
 import {
   MonitoringMetadata,
-  MONITOR_TASK_TYPES,
-  type OrchestrationThreadActivity,
+  type OrchestrationV2PendingBackgroundTask,
+  type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+
+const MONITOR_TASK_TYPES = new Set(["monitor", "monitor_mcp", "local_bash", "shell"]);
 
 export interface MonitoringTask {
   readonly id: string;
@@ -13,14 +16,14 @@ export interface MonitoringTask {
   readonly command: string;
   readonly nextWakeAt?: string | undefined;
   readonly stoppable: boolean;
-  readonly startedAt: string;
+  readonly startedAt: string | null;
   readonly result?: { readonly at: string; readonly text: string };
 }
 
 const decodeMonitoringMetadata = Schema.decodeUnknownOption(MonitoringMetadata);
 
 export function formatMonitoringDuration(task: MonitoringTask, now: number): string {
-  return formatDuration(now - Date.parse(task.startedAt));
+  return task.startedAt === null ? "Unknown" : formatDuration(now - Date.parse(task.startedAt));
 }
 
 export const monitoringCategoryLabel = {
@@ -31,7 +34,12 @@ export const monitoringCategoryLabel = {
 
 /** Fold the task journal into current watches, excluding finished tasks. */
 export function deriveMonitoringTasks(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  activities: ReadonlyArray<{
+    readonly kind: string;
+    readonly payload: unknown;
+    readonly createdAt: string;
+    readonly summary: string;
+  }>,
 ): MonitoringTask[] {
   const tasks = new Map<string, MonitoringTask>();
   for (const activity of [...activities].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
@@ -89,4 +97,34 @@ export function deriveMonitoringTasks(
     }
   }
   return Array.from(tasks.values());
+}
+
+export function deriveProjectionMonitoringTasks(
+  tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>,
+  turnItems: ReadonlyArray<OrchestrationV2TurnItem> = [],
+): MonitoringTask[] {
+  const itemsById = new Map(turnItems.map((item) => [String(item.id), item]));
+  return tasks
+    .filter((task) => task.kind !== "subagent" && task.parentTaskId === undefined)
+    .map((task) => {
+      const item = itemsById.get(task.taskId);
+      const startedAt = task.startedAt ?? item?.startedAt;
+      const category =
+        task.category === "scheduled" || task.category === "event" || task.category === "process"
+          ? task.category
+          : task.kind === "monitor"
+            ? "event"
+            : "process";
+      return {
+        id: task.taskId,
+        label: task.label ?? task.description ?? item?.title ?? task.taskId,
+        category,
+        command:
+          task.command ??
+          (item?.type === "command_execution" ? item.input : (task.description ?? task.taskId)),
+        startedAt: startedAt == null ? null : DateTime.formatIso(startedAt),
+        stoppable: task.stoppable ?? (task.kind === "command" || task.kind === "monitor"),
+        ...(task.nextWakeAt == null ? {} : { nextWakeAt: DateTime.formatIso(task.nextWakeAt) }),
+      };
+    });
 }

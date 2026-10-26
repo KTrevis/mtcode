@@ -1,3 +1,7 @@
+import type {
+  PiCommand as ClientOrchestrationCommand,
+  PiThreadStreamItem as OrchestrationThreadStreamItem,
+} from "./PiThreadModel.ts";
 import {
   CommandId,
   ComposerContextId,
@@ -6,10 +10,9 @@ import {
   PiNativeSessionKey,
   ProjectId,
   ThreadId,
-  type ClientOrchestrationCommand,
   type OrchestrationProjectShell,
-  type OrchestrationThreadStreamItem,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
+  type OrchestrationV2Command,
 } from "@t3tools/contracts";
 import { it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -20,10 +23,10 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 import { describe, expect } from "vite-plus/test";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
 import type { PiExternalLifecycleOverride } from "../persistence/Services/PiExternalLifecycleOverrides.ts";
 import { PiExternalLifecycleOverrideRepository } from "../persistence/Services/PiExternalLifecycleOverrides.ts";
 import {
@@ -74,124 +77,164 @@ const takeoverTurn = (externalResume?: "takeover", streamingBehavior?: "steer" |
     threadId: takeoverRecord.threadId,
     message: {
       messageId: MessageId.make("takeover-message"),
-      role: "user",
       text: "continue here",
       attachments: [],
     },
-    runtimeMode: "full-access",
-    interactionMode: "default",
     ...(externalResume === undefined ? {} : { externalResume }),
     ...(streamingBehavior === undefined ? {} : { streamingBehavior }),
-    createdAt: "2026-08-06T00:02:00.000Z",
   }) satisfies Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.start" }>;
 
 describe("PiExternalThreadSource hardening", () => {
-  for (const mode of ["unconfirmed", "takeover", "send", "steer", "followUp"] as const) {
-    it.effect(
-      `projects structured context for native ${mode} without changing admission identity`,
-      () =>
-        Effect.gen(function* () {
-          const commands: unknown[] = [];
-          const runtime = {
-            runtimeId: PiNativeRuntimeId.make("runtime-1"),
-            sessionFile: takeoverRecord.canonicalFile,
-            writerKind: "rpc",
-            status: mode === "send" ? "idle" : "streaming",
-            sequence: 1,
-          } satisfies SupervisorRuntimeState;
-          const dependencies = Layer.mergeAll(
-            Layer.mock(SessionCatalog)({
-              list: () => Effect.succeed([takeoverRecord]),
-              omittedCount: () => Effect.succeed(0),
-              read: () => Effect.succeed({ record: takeoverRecord, entries: [] }),
-            }),
-            Layer.mock(SupervisorClient)({
-              list: () =>
-                Effect.succeed(mode === "takeover" || mode === "unconfirmed" ? [] : [runtime]),
-              probeCapabilities: () => Effect.succeed({ guardedResume: GUARDED_RESUME_CAPABILITY }),
-              subscribe: () => Stream.empty,
-              dispatch: (command) => {
-                commands.push(command);
-                return Effect.succeed({
-                  commandId: CommandId.make("takeover-command"),
-                  status: "completed",
-                });
-              },
-            }),
-            Layer.mock(ProjectionSnapshotQuery)({
-              getShellSnapshot: () =>
-                Effect.succeed({
-                  snapshotSequence: 0,
-                  projects: [],
-                  threads: [],
-                  updatedAt: takeoverRecord.updatedAt,
-                }),
-            }),
-            Layer.mock(PiExternalLifecycleOverrideRepository)({
-              list: () => Effect.succeed([]),
-            }),
-          );
-          const turn = takeoverTurn(
-            mode === "takeover" ? "takeover" : undefined,
-            mode === "steer" || mode === "followUp" ? mode : undefined,
-          );
-          const command = {
-            ...turn,
-            message: {
-              ...turn.message,
-              text: "Inspect [build](t3-context://v1/terminal/build)",
-              context: {
-                version: 1,
-                records: [
-                  {
-                    version: 1,
-                    kind: "terminal",
-                    contextId: ComposerContextId.make("build"),
-                    label: "build",
-                    terminalId: "terminal-1",
-                    terminalLabel: "Build",
-                    lineStart: 7,
-                    lineEnd: 7,
-                    text: "compiled successfully",
-                  },
-                ],
-              },
-            },
-          } satisfies ClientOrchestrationCommand;
-          yield* Effect.gen(function* () {
-            const source = yield* PiExternalThreadSource;
-            if (mode === "unconfirmed") {
-              expect(yield* source.dispatch(command).pipe(Effect.flip)).toMatchObject({
-                code: "read_only",
-                message: expect.stringContaining("another host"),
+  it.effect.each(["unconfirmed", "takeover", "send", "steer", "followUp"] as const)(
+    "projects structured context for native %s without changing admission identity",
+    (mode) =>
+      Effect.gen(function* () {
+        const commands: unknown[] = [];
+        const runtime = {
+          runtimeId: PiNativeRuntimeId.make("runtime-1"),
+          sessionFile: takeoverRecord.canonicalFile,
+          writerKind: "rpc",
+          status: mode === "send" ? "idle" : "streaming",
+          sequence: 1,
+        } satisfies SupervisorRuntimeState;
+        const dependencies = Layer.mergeAll(
+          Layer.mock(SessionCatalog)({
+            list: () => Effect.succeed([takeoverRecord]),
+            omittedCount: () => Effect.succeed(0),
+            read: () => Effect.succeed({ record: takeoverRecord, entries: [] }),
+          }),
+          Layer.mock(SupervisorClient)({
+            list: () =>
+              Effect.succeed(mode === "takeover" || mode === "unconfirmed" ? [] : [runtime]),
+            probeCapabilities: () => Effect.succeed({ guardedResume: GUARDED_RESUME_CAPABILITY }),
+            subscribe: () => Stream.empty,
+            dispatch: (command) => {
+              commands.push(command);
+              return Effect.succeed({
+                commandId: CommandId.make("takeover-command"),
+                status: "completed",
               });
-              return;
-            }
-            yield* source.dispatch(command);
-          }).pipe(
-            Effect.provide(PiExternalThreadSource.layerTest.pipe(Layer.provide(dependencies))),
-          );
+            },
+          }),
+          Layer.mock(ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+          Layer.mock(ProjectionStoreV2)({
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                schemaVersion: 2,
+                archivedThreads: [],
+                threads: [],
+                updatedAt: takeoverRecord.updatedAt,
+              }),
+          }),
+          Layer.mock(PiExternalLifecycleOverrideRepository)({
+            list: () => Effect.succeed([]),
+          }),
+        );
+        const turn = takeoverTurn(
+          mode === "takeover" ? "takeover" : undefined,
+          mode === "steer" || mode === "followUp" ? mode : undefined,
+        );
+        const command = {
+          ...turn,
+          message: {
+            ...turn.message,
+            text: "Inspect [build](t3-context://v1/terminal/build)",
+            context: {
+              version: 1,
+              records: [
+                {
+                  version: 1,
+                  kind: "terminal",
+                  contextId: ComposerContextId.make("build"),
+                  label: "build",
+                  terminalId: "terminal-1",
+                  terminalLabel: "Build",
+                  lineStart: 7,
+                  lineEnd: 7,
+                  text: "compiled successfully",
+                },
+              ],
+            },
+          },
+        } satisfies ClientOrchestrationCommand;
+        yield* Effect.gen(function* () {
+          const source = yield* PiExternalThreadSource;
           if (mode === "unconfirmed") {
-            expect(commands).toEqual([]);
+            expect(
+              yield* source
+                .dispatch({
+                  type: "message.dispatch",
+                  commandId: command.commandId,
+                  threadId: command.threadId,
+                  messageId: command.message.messageId,
+                  text: command.message.text,
+                  context: command.message.context,
+                  attachments: [],
+                  createdBy: "user",
+                  creationSource: "web",
+                  dispatchMode: {
+                    type:
+                      command.streamingBehavior === "followUp"
+                        ? "queue_after_active"
+                        : command.streamingBehavior === "steer"
+                          ? "steer_active"
+                          : "start_immediately",
+                    targetRunId: undefined,
+                  },
+                  ...("externalResume" in command
+                    ? { externalResume: command.externalResume }
+                    : {}),
+                } as OrchestrationV2Command)
+                .pipe(Effect.flip),
+            ).toMatchObject({
+              code: "read_only",
+              message: expect.stringContaining("another host"),
+            });
             return;
           }
-          expect(commands).toHaveLength(1);
-          expect(commands[0]).toMatchObject({
-            type: mode === "takeover" ? "resumeAndSend" : mode,
-            commandId: turn.commandId,
-            messageId: turn.message.messageId,
-            message: expect.stringContaining("[Terminal: build; ref=build]"),
-            ...(mode === "takeover"
-              ? { streamingBehavior: "steer" }
-              : { runtimeId: runtime.runtimeId }),
-          });
-          expect(commands[0]).toMatchObject({
-            message: expect.stringContaining("7 | compiled successfully"),
-          });
-          expect(command.message.text).toBe("Inspect [build](t3-context://v1/terminal/build)");
-        }).pipe(Effect.scoped),
-    );
-  }
+          yield* source.dispatch({
+            type: "message.dispatch",
+            commandId: command.commandId,
+            threadId: command.threadId,
+            messageId: command.message.messageId,
+            text: command.message.text,
+            context: command.message.context,
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+            dispatchMode: {
+              type:
+                command.streamingBehavior === "followUp"
+                  ? "queue_after_active"
+                  : command.streamingBehavior === "steer"
+                    ? "steer_active"
+                    : "start_immediately",
+              targetRunId: undefined,
+            },
+            ...("externalResume" in command ? { externalResume: command.externalResume } : {}),
+          } as OrchestrationV2Command);
+        }).pipe(Effect.provide(PiExternalThreadSource.layerTest.pipe(Layer.provide(dependencies))));
+        if (mode === "unconfirmed") {
+          expect(commands).toEqual([]);
+          return;
+        }
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({
+          type: mode === "takeover" ? "resumeAndSend" : mode,
+          commandId: turn.commandId,
+          messageId: turn.message.messageId,
+          message: expect.stringContaining("[Terminal: build; ref=build]"),
+          ...(mode === "takeover"
+            ? { streamingBehavior: "steer" }
+            : { runtimeId: runtime.runtimeId }),
+        });
+        expect(commands[0]).toMatchObject({
+          message: expect.stringContaining("7 | compiled successfully"),
+        });
+        expect(command.message.text).toBe("Inspect [build](t3-context://v1/terminal/build)");
+      }).pipe(Effect.scoped),
+  );
 
   it("requires explicit takeover confirmation only when no runtime is present", () => {
     expect(
@@ -360,6 +403,7 @@ describe("PiExternalThreadSource hardening", () => {
             list: () => Effect.succeed([takeoverRecord]),
             omittedCount: () => Effect.succeed(0),
             read: () => Effect.succeed({ record: takeoverRecord, entries: [] }),
+            // @effect-diagnostics-next-line effectSucceedWithVoid:off - The lookup returns an optional value, not void.
             findLifecycleOperation: () => Effect.succeed(undefined),
           }),
           Layer.mock(SupervisorClient)({
@@ -367,11 +411,13 @@ describe("PiExternalThreadSource hardening", () => {
             probeCapabilities: () => Effect.succeed({}),
             subscribe: () => Stream.empty,
           }),
-          Layer.mock(ProjectionSnapshotQuery)({
+          Layer.mock(ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+          Layer.mock(ProjectionStoreV2)({
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 0,
-                projects: [],
+                schemaVersion: 2,
+                archivedThreads: [],
                 threads: [],
                 updatedAt: "2026-08-06T00:00:00.000Z",
               }),
@@ -391,7 +437,7 @@ describe("PiExternalThreadSource hardening", () => {
                 }
                 return Option.fromNullishOr(captured);
               }),
-            getByCommandId: () => Effect.succeed(Option.none()),
+            getByCommandId: () => Effect.succeedNone,
           }),
         );
 
@@ -412,17 +458,15 @@ describe("PiExternalThreadSource hardening", () => {
           });
           yield* Deferred.succeed(releaseInitialLifecycleRead, undefined);
 
-          const items = Array.from(
-            yield* Fiber.join(subscription).pipe(Effect.timeout("1 second"), TestClock.withLive),
-          );
+          const items = Array.from(yield* Fiber.join(subscription));
           expect(items.map((item) => item.kind)).toEqual(["snapshot", "synchronized", "snapshot"]);
           expect(items[0]).toMatchObject({
             kind: "snapshot",
-            snapshot: { thread: { settledOverride: null } },
+            projection: { thread: { settledOverride: null } },
           });
           expect(items[2]).toMatchObject({
             kind: "snapshot",
-            snapshot: { thread: { settledOverride: "settled" } },
+            projection: { thread: { settledOverride: "settled" } },
           });
         }).pipe(Effect.provide(PiExternalThreadSource.layerTest.pipe(Layer.provide(dependencies))));
       }),
@@ -457,7 +501,7 @@ describe("PiExternalThreadSource hardening", () => {
             );
           }),
         ).pipe(Effect.forkChild);
-        yield* Deferred.await(attached).pipe(Effect.timeout("1 second"), TestClock.withLive);
+        yield* Deferred.await(attached);
         yield* Fiber.interrupt(worker);
         yield* PubSub.publish(catalog, undefined);
         yield* PubSub.publish(lifecycle, takeoverRecord.threadId);
@@ -689,7 +733,7 @@ describe("PiExternalThreadSource hardening", () => {
       id: ThreadId.make(`external:pi:${index}`),
       projectId: project.id,
       title: "x".repeat(256),
-    })) as unknown as OrchestrationThreadShell[];
+    })) as unknown as OrchestrationV2ThreadShell[];
 
     const bounded = boundExternalCatalog({
       projects: [project],

@@ -1,32 +1,121 @@
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import { Command, GlobalFlag } from "effect/unstable/cli";
+import * as Console from "effect/Console";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { Command, GlobalFlag } from "effect/cli";
+import * as CliError from "effect/cli/CliError";
 
-import { ServerConfig, type StartupPresentation } from "../config.ts";
+import * as ServerConfig from "../config.ts";
+import { awaitLauncherLoss } from "../launcherWatch.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import { tryLaunchDesktopApp } from "./desktopLaunch.ts";
+import { openLiveProjectIfPresent } from "./project.ts";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
 
-export const runServerCommand = (
+const encodeCommand = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
+
+// The desktop launcher reads this process's stdout and stderr. Once it is gone,
+// every log write fails, and Node turns an unhandled stream error into a crash
+// that skips shutdown and leaves the ownership lock and runtime record behind.
+function ignoreClosedLauncherPipe(error: NodeJS.ErrnoException): void {
+  if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") throw error;
+}
+
+const runServerCommand = Effect.fn("server.runServerCommand")(function* (
   flags: CliServerFlags,
   options?: {
-    readonly startupPresentation?: StartupPresentation;
+    readonly startupPresentation?: ServerConfig.StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly rejectRunningServer?: boolean;
   },
-) =>
-  Effect.gen(function* () {
-    const logLevel = yield* GlobalFlag.LogLevel;
-    const config = yield* resolveServerConfig(flags, logLevel, options);
-    return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
+) {
+  const logLevel = yield* GlobalFlag.LogLevel;
+  const config = yield* resolveServerConfig(flags, logLevel, options);
+  const run = runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
+  if (config.mode !== "desktop" || config.desktopBootstrapToken === undefined) return yield* run;
+  yield* Effect.sync(() => {
+    process.stdout.on("error", ignoreClosedLauncherPipe);
+    process.stderr.on("error", ignoreClosedLauncherPipe);
   });
+  return yield* Effect.raceFirst(
+    run,
+    awaitLauncherLoss().pipe(
+      // End like SIGTERM does (interrupt-only exit, so the runtime forces process exit).
+      Effect.andThen(Effect.interrupt),
+    ),
+  );
+});
+
+const openProjectViaDesktopOrLiveServer = Effect.fn("server.openProjectViaDesktopOrLiveServer")(
+  function* (flags: CliServerFlags) {
+    const location = { baseDir: flags.baseDir, cwd: flags.cwd, clearOnFailure: false };
+    if (yield* openLiveProjectIfPresent(location)) return true;
+    if (!(yield* tryLaunchDesktopApp())) return false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      yield* Effect.sleep("500 millis");
+      if (yield* openLiveProjectIfPresent(location)) return true;
+    }
+    yield* Console.error(
+      `Launched ${resolveAppDisplayName()} desktop, but it did not become ready in time. Falling back to the CLI server.`,
+    );
+    return false;
+  },
+);
+
+export const runDefaultServerCommand = Effect.fn("server.runDefaultServerCommand")(function* (
+  flags: CliServerFlags,
+) {
+  if (Option.isSome(flags.cwd)) {
+    const cwd = flags.cwd.value.trim();
+    const fs = yield* FileSystem.FileSystem;
+    const platform = yield* HostProcess.Platform;
+    const explicitPath =
+      cwd === "." ||
+      cwd === ".." ||
+      cwd === "~" ||
+      /[/\\]/.test(cwd) ||
+      (platform === "win32" && /^[a-z]:/i.test(cwd));
+    if (!explicitPath && (!(yield* fs.exists(cwd)) || (yield* fs.stat(cwd)).type !== "Directory")) {
+      return yield* new CliError.UserError({
+        cause: cwd,
+        userMessage: `Unknown command ${yield* encodeCommand(cwd)}. Use "t3 --help" for commands or an explicit path such as "t3 ./my-project" for a new directory.`,
+      });
+    }
+  }
+  const serverOptions: ReadonlyArray<Option.Option<unknown>> = [
+    flags.mode,
+    flags.port,
+    flags.host,
+    flags.devUrl,
+    flags.noBrowser,
+    flags.bootstrapFd,
+    flags.autoBootstrapProjectFromCwd,
+    flags.logWebSocketEvents,
+    flags.tailscaleServeEnabled,
+    flags.tailscaleServePort,
+  ];
+  const hasServerOptions = serverOptions.some(Option.isSome);
+  if (
+    Option.isSome(flags.cwd) &&
+    !hasServerOptions &&
+    (yield* openProjectViaDesktopOrLiveServer(flags).pipe(Effect.provide(FetchHttpClient.layer)))
+  )
+    return;
+  return yield* runServerCommand(flags, { rejectRunningServer: true });
+});
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription(`Run the ${resolveAppDisplayName()} server.`),
-  Command.withHandler((flags) => runServerCommand(flags)),
+  Command.withDescription("Run the T3 Code server."),
+  Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription(
-    `Run the ${resolveAppDisplayName()} server without opening a browser and print headless pairing details.`,
+    "Run the T3 Code server without opening a browser and print headless pairing details.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {

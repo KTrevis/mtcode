@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, type FormEvent } from "react";
+import { memo, useState, type FormEvent } from "react";
 import type { KanbanCard } from "@t3tools/contracts";
 import { unfinishedKanbanDependencies } from "@t3tools/shared/kanban";
 import {
@@ -76,7 +76,7 @@ const TicketNodeView = memo(function TicketNodeView({ data, selected }: NodeProp
       </div>
       <button
         type="button"
-        className="line-clamp-3 w-full cursor-pointer break-words rounded-sm text-left text-sm font-medium hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        className="line-clamp-3 w-full cursor-pointer break-words rounded-sm text-left text-sm font-medium hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onClick={() => onOpen(card.id)}
       >
         {card.title}
@@ -109,60 +109,45 @@ export function KanbanGraph({
   const [nodeState, setNodeState] = useState<TicketNode[]>([]);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const layout = useMemo(() => layoutKanbanTickets(cards), [cards]);
-  const nodeData = useMemo(
-    () =>
-      new Map(
-        cards.map((card) => [
-          card.id,
-          {
-            card,
-            blockers: unfinishedKanbanDependencies(card, cards),
-            onOpen,
-          },
-        ]),
-      ),
-    [cards, onOpen],
+  const layout = layoutKanbanTickets(cards);
+  const nodeData = new Map(
+    cards.map((card) => [
+      card.id,
+      {
+        card,
+        blockers: unfinishedKanbanDependencies(card, cards),
+        onOpen,
+      },
+    ]),
   );
-  const nodes = useMemo<TicketNode[]>(
-    () =>
-      reconcileKanbanGraphNodes<TicketNode>(
-        cards.map((card) => ({
-          id: card.id,
-          type: "ticket" as const,
-          data: nodeData.get(card.id)!,
-          position: layout[card.id]!,
-          ...(selectedCardId !== undefined ? { selected: card.id === selectedCardId } : {}),
-          dragHandle: "[data-graph-drag-handle]",
-          deletable: false,
-          ariaLabel: card.title,
-        })),
-        nodeState,
-      ),
-    [cards, nodeData, nodeState, layout, selectedCardId],
+  const nodes = reconcileKanbanGraphNodes<TicketNode>(
+    cards.map((card) => ({
+      id: card.id,
+      type: "ticket" as const,
+      data: nodeData.get(card.id)!,
+      position: layout[card.id]!,
+      ...(selectedCardId !== undefined ? { selected: card.id === selectedCardId } : {}),
+      dragHandle: "[data-graph-drag-handle]",
+      deletable: false,
+      ariaLabel: card.title,
+    })),
+    nodeState,
   );
-  const edges = useMemo<Edge[]>(
-    () =>
-      cards.flatMap((card) =>
-        (card.dependsOn ?? []).map((source) => ({
-          id: JSON.stringify([source, card.id]),
-          source,
-          target: card.id,
-          type: "smoothstep",
-          selected: selectedEdgeId === JSON.stringify([source, card.id]),
-          markerEnd: { type: MarkerType.ArrowClosed },
-          ariaLabel: `${card.title} depends on ${cards.find((ticket) => ticket.id === source)?.title ?? source}`,
-          deletable: !disabled,
-        })),
-      ),
-    [cards, selectedEdgeId, disabled],
+  const edges = cards.flatMap((card) =>
+    (card.dependsOn ?? []).map((source) => ({
+      id: JSON.stringify([source, card.id]),
+      source,
+      target: card.id,
+      type: "smoothstep",
+      selected: selectedEdgeId === JSON.stringify([source, card.id]),
+      markerEnd: { type: MarkerType.ArrowClosed },
+      ariaLabel: `${card.title} depends on ${cards.find((ticket) => ticket.id === source)?.title ?? source}`,
+      deletable: !disabled,
+    })),
   );
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId);
-  const isValidConnection = useCallback(
-    (connection: Connection | Edge) =>
-      !disabled && connectKanbanTickets(cards, connection.source, connection.target) !== null,
-    [cards, disabled],
-  );
+  const isValidConnection = (connection: Connection | Edge) =>
+    !disabled && connectKanbanTickets(cards, connection.source, connection.target) !== null;
   const add = async (event: FormEvent) => {
     event.preventDefault();
     if (!disabled && title.trim() && (await onAdd(title.trim()))) setTitle("");

@@ -1,4 +1,8 @@
-import { GitMergeIcon, LoaderIcon } from "lucide-react";
+import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { pullRequestEnvironment } from "~/state/pullRequests";
+import { PullRequestGlyph } from "./pullRequestIcons";
+import { LoaderIcon } from "lucide-react";
 import { memo } from "react";
 
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -7,6 +11,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PullRequestUpstreamReleaseBannerProps {
+  readonly environmentId: EnvironmentId;
   readonly repository: string;
   readonly tagName: string;
   readonly name: string | undefined;
@@ -17,15 +22,8 @@ interface PullRequestUpstreamReleaseBannerProps {
   readonly taking: boolean;
 }
 
-/**
- * What the upstream has shipped, above the change requests it is still deciding on.
- *
- * A fork lives off its upstream's releases, and the answer to "am I behind" is one line rather
- * than a section: which tag, how old, and a way to take it. Taking is offered without checking
- * first whether it is needed — the check costs a fetch, and pressing it when there is nothing to
- * take says exactly that and creates nothing.
- */
 function PullRequestUpstreamReleaseBannerImpl({
+  environmentId,
   repository,
   tagName,
   name,
@@ -35,9 +33,12 @@ function PullRequestUpstreamReleaseBannerImpl({
   onTake,
   taking,
 }: PullRequestUpstreamReleaseBannerProps) {
+  const canTake = useAtomValue(
+    pullRequestEnvironment.mergeUpstreamRelease.permissionAtom(environmentId),
+  );
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2">
-      <GitMergeIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <PullRequestGlyph.merged aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -55,7 +56,7 @@ function PullRequestUpstreamReleaseBannerImpl({
         <TooltipPopup>{name ?? tagName}</TooltipPopup>
       </Tooltip>
       {isPrerelease ? (
-        <span className="shrink-0 rounded border border-border/60 px-1 text-[10px] text-muted-foreground">
+        <span className="shrink-0 rounded border border-border/60 px-1 text-3xs text-muted-foreground">
           nightly
         </span>
       ) : null}
@@ -69,7 +70,7 @@ function PullRequestUpstreamReleaseBannerImpl({
               size="xs"
               variant="outline"
               className="ml-auto shrink-0"
-              disabled={taking}
+              disabled={taking || !canTake}
               onClick={onTake}
             >
               {taking ? (

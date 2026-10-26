@@ -11,9 +11,9 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -98,7 +98,6 @@ it.effect("synchronizes the current descriptor label with the relay", () =>
       Effect.provideService(ServerEnvironment.ServerEnvironment, {
         getEnvironmentId: Effect.succeed(environmentId),
         getDescriptor: Effect.succeed(descriptor("Current label")),
-        setEnvironmentLabel: () => Effect.void,
       }),
       Effect.provideService(HttpClient.HttpClient, client),
     );
@@ -113,7 +112,7 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const changes = yield* PubSub.unbounded<typeof DEFAULT_SERVER_SETTINGS>();
-      const currentLabel = yield* Ref.make("");
+      const currentLabel = yield* Ref.make("Old label");
       const requestLabels = yield* Ref.make<ReadonlyArray<string>>([]);
       const oldRequestStarted = yield* Deferred.make<void>();
       const newRequestCompleted = yield* Deferred.make<void>();
@@ -138,6 +137,8 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
         ready: Effect.void,
         getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, environmentLabel: "Old label" }),
         updateSettings: () => Effect.die("unused"),
+        updateProviderInstance: () => Effect.die("unused"),
+        withSettingsSnapshot: () => Effect.die("unused"),
         streamChanges: Stream.empty,
         subscribeChanges: PubSub.subscribe(changes).pipe(
           Effect.map((subscription) => Stream.fromSubscription(subscription)),
@@ -146,7 +147,6 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
       const environment = ServerEnvironment.ServerEnvironment.of({
         getEnvironmentId: Effect.succeed(environmentId),
         getDescriptor: Ref.get(currentLabel).pipe(Effect.map(descriptor)),
-        setEnvironmentLabel: (label) => Ref.set(currentLabel, label),
       });
 
       const fiber = yield* runEnvironmentLabelRelaySync().pipe(
@@ -158,6 +158,7 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
       );
 
       yield* Deferred.await(oldRequestStarted);
+      yield* Ref.set(currentLabel, "New label");
       yield* PubSub.publish(changes, {
         ...DEFAULT_SERVER_SETTINGS,
         environmentLabel: "New label",
@@ -190,7 +191,6 @@ it.effect("classifies a relay 404 as a final answer, not a transient fault", () 
       Effect.provideService(ServerEnvironment.ServerEnvironment, {
         getEnvironmentId: Effect.succeed(environmentId),
         getDescriptor: Effect.succeed(descriptor("Current label")),
-        setEnvironmentLabel: () => Effect.void,
       }),
       Effect.provideService(HttpClient.HttpClient, client),
       Effect.result,
@@ -213,7 +213,6 @@ it.effect("still retries a relay 503", () =>
       Effect.provideService(ServerEnvironment.ServerEnvironment, {
         getEnvironmentId: Effect.succeed(environmentId),
         getDescriptor: Effect.succeed(descriptor("Current label")),
-        setEnvironmentLabel: () => Effect.void,
       }),
       Effect.provideService(HttpClient.HttpClient, client),
       Effect.result,

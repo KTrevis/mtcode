@@ -1,67 +1,44 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
-
-import "./index.css";
-
-import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
-import { isElectron } from "./env";
 import { ConnectProvidersRoot, useConnectProviders } from "./cloud/connectProviderContext";
 import { providerHasRelay } from "./cloud/connectProviders";
-import { hasClerkPublicConfig } from "./cloud/publicConfig";
-import { getRouter } from "./router";
-import {
-  syncDocumentElectronPlatformClasses,
-  syncDocumentWindowControlsOverlayClass,
-} from "./lib/windowControlsOverlay";
+import React from "react";
+import ReactDOM from "react-dom/client";
+
+import "@fontsource-variable/inter";
+import "./index.css";
+
+import { hasCloudPublicConfig } from "./cloud/publicConfig";
+import { isElectron } from "./env";
+import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
-prepareProviderAuthDelivery();
+const router = startAppServices();
 
-// Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-const history = isElectron ? createHashHistory() : createBrowserHistory();
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
-const router = getRouter(history);
+const ConnectManagedAuthShell = React.lazy(() =>
+  isElectron
+    ? import("./components/clerk/ElectronManagedAuthShell")
+    : import("./components/clerk/BrowserManagedAuthShell"),
+);
 
-if (isElectron) {
-  syncDocumentElectronPlatformClasses(navigator.platform);
-  syncDocumentWindowControlsOverlayClass();
-}
-
-// KT Code keeps the fork's connect-provider Clerk gate (the key may come from an
-// embedded provider at runtime), but the Clerk runtime itself is a split chunk
-// like upstream: nothing Clerk-related sits in the startup graph for local-mode
-// users.
-const ConnectClerkGate = React.lazy(() => import("./components/clerk/ConnectClerkGate"));
-
-const envClerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
-
-function ClerkGate({ children }: { readonly children: React.ReactNode }) {
+function ConnectAuthGate({ children }: { readonly children: React.ReactNode }) {
   const { embedded } = useConnectProviders();
-  const publishableKey = embedded?.clerkPublishableKey ?? envClerkPublishableKey;
-  const enableClerk = Boolean(publishableKey && (embedded || hasClerkPublicConfig()));
-  const wrapRelay = Boolean(embedded && providerHasRelay(embedded));
-
-  if (!enableClerk || !publishableKey) {
-    return children;
-  }
-
+  const publishableKey = embedded?.clerkPublishableKey ?? clerkPublishableKey;
+  if (!publishableKey || (!embedded && !hasCloudPublicConfig())) return children;
   return (
     <React.Suspense fallback={null}>
-      <ConnectClerkGate
+      <ConnectManagedAuthShell
         key={embedded?.id ?? "clerk"}
         publishableKey={publishableKey}
-        wrapRelay={wrapRelay}
+        wrapRelay={embedded ? providerHasRelay(embedded) : true}
       >
         {children}
-      </ConnectClerkGate>
+      </ConnectManagedAuthShell>
     </React.Suspense>
   );
 }
 
-// A failed split-chunk fetch usually means the hashed assets went stale under
-// a deploy; one guarded reload picks up the fresh index.html.
 let chunkLoadFailed = false;
 let reloadScheduled = false;
 window.addEventListener("vite:preloadError", (event) => {
@@ -74,40 +51,31 @@ window.addEventListener("vite:preloadError", (event) => {
 
 const app = <AppRoot router={router} />;
 
-// When Clerk is configured statically, resolve its chunk before the first
-// commit too, so the boot splash holds until real UI paints (same reasoning as
-// the route chunks below). An embedded provider that enables Clerk later goes
-// through the gate's Suspense boundary instead.
-const clerkGateModule =
-  envClerkPublishableKey && hasClerkPublicConfig()
-    ? import("./components/clerk/ConnectClerkGate")
+// Split by runtime to keep Clerk out of local startup and clerk-js out of browser builds.
+const managedAuthShellModule =
+  clerkPublishableKey && hasCloudPublicConfig()
+    ? isElectron
+      ? import("./components/clerk/ElectronManagedAuthShell")
+      : import("./components/clerk/BrowserManagedAuthShell")
     : null;
 
-// The index.html boot splash lives inside #root, and React's first commit
-// clears it. Resolve everything that first commit needs, the selected
-// managed-auth runtime and the initial route's split chunks, before
-// rendering, so the splash holds until real UI paints instead of dropping to
-// a blank window while chunks download.
-export const startup = Promise.all([clerkGateModule, router.load()])
+export const startup = Promise.all([
+  managedAuthShellModule?.then((module) => module.default) ?? null,
+  router.load(),
+])
   .then(() => {
-    // A route chunk failure still resolves router.load(): the error is parked in
-    // the lazy component and surfaces through the route error boundary. Skip the
-    // paint when a reload is on its way, and only re-arm the guard after a boot
-    // that fetched every chunk it asked for.
+    // Route chunk failures resolve router.load() and surface later through the error boundary.
     if (reloadScheduled) return;
     if (!chunkLoadFailed) clearChunkReloadGuard();
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
         <ConnectProvidersRoot>
-          <ClerkGate>{app}</ClerkGate>
+          <ConnectAuthGate>{app}</ConnectAuthGate>
         </ConnectProvidersRoot>
       </React.StrictMode>,
     );
   })
   .catch((error: unknown) => {
-    // Let the bootstrap entry show the error unless a reload is already scheduled.
     if (reloadScheduled) return;
-    console.error("KT Code failed to load its startup chunks.", error);
-    const bootShell = document.getElementById("boot-shell");
-    if (bootShell) bootShell.textContent = "KT Code could not load. Reload to try again.";
+    throw error;
   });

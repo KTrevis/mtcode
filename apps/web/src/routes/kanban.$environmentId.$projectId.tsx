@@ -1,3 +1,4 @@
+import { useEnvironmentProviders } from "../state/environments";
 import {
   kanbanDependencyError,
   unfinishedKanbanDependencies,
@@ -7,7 +8,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES,
-  type AssetResource,
   type EnvironmentId,
   type KanbanCard,
   type KanbanTag,
@@ -19,7 +19,7 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { GitBranchIcon, LayoutDashboardIcon, NetworkIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, lazy, Suspense } from "react";
+import { useDeferredValue, useEffect, useState, lazy, Suspense } from "react";
 
 import { ToggleGroup, Toggle } from "../components/ui/toggle-group";
 
@@ -229,13 +229,10 @@ function CardDetails({
   const [title, setTitle] = useState(card.title);
   const [tagIds, setTagIds] = useState<readonly string[]>(card.tagIds ?? []);
   const [addedTags, setAddedTags] = useState<readonly KanbanTag[]>([]);
-  const tags = useMemo(
-    () => [
-      ...availableTags,
-      ...addedTags.filter((tag) => !availableTags.some((existing) => existing.id === tag.id)),
-    ],
-    [availableTags, addedTags],
-  );
+  const tags = [
+    ...availableTags,
+    ...addedTags.filter((tag) => !availableTags.some((existing) => existing.id === tag.id)),
+  ];
   const [branch, setBranch] = useState(card.branch ?? null);
   const [description, setDescription] = useState(card.description ?? "");
   const [uploading, setUploading] = useState(false);
@@ -243,17 +240,14 @@ function CardDetails({
   const [removedImageIds, setRemovedImageIds] = useState<readonly string[]>([]);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [failedDraftKey, setFailedDraftKey] = useState<string | null>(null);
-  const images = useMemo(
-    () => [
-      ...(card.images ?? []).filter((image) => !removedImageIds.includes(image.id)),
-      ...addedImages.filter(
-        (image) =>
-          !removedImageIds.includes(image.id) &&
-          !(card.images ?? []).some((savedImage) => savedImage.id === image.id),
-      ),
-    ],
-    [card.images, addedImages, removedImageIds],
-  );
+  const images = [
+    ...(card.images ?? []).filter((image) => !removedImageIds.includes(image.id)),
+    ...addedImages.filter(
+      (image) =>
+        !removedImageIds.includes(image.id) &&
+        !(card.images ?? []).some((savedImage) => savedImage.id === image.id),
+    ),
+  ];
   const changed =
     tags.length !== availableTags.length ||
     JSON.stringify(tagIds) !== JSON.stringify(card.tagIds ?? []) ||
@@ -272,16 +266,13 @@ function CardDetails({
     images.map((image) => image.id),
     dependsOn,
   ]);
-  const imageResources = useMemo<AssetResource[]>(
-    () =>
-      images.map((image) => ({
-        _tag: "attachment",
-        attachmentId: image.attachment.id,
-      })),
-    [images],
-  );
+  const imageResources = images.map((image) => ({
+    _tag: "attachment" as const,
+    attachmentId: image.attachment.id,
+  }));
   const imageUrls = useAssetUrls(environmentId, imageResources);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Subscribe the board to its environment connection lifecycle.
   useEffect(() => {
     if (saving || uploading) return;
     if (!changed) {
@@ -365,15 +356,12 @@ function CardDetails({
       .finally(() => setUploading(false));
   };
 
-  const removeImage = useCallback(
-    (id: string) => {
-      setDescription((current) =>
-        current.replace(new RegExp(`!\\[[^\\]]*\\]\\(kanban-image:${id}\\)`, "g"), ""),
-      );
-      setRemovedImageIds((current) => [...current, id]);
-    },
-    [setDescription, setRemovedImageIds],
-  );
+  const removeImage = (id: string) => {
+    setDescription((current) =>
+      current.replace(new RegExp(`!\\[[^\\]]*\\]\\(kanban-image:${id}\\)`, "g"), ""),
+    );
+    setRemovedImageIds((current) => [...current, id]);
+  };
 
   const openImage = (id: string) => {
     const available = images.flatMap((image, index) => {
@@ -625,6 +613,7 @@ function KanbanPage() {
   const { cardId } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const handleNewThread = useNewThreadHandler();
+  const providersByEnvironment = useEnvironmentProviders();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const project = projects.find(
@@ -767,7 +756,10 @@ function KanbanPage() {
       config && resolveProjectSettings(config.settings, project.id, project).settings;
     const modelSelection =
       config &&
-      resolveDefaultProviderModelSelection(config.providers, settings?.defaultModelSelection);
+      resolveDefaultProviderModelSelection(
+        providersByEnvironment.get(project.environmentId) ?? [],
+        settings?.defaultModelSelection,
+      );
     if (!modelSelection || !settings) {
       toastManager.add(
         stackedThreadToast({

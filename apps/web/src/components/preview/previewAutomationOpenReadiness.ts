@@ -12,7 +12,7 @@ import {
  * brand-new tab left in fill mode would be sized by whatever the panel happens
  * to be — deterministic beats incidental here.
  */
-export const DEFAULT_PREVIEW_AUTOMATION_VIEWPORT = {
+const DEFAULT_PREVIEW_AUTOMATION_VIEWPORT = {
   _tag: "freeform",
   width: 1280,
   height: 800,

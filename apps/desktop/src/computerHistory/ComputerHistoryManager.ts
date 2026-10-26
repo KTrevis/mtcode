@@ -1,8 +1,9 @@
+import { Platform as HostProcessPlatform } from "@t3tools/shared/HostProcess";
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalDate:off
 // @effect-diagnostics globalTimers:off - daemon kill timeouts run in imperative Promise helpers, off the Effect runtime
-import { spawn, type ChildProcess } from "node:child_process";
-import * as NodeFs from "node:fs";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { shell } from "electron";
 
@@ -32,7 +33,7 @@ import { mtcodeDesktopProfileEnv } from "@t3tools/shared/munimComputerUse";
 import { resolveDesktopMcpBinaryPathSync } from "./resolveBinary.ts";
 
 type DaemonState = {
-  child: ChildProcess | null;
+  child: NodeChildProcess.ChildProcess | null;
   generation: number;
   rootPath: string | null;
   stopping: Promise<void> | null;
@@ -61,33 +62,37 @@ export class ComputerHistoryOperationError extends Schema.TaggedError<ComputerHi
   }
 }
 
-async function writeUnavailableStatus(root: string, lastError: string): Promise<void> {
+async function writeUnavailableStatus(
+  platform: NodeJS.Platform,
+  root: string,
+  lastError: string,
+): Promise<void> {
   await ensureComputerHistoryLayout(root);
   const payload = {
     phase: "unavailable",
     accessibilityGranted: false,
     eventCount: 0,
-    platform: process.platform,
+    platform,
     updatedAt: new Date().toISOString(),
     lastError,
   };
-  await NodeFs.promises.writeFile(
+  await NodeFS.promises.writeFile(
     NodePath.join(root, "status.json"),
     `${JSON.stringify(payload, null, 2)}\n`,
     "utf8",
   );
 }
 
-async function writeStoppedStatus(root: string): Promise<void> {
+async function writeStoppedStatus(platform: NodeJS.Platform, root: string): Promise<void> {
   await ensureComputerHistoryLayout(root);
   const payload = {
     phase: "stopped",
     accessibilityGranted: false,
     eventCount: 0,
-    platform: process.platform,
+    platform,
     updatedAt: new Date().toISOString(),
   };
-  await NodeFs.promises.writeFile(
+  await NodeFS.promises.writeFile(
     NodePath.join(root, "status.json"),
     `${JSON.stringify(payload, null, 2)}\n`,
     "utf8",
@@ -144,7 +149,8 @@ const runDaemonOp = (
     catch: (cause) => new ComputerHistoryOperationError({ operation, root, cause }),
   });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
+  const platform = yield* HostProcessPlatform;
   // Plain mutable state — avoids Effect.runPromise on every Ref touch inside
   // imperative daemon helpers (Macroscope Effect Service Conventions).
   const state: DaemonState = {
@@ -261,7 +267,7 @@ export const make = Effect.gen(function* () {
       await stopDaemonImpl();
       // Clear stale running/paused status so polls do not treat an intentional
       // stop as a crash while ServerSettings persistence is still catching up.
-      await writeStoppedStatus(root);
+      await writeStoppedStatus(platform, root);
       return;
     }
 
@@ -274,12 +280,12 @@ export const make = Effect.gen(function* () {
 
     const binary = resolveDesktopMcpBinaryPathSync();
     if (!binary) {
-      await writeUnavailableStatus(root, "munim-computer-use binary not found");
+      await writeUnavailableStatus(platform, root, "munim-computer-use binary not found");
       return;
     }
 
     const generation = state.generation + 1;
-    const child = spawn(binary, ["computer-history", "--root", root], {
+    const child = NodeChildProcess.spawn(binary, ["computer-history", "--root", root], {
       // Same MT identity the MCP server runs under (see desktopMcpLaunch.ts).
       env: { ...process.env, ...mtcodeDesktopProfileEnv() },
       stdio: ["ignore", "ignore", "pipe"],
@@ -297,6 +303,7 @@ export const make = Effect.gen(function* () {
         state.child = null;
       }
       void writeUnavailableStatus(
+        platform,
         root,
         `failed to start computer-history daemon: ${error.message}`,
       ).catch(() => {
@@ -318,7 +325,7 @@ export const make = Effect.gen(function* () {
         code === null
           ? `computer-history daemon exited (${signal ?? "signal"})`
           : `computer-history daemon exited (code ${code})`;
-      void writeUnavailableStatus(root, detail).catch(() => {
+      void writeUnavailableStatus(platform, root, detail).catch(() => {
         // Best-effort status write — never crash the main process.
       });
     });
@@ -358,25 +365,29 @@ export const make = Effect.gen(function* () {
   };
 
   return ComputerHistoryManager.of({
-    mergePatchSettings: (stateDir, persisted, patch) =>
-      Effect.tryPromise({
-        try: () => applyPatchSettings(stateDir, persisted, patch),
-        catch: (cause) => {
-          const root = resolveComputerHistoryRoot(stateDir);
-          return new ComputerHistoryOperationError({
-            operation: "mergePatchSettings",
-            root,
-            cause,
-          });
-        },
-      }),
-    ensureDaemon: (stateDir, settings) =>
+    mergePatchSettings: Effect.fn("ComputerHistoryManager.mergePatchSettings")(
+      (stateDir, persisted, patch) =>
+        Effect.tryPromise({
+          try: () => applyPatchSettings(stateDir, persisted, patch),
+          catch: (cause) => {
+            const root = resolveComputerHistoryRoot(stateDir);
+            return new ComputerHistoryOperationError({
+              operation: "mergePatchSettings",
+              root,
+              cause,
+            });
+          },
+        }),
+    ),
+    ensureDaemon: Effect.fn("ComputerHistoryManager.ensureDaemon")((stateDir, settings) =>
       runDaemonOp("ensureDaemon", resolveComputerHistoryRoot(stateDir), () =>
         enqueueEnsure(() => ensureDaemonImpl(stateDir, settings)),
       ),
-    stopDaemon: () =>
+    ),
+    stopDaemon: Effect.fn("ComputerHistoryManager.stopDaemon")(() =>
       runDaemonOp("stopDaemon", state.rootPath ?? "", () => enqueueEnsure(() => stopDaemonImpl())),
-    getStatus: (stateDir, settings) =>
+    ),
+    getStatus: Effect.fn("ComputerHistoryManager.getStatus")((stateDir, settings) =>
       Effect.tryPromise({
         try: async () => {
           const root = resolveComputerHistoryRoot(stateDir);
@@ -393,7 +404,7 @@ export const make = Effect.gen(function* () {
             !daemonRunning &&
             (file?.phase === "running" || file?.phase === "paused");
           if (staleRunning) {
-            await writeUnavailableStatus(root, "computer-history daemon is not running");
+            await writeUnavailableStatus(platform, root, "computer-history daemon is not running");
           }
           const liveFile = staleRunning ? await readStatusFile(root) : file;
           const memoriesPath = NodePath.join(root, "memories", "resources");
@@ -415,7 +426,7 @@ export const make = Effect.gen(function* () {
             ...(liveFile?.activeSegmentId ? { activeSegmentId: liveFile.activeSegmentId } : {}),
             eventCount: liveFile?.eventCount ?? 0,
             ...(liveFile?.lastError ? { lastError: liveFile.lastError } : {}),
-            platform: liveFile?.platform ?? process.platform,
+            platform: liveFile?.platform ?? platform,
           } satisfies ComputerHistoryStatus;
         },
         catch: (cause) =>
@@ -425,7 +436,8 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       }),
-    getTimeline: (stateDir) =>
+    ),
+    getTimeline: Effect.fn("ComputerHistoryManager.getTimeline")((stateDir) =>
       Effect.tryPromise({
         try: () => listTimeline(resolveComputerHistoryRoot(stateDir)),
         catch: (cause) =>
@@ -435,13 +447,16 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       }),
-    clear: (stateDir, scope, settings) =>
+    ),
+    clear: Effect.fn("ComputerHistoryManager.clear")((stateDir, scope, settings) =>
       Effect.tryPromise({
         try: () => {
           const effectiveSettings = lastMergedSettings ?? settings;
-          return clearHistory(resolveComputerHistoryRoot(stateDir), scope, {
-            ...(effectiveSettings.mirrorToCodex ? { codexHome: defaultCodexHome() } : {}),
-          });
+          return clearHistory(
+            resolveComputerHistoryRoot(stateDir),
+            scope,
+            effectiveSettings.mirrorToCodex ? { codexHome: defaultCodexHome() } : {},
+          );
         },
         catch: (cause) =>
           new ComputerHistoryOperationError({
@@ -450,13 +465,16 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       }),
-    removeMemory: (stateDir, path, settings) =>
+    ),
+    removeMemory: Effect.fn("ComputerHistoryManager.removeMemory")((stateDir, path, settings) =>
       Effect.tryPromise({
         try: () => {
           const effectiveSettings = lastMergedSettings ?? settings;
-          return deleteMemory(resolveComputerHistoryRoot(stateDir), path, {
-            ...(effectiveSettings.mirrorToCodex ? { codexHome: defaultCodexHome() } : {}),
-          });
+          return deleteMemory(
+            resolveComputerHistoryRoot(stateDir),
+            path,
+            effectiveSettings.mirrorToCodex ? { codexHome: defaultCodexHome() } : {},
+          );
         },
         catch: (cause) =>
           new ComputerHistoryOperationError({
@@ -466,7 +484,8 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       }),
-    revealMemory: (stateDir, path) =>
+    ),
+    revealMemory: Effect.fn("ComputerHistoryManager.revealMemory")((stateDir, path) =>
       Effect.tryPromise({
         try: async () => {
           const root = resolveComputerHistoryRoot(stateDir);
@@ -476,7 +495,7 @@ export const make = Effect.gen(function* () {
           if (resolved !== resourcesRoot && !resolved.startsWith(resourcesRoot + NodePath.sep)) {
             return false;
           }
-          if (!NodeFs.existsSync(resolved)) return false;
+          if (!NodeFS.existsSync(resolved)) return false;
           shell.showItemInFolder(resolved);
           return true;
         },
@@ -488,7 +507,10 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       }),
-    currentRoot: () => Effect.sync(() => state.rootPath),
+    ),
+    currentRoot: Effect.fn("ComputerHistoryManager.currentRoot")(() =>
+      Effect.sync(() => state.rootPath),
+    ),
   });
 });
 

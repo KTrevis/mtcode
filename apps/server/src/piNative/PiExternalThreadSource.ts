@@ -1,3 +1,9 @@
+import type {
+  PiThreadSnapshot,
+  PiThreadStreamItem,
+  PiCommand,
+  PiDispatchResult,
+} from "./PiThreadModel.ts";
 // @effect-diagnostics globalTimers:off
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics preferSchemaOverJson:off
@@ -6,13 +12,13 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import type {
-  ClientOrchestrationCommand,
-  DispatchResult,
   OrchestrationProjectShell,
-  OrchestrationShellSnapshot,
-  OrchestrationSubscribeThreadInput,
-  OrchestrationThreadDetailSnapshot,
-  OrchestrationThreadStreamItem,
+  OrchestrationV2ShellSnapshot,
+  OrchestrationV2Command,
+  OrchestrationV2ThreadDetailSnapshot,
+  OrchestrationV2ThreadStreamItem,
+  OrchestrationV2DispatchCommandResult,
+  OrchestrationV2SubscribeThreadInput,
   PiExternalCatalogSnapshot,
   PiExternalCatalogSubscribeInput,
   PiExternalCatalogStreamItem,
@@ -42,8 +48,10 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { resolveAutoSettlementAt } from "../orchestration/ThreadSettlementPolicy.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import { makePiV2StreamAdapter, piV2Detail, piV2Shell } from "./PiV2Projection.ts";
+
 import type { PiExternalLifecycleOverride } from "../persistence/Services/PiExternalLifecycleOverrides.ts";
 import { PiExternalLifecycleOverrideRepository } from "../persistence/Services/PiExternalLifecycleOverrides.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -59,7 +67,6 @@ import {
   projectPiLiveEvent,
   projectPiThread,
   projectPiThreadOverlay,
-  projectPiThreadShell,
 } from "./PiSessionProjection.ts";
 import { SupervisorClient } from "./SupervisorClient.ts";
 import type {
@@ -99,18 +106,33 @@ export function validExternalLifecycleOverride(
  * settle/un-settle overrides still flow through the external lifecycle store.
  */
 export function applyPiExternalAutoSettlement(input: {
-  readonly snapshot: OrchestrationThreadDetailSnapshot;
+  readonly snapshot: PiThreadSnapshot;
   readonly now: string;
   readonly autoSettleAfterDays: number | null;
-}): OrchestrationThreadDetailSnapshot {
-  const settledAt = resolveAutoSettlementAt({
-    thread: projectPiThreadShell(input.snapshot),
-    pullRequest: null,
-    now: input.now,
-    autoSettleAfterDays: input.autoSettleAfterDays,
-    autoSettleOnMerge: false,
-    autoSettlePinnedThreads: false,
-  });
+}): PiThreadSnapshot {
+  const thread = input.snapshot.thread;
+  if (
+    thread.settledOverride !== null ||
+    thread.session?.status === "running" ||
+    thread.session?.status === "starting" ||
+    (thread.pendingComposerIntents?.length ?? 0) > 0 ||
+    input.autoSettleAfterDays === null
+  )
+    return input.snapshot;
+  const activity = [
+    thread.latestTurn?.requestedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.completedAt,
+    thread.messages.findLast((message) => message.role === "user")?.createdAt,
+  ]
+    .filter((value): value is string => value != null)
+    .sort()
+    .at(-1);
+  const settledAt =
+    activity !== undefined &&
+    Date.parse(activity) < Date.parse(input.now) - input.autoSettleAfterDays * 86_400_000
+      ? activity
+      : null;
   if (settledAt === null) return input.snapshot;
   return {
     ...input.snapshot,
@@ -146,7 +168,7 @@ export class CatalogRuntimeAttachmentGate {
 export class PiThreadStreamSequenceGate {
   #projectedThrough = -1;
 
-  allows(item: OrchestrationThreadStreamItem): boolean {
+  allows(item: PiThreadStreamItem): boolean {
     if (item.kind === "synchronized") return true;
     const sequence =
       item.kind === "snapshot" ? item.snapshot.snapshotSequence : item.event.sequence;
@@ -257,7 +279,7 @@ export class PiSubagentStreamTracker {
 
 export function boundExternalCatalog(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
-  readonly threads: ReadonlyArray<ReturnType<typeof projectPiThreadShell>>;
+  readonly threads: ReadonlyArray<ReturnType<typeof piV2Shell>>;
   readonly totalThreadCount: number;
   readonly maxThreads?: number;
   readonly maxSerializedBytes?: number;
@@ -331,7 +353,7 @@ interface Association {
 
 async function associate(
   records: ReadonlyArray<PiSessionCatalogRecord>,
-  internal: OrchestrationShellSnapshot,
+  internal: OrchestrationV2ShellSnapshot,
 ): Promise<Association> {
   const projects = await Promise.all(
     internal.projects.map(async (project) => ({
@@ -392,10 +414,7 @@ function runtimeFor(
   );
 }
 
-type PiExternalTurnStartCommand = Extract<
-  ClientOrchestrationCommand,
-  { readonly type: "thread.turn.start" }
->;
+type PiExternalTurnStartCommand = Extract<PiCommand, { readonly type: "thread.turn.start" }>;
 type PiResumeAndSendCommand = Extract<SupervisorCommand, { readonly type: "resumeAndSend" }>;
 
 export function planPiExternalTurnStart(input: {
@@ -444,7 +463,7 @@ export function runtimeCatalogSignature(runtimes: ReadonlyArray<SupervisorRuntim
   );
 }
 
-function internalAssociationSignature(snapshot: OrchestrationShellSnapshot): string {
+function internalAssociationSignature(snapshot: OrchestrationV2ShellSnapshot): string {
   return JSON.stringify({
     projects: snapshot.projects
       .map((project) => [project.id, project.workspaceRoot])
@@ -511,13 +530,11 @@ class PiExternalCatalogTriggers extends Context.Reference<Stream.Stream<void, Pi
   },
 ) {}
 
-function validateInlineImages(
-  command: Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.start" }>,
-) {
+function validateInlineImages(command: Extract<PiCommand, { readonly type: "thread.turn.start" }>) {
   for (const attachment of command.message.attachments) {
     // Uploaded attachments are rejected below with the same external-thread
     // capability error; only inline payloads need data-url validation here.
-    if (!("dataUrl" in attachment)) {
+    if (!("dataUrl" in attachment) || typeof attachment.dataUrl !== "string") {
       continue;
     }
     const comma = attachment.dataUrl.indexOf(",");
@@ -527,6 +544,46 @@ function validateInlineImages(
       throw new Error("image exceeds the attachment byte ceiling");
     }
   }
+}
+
+function piCommandFromV2(command: OrchestrationV2Command): PiCommand | undefined {
+  if (command.type === "message.dispatch") {
+    if (
+      command.dispatchMode.type === "defer_start" ||
+      command.dispatchMode.type === "restart_active"
+    )
+      return undefined;
+    return {
+      type: "thread.turn.start",
+      commandId: command.commandId,
+      threadId: command.threadId,
+      message: {
+        messageId: command.messageId,
+        text: command.text,
+        context: command.context,
+        attachments: command.attachments,
+      },
+      streamingBehavior: command.dispatchMode.type === "queue_after_active" ? "followUp" : "steer",
+      ...("externalResume" in command && command.externalResume === "takeover"
+        ? { externalResume: "takeover" as const }
+        : {}),
+    };
+  }
+  if (command.type === "thread.stop")
+    return {
+      type: "thread.session.stop",
+      commandId: command.commandId,
+      threadId: command.threadId,
+    };
+  if (command.type === "run.interrupt")
+    return {
+      type: "thread.turn.interrupt",
+      commandId: command.commandId,
+      threadId: command.threadId,
+    };
+  if (command.type === "thread.settle" || command.type === "thread.unsettle")
+    return { type: command.type, commandId: command.commandId, threadId: command.threadId };
+  return undefined;
 }
 
 export class PiExternalThreadSource extends Context.Service<
@@ -541,16 +598,16 @@ export class PiExternalThreadSource extends Context.Service<
     ) => Effect.Effect<PiSessionCatalogRecord | undefined, PiNativeError>;
     readonly threadSnapshot: (
       threadId: ThreadId,
-    ) => Effect.Effect<OrchestrationThreadDetailSnapshot, PiNativeError>;
+    ) => Effect.Effect<OrchestrationV2ThreadDetailSnapshot, PiNativeError>;
     readonly subscribeThread: (
-      input: OrchestrationSubscribeThreadInput,
-    ) => Stream.Stream<OrchestrationThreadStreamItem, PiNativeError>;
+      input: OrchestrationV2SubscribeThreadInput,
+    ) => Stream.Stream<OrchestrationV2ThreadStreamItem, PiNativeError>;
     readonly createSession: (
       input: PiExternalCreateSessionInput,
     ) => Effect.Effect<PiExternalCreateSessionResult, PiNativeError>;
     readonly dispatch: (
-      command: ClientOrchestrationCommand,
-    ) => Effect.Effect<DispatchResult, PiNativeError>;
+      command: OrchestrationV2Command,
+    ) => Effect.Effect<OrchestrationV2DispatchCommandResult, PiNativeError>;
   }
 >()("t3/piNative/PiExternalThreadSource") {
   static readonly layer = Layer.effect(
@@ -558,7 +615,8 @@ export class PiExternalThreadSource extends Context.Service<
     Effect.gen(function* () {
       const catalog = yield* SessionCatalog;
       const supervisor = yield* SupervisorClient;
-      const snapshots = yield* ProjectionSnapshotQuery;
+      const snapshots = yield* ProjectionStoreV2;
+      const projectStore = yield* ProjectStoreV2;
       const lifecycleOverrides = yield* PiExternalLifecycleOverrideRepository;
       const catalogTriggerStream = yield* PiExternalCatalogTriggers;
       const settingsService = Option.getOrUndefined(
@@ -569,7 +627,7 @@ export class PiExternalThreadSource extends Context.Service<
       let catalogSignature = "";
       let cachedRecords: ReadonlyArray<PiSessionCatalogRecord> | undefined;
       let cachedOmittedThreadCount = 0;
-      let cachedInternal: OrchestrationShellSnapshot | undefined;
+      let cachedInternal: OrchestrationV2ShellSnapshot | undefined;
       let cachedAssociation: Association | undefined;
       let lastCatalogRuntimeSignature = "";
       let lastInternalAssociationSignature = "";
@@ -579,13 +637,15 @@ export class PiExternalThreadSource extends Context.Service<
         supervisor.probeCapabilities(refresh).pipe(Effect.map(supportsGuardedResume));
       const projectedGuardedResume = probeGuardedResume().pipe(Effect.orElseSucceed(() => false));
 
-      const internalShell = snapshots
-        .getShellSnapshot()
-        .pipe(
-          Effect.mapError(() =>
-            privateSourceError("internal_shell", "Thread catalog access failed."),
-          ),
-        );
+      const internalShell = Effect.all({
+        shell: snapshots.getShellSnapshot(),
+        projects: projectStore.listShells(),
+      }).pipe(
+        Effect.map(({ shell, projects }) => ({ ...shell, projects })),
+        Effect.mapError(() =>
+          privateSourceError("internal_shell", "Thread catalog access failed."),
+        ),
+      );
 
       const currentSettings = (
         settingsService?.getSettings ?? Effect.succeed(DEFAULT_SERVER_SETTINGS)
@@ -675,7 +735,7 @@ export class PiExternalThreadSource extends Context.Service<
             }),
             ...autoSettlement,
           });
-          return projectPiThreadShell(detail);
+          return piV2Shell(detail);
         });
         const { projects, threads, omittedProjectCount, omittedThreadCount } = boundExternalCatalog(
           {
@@ -847,7 +907,7 @@ export class PiExternalThreadSource extends Context.Service<
         liveUserEvent?: SupervisorStreamEvent,
         snapshotSubagentEvent = false,
         retainedSubagentEvents: ReadonlyArray<SupervisorStreamEvent> = [],
-      ): Effect.fn.Return<OrchestrationThreadStreamItem | null, PiNativeError> {
+      ): Effect.fn.Return<PiThreadStreamItem | null, PiNativeError> {
         if (item.type === "synchronized") return { kind: "synchronized" };
         if (item.type === "snapshot") {
           const snapshot = yield* readProjected(record.threadId, item.runtime, item.entries);
@@ -1017,7 +1077,7 @@ export class PiExternalThreadSource extends Context.Service<
               ),
             );
           }),
-          Stream.filter((item): item is OrchestrationThreadStreamItem => item !== null),
+          Stream.filter((item): item is PiThreadStreamItem => item !== null),
         );
       };
 
@@ -1057,9 +1117,7 @@ export class PiExternalThreadSource extends Context.Service<
         return receipt;
       });
 
-      const dispatch = Effect.fn("PiExternalThreadSource.dispatch")(function* (
-        command: ClientOrchestrationCommand,
-      ) {
+      const dispatch = Effect.fn("PiExternalThreadSource.dispatch")(function* (command: PiCommand) {
         if (!("threadId" in command) || !isPiExternalThreadId(command.threadId)) {
           return yield* sourceError("not_external", "command is not for an external pi thread");
         }
@@ -1095,7 +1153,7 @@ export class PiExternalThreadSource extends Context.Service<
             return {
               sequence: snapshot.snapshotSequence,
               deliveryStatus: "completed",
-            } satisfies DispatchResult;
+            } satisfies PiDispatchResult;
           }
           const jsonlOperation = yield* catalog.findLifecycleOperation(
             command.threadId,
@@ -1140,7 +1198,7 @@ export class PiExternalThreadSource extends Context.Service<
             return {
               sequence: snapshot.snapshotSequence,
               deliveryStatus: "completed",
-            } satisfies DispatchResult;
+            } satisfies PiDispatchResult;
           }
           let lifecycleRuntime: SupervisorRuntimeState | undefined;
           if (command.type === "thread.settle") {
@@ -1223,7 +1281,7 @@ export class PiExternalThreadSource extends Context.Service<
           return {
             sequence: snapshot.snapshotSequence,
             deliveryStatus: "completed",
-          } satisfies DispatchResult;
+          } satisfies PiDispatchResult;
         }
         const runtimes = yield* supervisor
           .list()
@@ -1325,7 +1383,7 @@ export class PiExternalThreadSource extends Context.Service<
         return {
           sequence,
           deliveryStatus: receipt.status === "indeterminate" ? "indeterminate" : "completed",
-        } satisfies DispatchResult;
+        } satisfies PiDispatchResult;
       });
 
       // Subscribe before the initial read so a settings change cannot land
@@ -1443,7 +1501,9 @@ export class PiExternalThreadSource extends Context.Service<
       );
 
       return PiExternalThreadSource.of({
-        catalogSnapshot: () => SubscriptionRef.get(catalogSnapshots),
+        catalogSnapshot: Effect.fn("PiExternalThreadSource.catalogSnapshot")(() =>
+          SubscriptionRef.get(catalogSnapshots),
+        ),
         subscribeCatalog: (input) => {
           let emittedSequence = -1;
           let synchronized = false;
@@ -1469,7 +1529,10 @@ export class PiExternalThreadSource extends Context.Service<
           );
         },
         resolve: findRecord,
-        threadSnapshot: authoritativeThreadSnapshot,
+        threadSnapshot: Effect.fn("PiExternalThreadSource.threadSnapshot")(
+          (threadId) => authoritativeThreadSnapshot(threadId),
+          Effect.map(piV2Detail),
+        ),
         subscribeThread: (input) =>
           Stream.unwrap(
             Effect.gen(function* () {
@@ -1503,10 +1566,7 @@ export class PiExternalThreadSource extends Context.Service<
                 Stream.mapEffect(() => readProjected(input.threadId)),
                 Stream.map((snapshot) => catalogUpdateAfterRead(attachmentGate, snapshot)),
                 Stream.takeWhile((snapshot) => snapshot !== undefined),
-                Stream.filter(
-                  (snapshot): snapshot is OrchestrationThreadDetailSnapshot =>
-                    snapshot !== undefined,
-                ),
+                Stream.filter((snapshot): snapshot is PiThreadSnapshot => snapshot !== undefined),
                 Stream.map((snapshot) => ({
                   kind: "snapshot" as const,
                   snapshot,
@@ -1529,62 +1589,84 @@ export class PiExternalThreadSource extends Context.Service<
                 ),
               );
             }),
-          ),
-        createSession: (input) =>
-          Effect.gen(function* () {
-            const receipt = yield* dispatchSupervisor({
+          ).pipe(Stream.map(makePiV2StreamAdapter())),
+        createSession: Effect.fn("PiExternalThreadSource.createSession")(function* (input) {
+          const receipt = yield* dispatchSupervisor({
+            type: "start",
+            commandId: input.commandId,
+            cwd: input.cwd,
+          });
+          if (!receipt.runtimeId) {
+            return yield* sourceError("create_failed", "pi did not return a runtime");
+          }
+          const runtime = (yield* supervisor.list()).find(
+            (candidate) => candidate.runtimeId === receipt.runtimeId,
+          );
+          const sessionFile = runtime?.sessionFile ?? receiptSessionFile(receipt);
+          if (!sessionFile) {
+            yield* shutdownCreatedRuntime(supervisor, receipt.runtimeId);
+            return yield* sourceError("create_failed", "pi did not create a session file");
+          }
+          const record = (yield* catalog.list()).find(
+            (candidate) => candidate.canonicalFile === sessionFile,
+          );
+          if (!record) {
+            yield* shutdownCreatedRuntime(supervisor, receipt.runtimeId);
+            return yield* sourceError("create_failed", "pi session was not cataloged");
+          }
+          if (!runtime || runtime.status === "exited") {
+            const recovery = yield* dispatchSupervisor({
               type: "start",
-              commandId: input.commandId,
+              commandId: CommandIdSchema.make(`pi-create-recovery:${input.commandId}`),
               cwd: input.cwd,
+              sessionFile,
             });
-            if (!receipt.runtimeId) {
-              return yield* sourceError("create_failed", "pi did not return a runtime");
-            }
-            const runtime = (yield* supervisor.list()).find(
-              (candidate) => candidate.runtimeId === receipt.runtimeId,
-            );
-            const sessionFile = runtime?.sessionFile ?? receiptSessionFile(receipt);
-            if (!sessionFile) {
-              yield* shutdownCreatedRuntime(supervisor, receipt.runtimeId);
-              return yield* sourceError("create_failed", "pi did not create a session file");
-            }
-            const record = (yield* catalog.list()).find(
-              (candidate) => candidate.canonicalFile === sessionFile,
-            );
-            if (!record) {
-              yield* shutdownCreatedRuntime(supervisor, receipt.runtimeId);
-              return yield* sourceError("create_failed", "pi session was not cataloged");
-            }
-            if (!runtime || runtime.status === "exited") {
-              const recovery = yield* dispatchSupervisor({
-                type: "start",
-                commandId: CommandIdSchema.make(`pi-create-recovery:${input.commandId}`),
-                cwd: input.cwd,
-                sessionFile,
-              });
-              const recoveredRuntime =
-                recovery.runtimeId === undefined
-                  ? undefined
-                  : (yield* supervisor.list()).find(
-                      (candidate) =>
-                        candidate.runtimeId === recovery.runtimeId && candidate.status !== "exited",
-                    );
-              if (!recoveredRuntime) {
-                if (recovery.runtimeId !== undefined) {
-                  yield* shutdownCreatedRuntime(supervisor, recovery.runtimeId);
-                }
-                return yield* sourceError(
-                  "create_failed",
-                  "pi session did not retain a managed runtime",
-                );
+            const recoveredRuntime =
+              recovery.runtimeId === undefined
+                ? undefined
+                : (yield* supervisor.list()).find(
+                    (candidate) =>
+                      candidate.runtimeId === recovery.runtimeId && candidate.status !== "exited",
+                  );
+            if (!recoveredRuntime) {
+              if (recovery.runtimeId !== undefined) {
+                yield* shutdownCreatedRuntime(supervisor, recovery.runtimeId);
               }
+              return yield* sourceError(
+                "create_failed",
+                "pi session did not retain a managed runtime",
+              );
             }
-            const snapshot = yield* buildCatalog(true);
-            yield* publishCatalogSnapshot(snapshot, true);
-            yield* PubSub.publish(catalogInvalidations, undefined);
-            return { threadId: record.threadId };
+          }
+          const snapshot = yield* buildCatalog(true);
+          yield* publishCatalogSnapshot(snapshot, true);
+          yield* PubSub.publish(catalogInvalidations, undefined);
+          return { threadId: record.threadId };
+        }),
+        dispatch: Effect.fn("PiExternalThreadSource.dispatch")((command) =>
+          Effect.suspend(() => {
+            const native = piCommandFromV2(command);
+            return native === undefined
+              ? Effect.fail(
+                  sourceError(
+                    "unsupported_external_mutation",
+                    `${command.type} is not supported for external Pi threads`,
+                  ),
+                )
+              : dispatch(native).pipe(
+                  Effect.flatMap((result) =>
+                    result.deliveryStatus === "indeterminate"
+                      ? Effect.fail(
+                          sourceError(
+                            "indeterminate",
+                            "Native Pi delivery could not be confirmed. Retry with the same command identity.",
+                          ),
+                        )
+                      : Effect.succeed({ sequence: result.sequence }),
+                  ),
+                );
           }),
-        dispatch,
+        ),
       });
     }),
   );

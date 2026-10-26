@@ -980,58 +980,70 @@ describe("managed Pi admission ledger", () => {
   it("does not expose a transition until its persistence completes", async () => {
     let releasePersist!: () => void;
     const persistGate = new Promise<void>((resolve) => (releasePersist = resolve));
+    const persistenceStarted = Promise.withResolvers<void>();
     const harness = makeManagedHarness(new Map(), {
       persist: async (_snapshot, index) => {
-        if (index === 0) await persistGate;
+        if (index === 0) {
+          persistenceStarted.resolve();
+          await persistGate;
+        }
       },
     });
-    const first = harness.controller.claim({}, managedClaim());
-    await new Promise((resolve) => setImmediate(resolve));
-    let duplicateSettled = false;
-    const duplicate = harness.controller.claim({}, managedClaim()).then((result) => {
-      duplicateSettled = true;
+    const completions: string[] = [];
+    const first = harness.controller.claim({}, managedClaim()).then((result) => {
+      completions.push("first");
       return result;
     });
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(duplicateSettled).toBe(false);
+    await persistenceStarted.promise;
+    const duplicate = harness.controller.claim({}, managedClaim()).then((result) => {
+      completions.push("duplicate");
+      return result;
+    });
     releasePersist();
     expect((await first).status).toBe("granted");
     expect(await duplicate).toEqual({ status: "delivering" });
+    expect(completions).toEqual(["first", "duplicate"]);
   });
 
   it("does not expose completed until finalization persistence completes", async () => {
     let releaseFinalize!: () => void;
     const finalizeGate = new Promise<void>((resolve) => (releaseFinalize = resolve));
+    const finalizationStarted = Promise.withResolvers<void>();
     const harness = makeManagedHarness(new Map(), {
       persist: async (_snapshot, index) => {
-        if (index === 1) await finalizeGate;
+        if (index === 1) {
+          finalizationStarted.resolve();
+          await finalizeGate;
+        }
       },
     });
     const holder = {};
     const granted = await harness.controller.claim(holder, managedClaim());
     if (granted.status !== "granted") throw new Error("expected managed lease");
-    const finalization = harness.controller.finalize(holder, {
-      protocol: MANAGED_ADMISSION_PROTOCOL,
-      operationKey: granted.operationKey,
-      leaseToken: granted.leaseToken,
-      finalization: { status: "completed", receipt: { turnId: "turn-1" } },
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    let duplicateSettled = false;
+    const completions: string[] = [];
+    const finalization = harness.controller
+      .finalize(holder, {
+        protocol: MANAGED_ADMISSION_PROTOCOL,
+        operationKey: granted.operationKey,
+        leaseToken: granted.leaseToken,
+        finalization: { status: "completed", receipt: { turnId: "turn-1" } },
+      })
+      .then((result) => {
+        completions.push("finalization");
+        return result;
+      });
+    await finalizationStarted.promise;
     const duplicate = harness.controller.claim({}, managedClaim()).then((result) => {
-      duplicateSettled = true;
+      completions.push("duplicate");
       return result;
     });
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(duplicateSettled).toBe(false);
     releaseFinalize();
     expect(await finalization).toMatchObject({ status: "finalized" });
     expect(await duplicate).toEqual({
       status: "completed",
       receipt: { turnId: "turn-1" },
     });
+    expect(completions).toEqual(["finalization", "duplicate"]);
   });
 
   it("fails closed after managed admission persistence fails", async () => {
@@ -1050,14 +1062,18 @@ describe("managed Pi admission ledger", () => {
   it("makes a disconnect during initial persistence indeterminate before reuse", async () => {
     let releasePersist!: () => void;
     const persistGate = new Promise<void>((resolve) => (releasePersist = resolve));
+    const persistenceStarted = Promise.withResolvers<void>();
     const harness = makeManagedHarness(new Map(), {
       persist: async (_snapshot, index) => {
-        if (index === 0) await persistGate;
+        if (index === 0) {
+          persistenceStarted.resolve();
+          await persistGate;
+        }
       },
     });
     const socket = {};
     const claim = harness.controller.claim(socket, managedClaim());
-    await new Promise((resolve) => setImmediate(resolve));
+    await persistenceStarted.promise;
     const disconnect = harness.controller.disconnect(socket);
     releasePersist();
 
@@ -1080,13 +1096,17 @@ describe("managed Pi admission ledger", () => {
   it("does not grant when the lease times out during initial persistence", async () => {
     let releasePersist!: () => void;
     const persistGate = new Promise<void>((resolve) => (releasePersist = resolve));
+    const persistenceStarted = Promise.withResolvers<void>();
     const harness = makeManagedHarness(new Map(), {
       persist: async (_snapshot, index) => {
-        if (index === 0) await persistGate;
+        if (index === 0) {
+          persistenceStarted.resolve();
+          await persistGate;
+        }
       },
     });
     const claim = harness.controller.claim({}, managedClaim());
-    await new Promise((resolve) => setImmediate(resolve));
+    await persistenceStarted.promise;
 
     harness.timers[0]!.work();
     releasePersist();
@@ -1163,7 +1183,6 @@ describe("managed Pi admission ledger", () => {
     const harness = makeManagedHarness();
     await harness.controller.claim({}, managedClaim());
     harness.timers[0]!.work();
-    await new Promise((resolve) => setImmediate(resolve));
 
     expect(await harness.controller.claim({}, managedClaim())).toMatchObject({
       status: "indeterminate",
@@ -1204,7 +1223,6 @@ describe("managed Pi admission ledger", () => {
       receipt: { turnId: "turn-1" },
     });
     harness.timers[0]!.work();
-    await new Promise((resolve) => setImmediate(resolve));
     expect(await harness.controller.claim({}, managedClaim())).toEqual({
       status: "completed",
       receipt: { turnId: "turn-1" },

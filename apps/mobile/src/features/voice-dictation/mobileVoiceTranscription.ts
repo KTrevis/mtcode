@@ -1,3 +1,7 @@
+import {
+  throwIfVoiceTranscriptionAborted,
+  type VoiceTranscriber,
+} from "@t3tools/client-runtime/voice-input";
 import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
 
 export interface MobileVoiceTranscriptionConfig {
@@ -52,6 +56,7 @@ export async function transcribeMobileVoiceRecording(
   uri: string,
   config: MobileVoiceTranscriptionConfig,
   fetchFn: typeof globalThis.fetch = globalThis.fetch,
+  signal?: AbortSignal,
 ): Promise<string> {
   const provider = mobileVoiceTranscriptionProviderConfig(config.provider);
   const form = new FormData();
@@ -63,6 +68,9 @@ export async function transcribeMobileVoiceRecording(
   } as unknown as Blob);
 
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) controller.abort();
   const timeout = setTimeout(() => controller.abort(), 2 * 60 * 1_000);
   try {
     const response = await fetchFn(provider.endpoint, {
@@ -87,11 +95,29 @@ export async function transcribeMobileVoiceRecording(
     }
     return payload.text.trim();
   } catch (cause) {
+    if (signal?.aborted) throwIfVoiceTranscriptionAborted(signal);
     if (cause instanceof Error && cause.name === "AbortError") {
       throw new Error("Voice transcription timed out.", { cause });
     }
     throw cause;
   } finally {
+    signal?.removeEventListener("abort", abort);
     clearTimeout(timeout);
   }
+}
+
+export function configuredMobileVoiceTranscriber(
+  config: MobileVoiceTranscriptionConfig,
+): VoiceTranscriber | null {
+  if (!config.apiKey.trim()) return null;
+  return {
+    prepare: async ({ signal }) => {
+      throwIfVoiceTranscriptionAborted(signal);
+      return {
+        locale: "auto",
+        transcribe: (uri, { signal }) =>
+          transcribeMobileVoiceRecording(uri, config, globalThis.fetch, signal),
+      };
+    },
+  };
 }

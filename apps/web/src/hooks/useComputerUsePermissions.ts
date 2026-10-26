@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useStableCallback } from "./useStableCallback";
+import { useEffect, useState } from "react";
 import type {
   DesktopComputerUsePermission,
   DesktopComputerUsePermissionsState,
@@ -15,7 +16,7 @@ function isMissingPermission(permission: DesktopComputerUsePermission): boolean 
 export function useComputerUsePermissions() {
   const [state, setState] = useState<DesktopComputerUsePermissionsState | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useStableCallback(async () => {
     const bridge = window.desktopBridge;
     if (!bridge?.getComputerUsePermissions) {
       setState(null);
@@ -26,8 +27,9 @@ export function useComputerUsePermissions() {
     } catch {
       setState(null);
     }
-  }, []);
+  });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Desktop privacy grants change outside React when the user returns from system settings.
   useEffect(() => {
     if (!isDesktopHost() || window.desktopBridge?.getComputerUsePermissions === undefined) {
       return;
@@ -42,15 +44,12 @@ export function useComputerUsePermissions() {
     };
   }, [refresh]);
 
-  const missing = useMemo(() => state?.permissions.filter(isMissingPermission) ?? [], [state]);
+  const missing = state?.permissions.filter(isMissingPermission) ?? [];
 
-  const openPermission = useCallback(
-    async (permission: DesktopComputerUsePermission) => {
-      await window.desktopBridge?.openComputerUsePrivacySettings?.(permission.kind);
-      window.setTimeout(() => void refresh(), 1500);
-    },
-    [refresh],
-  );
+  const openPermission = async (permission: DesktopComputerUsePermission) => {
+    await window.desktopBridge?.openComputerUsePrivacySettings?.(permission.kind);
+    window.setTimeout(() => void refresh(), 1500);
+  };
 
   return {
     missing,

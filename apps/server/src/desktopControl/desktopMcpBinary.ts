@@ -1,8 +1,8 @@
 import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+  Architecture as HostProcessArchitecture,
+  Environment as HostProcessEnvironment,
+  Platform as HostProcessPlatform,
+} from "@t3tools/shared/HostProcess";
 import {
   desktopMcpPathOverride,
   MUNIM_COMPUTER_USE_RESOURCE_DIR,
@@ -18,20 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-/**
- * Locate the desktop-control MCP server: the munim-computer-use binary, run by
- * MT Code under its own identity and registered as `mt-desktop`.
- *
- * Order: `MTCODE_DESKTOP_MCP_PATH` (then the deprecated `T3CODE_DESKTOP_MCP_PATH`),
- * the copy packaged into the app's Resources, a local munim-computer-use
- * checkout's build (`$MUNIM_COMPUTER_USE_CHECKOUT`, default `~/computer-use`),
- * the release the desktop build fetched into the cache for the version pinned
- * in `native/munim-computer-use.json`, and finally the newest release the
- * standalone `npx munim-computer-use` launcher cached (how an SSH host, which
- * runs a bare server with no app bundle, gets one). Resolves to undefined
- * when none exists — callers treat that as "do not offer the tools", which
- * also hides Computer View for the machine.
- */
+// Prefer explicit paths, packaged resources, local builds, then cached releases; absent binaries disable desktop tools.
 export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcpPath")(
   function* () {
     const platform = yield* HostProcessPlatform;
@@ -87,20 +74,7 @@ export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcp
   },
 );
 
-/**
- * Where a packaged app keeps the binary, given the directory of the server
- * module doing the lookup.
- *
- * The desktop build stages it at `<resources>/munim-computer-use`, while the
- * server bundle runs from inside an archive in that same directory:
- * `Resources/app.asar/apps/server/dist` on macOS and Linux,
- * `resources\server.asar\apps\server\dist` on Windows. So the copy sits
- * beside the archive, not beside the module. Looking only next to the module
- * missed it on every installed app: the server never advertised Computer View
- * or the agent desktop tools unless a `~/computer-use` checkout happened to be
- * built on that machine (true on the Mac that builds MT Code, false on the
- * Windows laptop).
- */
+// The desktop binary sits beside app.asar/server.asar in Resources, rather than beside the bundled server module.
 export function packagedDesktopMcpCandidates(input: {
   readonly moduleDir: string;
   readonly executableName: string;
@@ -180,13 +154,7 @@ function standaloneCacheBase(
   return root ? path.join(root, "munim-computer-use") : undefined;
 }
 
-/**
- * The binary `npx munim-computer-use` downloaded, if any. Mirrors the
- * launcher's cache: `$COMPUTER_USE_CACHE_DIR`, else
- * `%LOCALAPPDATA%\munim-computer-use` on Windows and
- * `${XDG_CACHE_HOME:-~/.cache}/munim-computer-use` elsewhere, one directory per
- * version.
- */
+// Mirror the munim-computer-use launcher cache layout, including platform-specific cache roots.
 const standaloneReleaseBinary = Effect.fn("desktopControl.standaloneReleaseBinary")(
   function* (input: {
     readonly platform: MunimComputerUsePlatform;

@@ -1,3 +1,4 @@
+import { useStableCallback } from "~/hooks/useStableCallback";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -7,10 +8,10 @@ import {
 import type { BackgroundPolicySnapshot, EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import { projectThreadAwareness, type AgentAwarenessState } from "@t3tools/shared/agentAwareness";
+import { useEffect, useReducer, useRef } from "react";
+import { projectThreadAwarenessV2, type AgentAwarenessState } from "@t3tools/shared/agentAwareness";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import {
   type AgentNotificationTransition,
@@ -34,19 +35,28 @@ import {
 } from "../../hooks/useSettings.ts";
 import { isElectron } from "../../env.ts";
 import {
-  readThreadShell,
-  readProject,
   setActiveEnvironmentId,
   useAuthoritativeShellEnvironmentIds,
   useConnectedShellEnvironmentIds,
   useProjects,
-  useServerConfigs,
   useThreadShells,
 } from "../../state/entities.ts";
 import { completionNotificationSnapshot } from "../../state/notificationPreview.ts";
 import { environmentBackgroundPolicy } from "../../state/server.ts";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner.ts";
 import { completionNotificationPreview } from "../../completionNotificationPreview.ts";
+
+import { authoritativeShellEnvironmentIdsAtom, environmentSnapshotAtom } from "../../state/shell";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+
+const notificationShellsAtom = Atom.make((get) =>
+  [...get(authoritativeShellEnvironmentIdsAtom)].flatMap((environmentId) =>
+    (get(environmentSnapshotAtom(environmentId))?.threads ?? []).map((thread) => ({
+      environmentId,
+      thread,
+    })),
+  ),
+);
 
 const COMPLETION_NOTIFICATION_QUERY_TIMEOUT_MS = 1_250;
 
@@ -84,10 +94,12 @@ function BrowserNotificationPolicyObserver({
   );
   const policy = Option.getOrNull(AsyncResult.value(result));
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(() => {
     onChanged(environmentId, policy);
   }, [environmentId, onChanged, policy]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(
     () => () => {
       onChanged(environmentId, null);
@@ -106,7 +118,7 @@ export function DesktopNotificationCoordinator() {
   const connectedEnvironmentIds = useConnectedShellEnvironmentIds();
   const projects = useProjects();
   const threads = useThreadShells();
-  const serverConfigs = useServerConfigs();
+  const notificationShells = useAtomValue(notificationShellsAtom);
   const navigate = useNavigate();
   const loadCompletionSnapshot = useAtomQueryRunner(completionNotificationSnapshot, {
     label: "completion notification preview",
@@ -128,6 +140,7 @@ export function DesktopNotificationCoordinator() {
   const notificationOperationsRef = useRef(Promise.resolve());
   const lifecycleGenerationRef = useRef(0);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(() => {
     lifecycleGenerationRef.current += 1;
     return () => {
@@ -135,13 +148,13 @@ export function DesktopNotificationCoordinator() {
     };
   }, []);
 
-  const enqueueNotificationOperations = useCallback((operation: () => Promise<void>) => {
+  const enqueueNotificationOperations = useStableCallback((operation: () => Promise<void>) => {
     notificationOperationsRef.current = notificationOperationsRef.current
       .then(operation)
       .catch(() => undefined);
-  }, []);
+  });
 
-  const activateTarget = useCallback(
+  const activateTarget = useStableCallback(
     (target: { readonly environmentId: EnvironmentId; readonly threadId: string }) => {
       setActiveEnvironmentId(target.environmentId);
       void navigate({
@@ -149,10 +162,9 @@ export function DesktopNotificationCoordinator() {
         params: target,
       });
     },
-    [navigate],
   );
 
-  const updateBackgroundPolicy = useCallback(
+  const updateBackgroundPolicy = useStableCallback(
     (environmentId: EnvironmentId, policy: BackgroundPolicySnapshot | null) => {
       if (policy === null) {
         if (!backgroundPoliciesRef.current.delete(environmentId)) {
@@ -166,10 +178,9 @@ export function DesktopNotificationCoordinator() {
       }
       markBackgroundPoliciesChanged();
     },
-    [],
   );
 
-  const observed = useMemo(() => {
+  const observed = (() => {
     const projectsByKey = new Map(
       projects.map((project) => [
         scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
@@ -177,45 +188,41 @@ export function DesktopNotificationCoordinator() {
       ]),
     );
 
-    return threads.flatMap((thread) => {
+    return notificationShells.flatMap(({ thread, environmentId }) => {
       const project = projectsByKey.get(
-        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+        scopedProjectKey(scopeProjectRef(environmentId, thread.projectId)),
       );
       if (!project) {
         return [];
       }
-      const target = scopeThreadRef(thread.environmentId, thread.id);
+      const target = scopeThreadRef(environmentId, thread.id);
       return [
         {
           key: scopedThreadKey(target),
           target,
-          state: projectThreadAwareness({
-            environmentId: thread.environmentId,
+          state: projectThreadAwarenessV2({
+            environmentId,
             project,
             thread,
           }),
         },
       ];
     });
-  }, [projects, threads]);
+  })();
 
-  const completionContexts = useMemo(
-    () =>
-      new Map(
-        threads.map((thread) => [
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          {
-            assistantMessageId: thread.latestTurn?.assistantMessageId ?? null,
-            turnId: thread.latestTurn?.turnId ?? null,
-            updatedAt: thread.updatedAt,
-            supportsPagination:
-              serverConfigs.get(thread.environmentId)?.threadSnapshotPagination === true,
-          },
-        ]),
-      ),
-    [serverConfigs, threads],
+  const completionContexts = new Map(
+    threads.map((thread) => [
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      {
+        assistantMessageId: thread.latestRun?.assistantMessageId ?? null,
+        runId: thread.latestRun?.runId ?? null,
+        updatedAt: thread.updatedAt,
+        supportsPagination: true,
+      },
+    ]),
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(() => {
     if (!bridge) {
       return;
@@ -223,6 +230,7 @@ export function DesktopNotificationCoordinator() {
     return bridge.onActivated(activateTarget);
   }, [activateTarget, bridge]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(() => {
     if (!settingsHydrated || settings.enabled) {
       return;
@@ -235,6 +243,7 @@ export function DesktopNotificationCoordinator() {
     }
   }, [bridge, enqueueNotificationOperations, settings.enabled, settingsHydrated]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize remote activity and notification lifecycle with the desktop or browser notification API.
   useEffect(() => {
     if ((isElectron && !bridge) || !settingsHydrated) {
       return;
@@ -328,18 +337,14 @@ export function DesktopNotificationCoordinator() {
 
         const target = scopeThreadRef(transition.state.environmentId, transition.state.threadId);
         const transitionIsCurrent = () => {
-          const currentThread = readThreadShell(target);
-          if (currentThread === null) {
-            return false;
-          }
-          const currentProject = readProject(
-            scopeProjectRef(currentThread.environmentId, currentThread.projectId),
+          const snapshot = appAtomRegistry.get(environmentSnapshotAtom(target.environmentId));
+          const currentThread = snapshot?.threads.find((thread) => thread.id === target.threadId);
+          const currentProject = snapshot?.projects.find(
+            (project) => project.id === currentThread?.projectId,
           );
-          if (currentProject === null) {
-            return false;
-          }
-          const currentAwareness = projectThreadAwareness({
-            environmentId: currentThread.environmentId,
+          if (!currentThread || !currentProject) return false;
+          const currentAwareness = projectThreadAwarenessV2({
+            environmentId: target.environmentId,
             project: currentProject,
             thread: currentThread,
           });
@@ -366,9 +371,9 @@ export function DesktopNotificationCoordinator() {
             );
             if (result?._tag === "Success" && Option.isSome(result.value)) {
               completionPreview = completionNotificationPreview({
-                messages: result.value.value.thread.messages,
+                messages: result.value.value.projection.messages,
                 assistantMessageId: context.assistantMessageId,
-                turnId: context.turnId,
+                runId: context.runId,
               });
             }
           }
@@ -450,6 +455,7 @@ export function DesktopNotificationCoordinator() {
     bridge,
     activateTarget,
     authoritativeEnvironmentIds,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Remote policy subscriptions mutate the registry and bump its generation.
     backgroundPolicyGeneration,
     completionContexts,
     enqueueNotificationOperations,

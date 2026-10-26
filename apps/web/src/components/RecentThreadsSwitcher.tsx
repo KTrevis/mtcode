@@ -1,21 +1,5 @@
-/**
- * Alt-tab style switcher over the threads opened this session, newest first
- * (topped up by most recent activity until two have been visited, so it works
- * straight after a reload).
- * Ctrl+Tab opens it and advances, Ctrl+Shift+Tab goes back, releasing the
- * held modifier opens the highlighted thread, Escape cancels. Mounted once at
- * the root so it works on every route, with or without the sidebar.
- *
- * The list is frozen on open: a thread deleted or archived mid-switch keeps
- * its row as a muted placeholder so the highlight never slides onto a
- * different thread, and committing on it just closes. A route change made
- * elsewhere while the switcher is open (another shortcut, a click, a remote
- * event) also turns the commit into a plain close.
- *
- * Browsers reserve Ctrl+Tab for their own tab switching, so the default
- * shortcut only ever reaches us in the desktop app; in a browser the commands
- * stay inert until the user rebinds them to reachable keys.
- */
+// Freeze the recent-thread list while modifiers are held so remote updates never move the selection.
+
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -211,6 +195,7 @@ export function RecentThreadsSwitcher() {
     if (!stillHeld) commit();
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Route native modifier keydown/keyup and window blur events into the session switcher.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => handleWindowKeyDown(event);
     const onKeyUp = (event: KeyboardEvent) => handleWindowKeyUp(event);
@@ -248,7 +233,9 @@ function RecentThreadsSwitcherOverlay({
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Scroll the highlighted row inside the switcher’s DOM list as keyboard selection changes.
   useEffect(() => {
+    if (selectedIndex < 0) return;
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 

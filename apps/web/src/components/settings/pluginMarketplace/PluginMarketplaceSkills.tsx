@@ -8,9 +8,9 @@ import {
 import { Link } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { ArrowRightIcon, SparklesIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { PROVIDER_ICON_BY_PROVIDER } from "~/components/chat/providerIconUtils";
+import { ProviderInstanceIcon } from "~/components/chat/ProviderInstanceIcon";
 import { Button } from "~/components/ui/button";
 import {
   Dialog,
@@ -39,7 +39,10 @@ export function usePrimarySkillInventory(refreshKey: number): SkillInventoryStat
   const prepared = usePreparedConnection(usePrimaryEnvironmentId());
   const [state, setState] = useState<SkillInventoryState>({ status: "loading" });
 
+  /* oxlint-disable react/set-state-in-effect -- Load the current environment skill inventory after an explicit refresh. Loading resets belong to this external request lifecycle. */
+  // oxlint-disable-next-line t3code/react-effect-budget -- Load the current environment skill inventory after an explicit refresh.
   useEffect(() => {
+    void refreshKey;
     if (Option.isNone(prepared)) return;
     let cancelled = false;
     setState((current) => (current.status === "loaded" ? current : { status: "loading" }));
@@ -61,7 +64,9 @@ export function usePrimarySkillInventory(refreshKey: number): SkillInventoryStat
     return () => {
       cancelled = true;
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refreshKey explicitly reloads the remote inventory.
   }, [prepared, refreshKey]);
+  /* oxlint-enable react/set-state-in-effect */
 
   return Option.isNone(prepared) ? { status: "unavailable" } : state;
 }
@@ -84,13 +89,12 @@ function SkillCard({
   readonly skill: SkillInventoryInstallation;
   readonly onOpen: () => void;
 }) {
-  const HarnessIcon = PROVIDER_ICON_BY_PROVIDER[skill.harness] ?? null;
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label={`View ${skill.name} skill`}
-      className="flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 text-left outline-none transition-colors hover:bg-foreground/4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-card/40"
+      className="flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 text-left outline-none transition-colors hover:bg-foreground/4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-card/40"
     >
       <span
         aria-hidden="true"
@@ -104,7 +108,11 @@ function SkillCard({
           {skill.description ?? "No description"}
         </span>
         <span className="mt-1 flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-          {HarnessIcon ? <HarnessIcon aria-hidden className="size-3 shrink-0" /> : null}
+          <ProviderInstanceIcon
+            driverKind={skill.harness}
+            displayName={skill.harnessDisplayName}
+            size="compact"
+          />
           <span className="shrink-0">{skill.harnessDisplayName}</span>
           <span aria-hidden="true">·</span>
           <span className="truncate font-mono text-2xs">
@@ -128,10 +136,7 @@ export function InstalledSkillsSection({
 }) {
   const [visibleCount, setVisibleCount] = useState(SKILL_PAGE_SIZE);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const openSkill = useMemo(
-    () => skills?.find((skill) => skillKey(skill) === openKey) ?? null,
-    [openKey, skills],
-  );
+  const openSkill = skills?.find((skill) => skillKey(skill) === openKey) ?? null;
   const visible = skills?.slice(0, visibleCount) ?? [];
 
   return (

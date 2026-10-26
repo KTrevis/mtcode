@@ -6,7 +6,7 @@ import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
 import type { DesktopThreadDeepLinkPayload } from "@t3tools/contracts";
-import { HostProcessArguments } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -212,27 +212,28 @@ export const make = Effect.gen(function* () {
     return null;
   };
 
-  const subscribe = (sender: DesktopIpc.DesktopIpcSenderWebContents | undefined) =>
-    Effect.gen(function* () {
-      const currentGeneration = yield* Ref.get(generation);
-      if (sender === undefined || sender.isDestroyed()) {
-        return { payload: null, generation: currentGeneration };
+  const subscribe = Effect.fn("subscribe")(function* (
+    sender: DesktopIpc.DesktopIpcSenderWebContents | undefined,
+  ) {
+    const currentGeneration = yield* Ref.get(generation);
+    if (sender === undefined || sender.isDestroyed()) {
+      return { payload: null, generation: currentGeneration };
+    }
+    yield* Effect.sync(() => {
+      if (!subscribers.includes(sender)) {
+        subscribers.push(sender);
       }
-      yield* Effect.sync(() => {
-        if (!subscribers.includes(sender)) {
-          subscribers.push(sender);
-        }
-        if (!observedSenders.has(sender)) {
-          observedSenders.add(sender);
-          sender.once("destroyed", () => removeSubscriber(sender));
-        }
-      });
-      const payload = yield* Ref.get(pending);
-      return {
-        payload: Option.getOrNull(payload),
-        generation: currentGeneration,
-      };
+      if (!observedSenders.has(sender)) {
+        observedSenders.add(sender);
+        sender.once("destroyed", () => removeSubscriber(sender));
+      }
     });
+    const payload = yield* Ref.get(pending);
+    return {
+      payload: Option.getOrNull(payload),
+      generation: currentGeneration,
+    };
+  });
 
   // The renderer's preload invokes this when its deep-link listener tears
   // down. Without it a reloaded or route-unmounted renderer would stay in the
@@ -254,53 +255,51 @@ export const make = Effect.gen(function* () {
       const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
       const runPromise = Effect.runPromiseWith(context);
 
-      const open = (payload: DesktopThreadDeepLinkPayload) =>
-        Effect.gen(function* () {
-          const deliveryGeneration = yield* Ref.updateAndGet(generation, (value) => value + 1);
-          yield* Ref.set(pending, Option.some(payload));
-          const subscriber = latestLiveSubscriber();
-          if (subscriber === null) {
-            yield* logInfo("thread deep link buffered until a renderer subscribes", {
-              environmentId: payload.environmentId,
-              threadId: payload.threadId,
-            });
-            return;
-          }
-          const window = yield* electronWindow.fromWebContentsId(subscriber.id);
-          if (Option.isSome(window)) {
-            yield* electronWindow.reveal(window.value);
-          }
-          const delivered = yield* Effect.sync(() => {
-            if (subscriber.isDestroyed()) return false;
-            try {
-              subscriber.send(DEEP_LINK_CHANNEL, payload, deliveryGeneration);
-              return true;
-            } catch {
-              return false;
-            }
-          });
-          if (!delivered) {
-            // The subscriber died between selection and send; keep the link
-            // for the next subscriber instead of dropping it.
-            removeSubscriber(subscriber);
-            return;
-          }
-          yield* logInfo("thread deep link sent to renderer", {
+      const open = Effect.fn("open")(function* (payload: DesktopThreadDeepLinkPayload) {
+        const deliveryGeneration = yield* Ref.updateAndGet(generation, (value) => value + 1);
+        yield* Ref.set(pending, Option.some(payload));
+        const subscriber = latestLiveSubscriber();
+        if (subscriber === null) {
+          yield* logInfo("thread deep link buffered until a renderer subscribes", {
             environmentId: payload.environmentId,
             threadId: payload.threadId,
           });
+          return;
+        }
+        const window = yield* electronWindow.fromWebContentsId(subscriber.id);
+        if (Option.isSome(window)) {
+          yield* electronWindow.reveal(window.value);
+        }
+        const delivered = yield* Effect.sync(() => {
+          if (subscriber.isDestroyed()) return false;
+          try {
+            subscriber.send(DEEP_LINK_CHANNEL, payload, deliveryGeneration);
+            return true;
+          } catch {
+            return false;
+          }
         });
+        if (!delivered) {
+          // The subscriber died between selection and send; keep the link
+          // for the next subscriber instead of dropping it.
+          removeSubscriber(subscriber);
+          return;
+        }
+        yield* logInfo("thread deep link sent to renderer", {
+          environmentId: payload.environmentId,
+          threadId: payload.threadId,
+        });
+      });
 
       yield* ipc
         .handle({
           channel: DEEP_LINK_ACK_CHANNEL,
-          handler: (raw, event) =>
-            Effect.gen(function* () {
-              if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return null;
-              if (event?.sender === undefined || !subscribers.includes(event.sender)) return null;
-              if ((yield* Ref.get(generation)) === raw) yield* Ref.set(pending, Option.none());
-              return null;
-            }),
+          handler: Effect.fn("handler")(function* (raw, event) {
+            if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return null;
+            if (event?.sender === undefined || !subscribers.includes(event.sender)) return null;
+            if ((yield* Ref.get(generation)) === raw) yield* Ref.set(pending, Option.none());
+            return null;
+          }),
         })
         .pipe(
           Effect.catch((error) =>
@@ -376,7 +375,7 @@ export const make = Effect.gen(function* () {
       // Cold starts: URLs stashed by the early capture before this service
       // existed (macOS; latest wins) and the primary instance's own command
       // line (Windows/Linux).
-      const processArguments = yield* HostProcessArguments;
+      const processArguments = yield* HostProcess.Arguments;
       const earlyUrls = earlyCapture.drain().toReversed();
       const initial =
         findThreadDeepLinkInArgv(earlyUrls, scheme) ??

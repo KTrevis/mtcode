@@ -26,17 +26,6 @@ export function buildGoalContinuationPrompt(objective: string): string {
   return CONTINUATION_TEMPLATE.replace(OBJECTIVE_PLACEHOLDER, () => objective);
 }
 
-const INTERRUPTED_TURN_CONTINUATION_PROMPT = [
-  "The previous turn was interrupted before it finished.",
-  "Continue from where you left off. Do not repeat work that is already done;",
-  "pick up the remaining steps and finish them.",
-].join("\n");
-
-/** T3-authored prompt for the composer's one-tap Continue after an interrupted Turn. */
-export function buildInterruptedTurnContinuationPrompt(): string {
-  return INTERRUPTED_TURN_CONTINUATION_PROMPT;
-}
-
 export function goalContinuationCommandId(input: {
   readonly threadId: string;
   readonly goalUpdatedAt: string;
@@ -63,8 +52,6 @@ export function isProviderAccountUsageLimitError(message: string | null | undefi
   }
   return USAGE_LIMIT_ERROR_PATTERN.test(message);
 }
-
-export const EMPTY_GOAL_CONTINUATION_LIMIT = 3;
 
 const OBJECTIVE_COMPLETE_TAG = /<objective_complete>([\s\S]*?)<\/objective_complete>/;
 const OBJECTIVE_BLOCKED_TAG = /<objective_blocked>([\s\S]*?)<\/objective_blocked>/;
@@ -114,7 +101,7 @@ export function countTrailingEmptyGoalContinuations(
   }
   const continuations = thread.activities
     .filter((activity) => activity.kind === "goal.continued" && activity.createdAt >= resetAt)
-    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   if (continuations.length === 0) {
     return 0;
   }

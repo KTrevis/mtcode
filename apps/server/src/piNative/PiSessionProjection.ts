@@ -1,15 +1,16 @@
 import type {
+  PiThreadSnapshot,
+  PiActivity,
+  PiMessage,
+  PiSession,
+  PiThread,
+  PiEvent,
+} from "./PiThreadModel.ts";
+import type {
   EventId,
   ExternalThreadBacking,
   MessageId,
-  OrchestrationEvent,
-  OrchestrationMessage,
   OrchestrationProjectShell,
-  OrchestrationSession,
-  OrchestrationThread,
-  OrchestrationThreadActivity,
-  OrchestrationThreadDetailSnapshot,
-  OrchestrationThreadShell,
   ProjectId,
   RuntimeTaskId,
   TurnId,
@@ -121,7 +122,7 @@ function runtimeSession(
   record: PiSessionCatalogRecord,
   runtime: SupervisorRuntimeState | undefined,
   activeTurnId: TurnId | null,
-): OrchestrationSession | null {
+): PiSession | null {
   if (!runtime) return null;
   const status =
     runtime.status === "streaming"
@@ -295,7 +296,7 @@ function projectedSubagentActivities(input: {
   readonly completedAt: string;
   readonly metadata: PiSubagentMetadata;
   readonly isError: boolean;
-}): ReadonlyArray<OrchestrationThreadActivity> {
+}): ReadonlyArray<PiActivity> {
   const taskId = piSubagentTaskId(input.record.sessionId, input.toolCallId);
   const linkage = subagentLinkage(input.metadata, input.toolCallId);
   const completion = subagentCompletionPresentation(input.metadata, input.isError);
@@ -333,8 +334,8 @@ function projectedSubagentActivities(input: {
 
 function projectHistory(record: PiSessionCatalogRecord, entries: ReadonlyArray<JsonRecord>) {
   const branch = activeBranch(entries);
-  const messages: OrchestrationMessage[] = [];
-  const activities: OrchestrationThreadActivity[] = [];
+  const messages: PiMessage[] = [];
+  const activities: PiActivity[] = [];
   const toolActivityIndex = new Map<string, number>();
   let currentTurnId: TurnId | null = null;
   let nextUserMessageId: MessageId | undefined;
@@ -473,7 +474,7 @@ function projectHistory(record: PiSessionCatalogRecord, entries: ReadonlyArray<J
       const priorArgs = isRecord(priorData?.rawInput) ? priorData.rawInput : {};
       const presentation = toolPresentation(message.toolName, priorArgs, message);
       const metadata = parsePiSubagent(priorArgs, message);
-      const completed: OrchestrationThreadActivity = {
+      const completed: PiActivity = {
         id: prior?.id ?? activityId(record, `tool:${message.toolCallId}`),
         tone: message.isError === true ? "error" : "tool",
         kind: "item.completed",
@@ -539,7 +540,7 @@ export function projectPiThread(input: {
     readonly override: "settled" | "active";
     readonly updatedAt: string;
   };
-}): OrchestrationThreadDetailSnapshot {
+}): PiThreadSnapshot {
   const history = projectHistory(input.record, input.entries);
   const session = runtimeSession(input.record, input.runtime, history.activeTurnId);
   const running = session?.status === "running";
@@ -570,7 +571,7 @@ export function projectPiThread(input: {
           completedAt: running ? null : (lastAssistant?.updatedAt ?? input.record.updatedAt),
           assistantMessageId: lastAssistant?.id ?? null,
         };
-  const thread: OrchestrationThread = {
+  const thread: PiThread = {
     id: input.record.threadId,
     projectId: input.projectId,
     title: input.record.title,
@@ -623,12 +624,12 @@ export function projectPiThread(input: {
 }
 
 export function projectPiThreadOverlay(
-  snapshot: OrchestrationThreadDetailSnapshot,
+  snapshot: PiThreadSnapshot,
   record: PiSessionCatalogRecord,
   events: ReadonlyArray<SupervisorStreamEvent>,
   occurredAt = record.updatedAt,
   omittedOverlayEventCount = 0,
-): OrchestrationThreadDetailSnapshot {
+): PiThreadSnapshot {
   let messages = [...snapshot.thread.messages];
   let activities = [...snapshot.thread.activities];
   let pendingComposerIntents = [...(snapshot.thread.pendingComposerIntents ?? [])];
@@ -724,7 +725,7 @@ export function projectPiThreadOverlay(
       const id = MessageIdSchema.make(
         `${record.sessionId}:live-assistant:${activeTurnId ?? "turn"}`,
       );
-      const message: OrchestrationMessage = {
+      const message: PiMessage = {
         id,
         role: "assistant",
         text,
@@ -754,7 +755,7 @@ export function projectPiThreadOverlay(
       if (parsedMetadata) subagentMetadataByToolCallId.set(toolCallId, parsedMetadata);
       const metadata = parsedMetadata ?? subagentMetadataByToolCallId.get(toolCallId);
       const completed = payload.type === "tool_execution_end";
-      const activity: OrchestrationThreadActivity = {
+      const activity: PiActivity = {
         id,
         tone: payload.data.isError === true ? "error" : "tool",
         kind: completed
@@ -797,7 +798,7 @@ export function projectPiThreadOverlay(
           });
         }
         const completion = subagentCompletionPresentation(metadata, payload.data.isError === true);
-        const taskActivity: OrchestrationThreadActivity = completed
+        const taskActivity: PiActivity = completed
           ? {
               id: activityId(record, `task:${toolCallId}:completed`),
               tone: completion.tone,
@@ -865,41 +866,6 @@ export function projectPiThreadOverlay(
             }
           : session,
     },
-  };
-}
-
-export function projectPiThreadShell(
-  detail: OrchestrationThreadDetailSnapshot,
-): OrchestrationThreadShell {
-  const { thread } = detail;
-  return {
-    id: thread.id,
-    projectId: thread.projectId,
-    title: thread.title,
-    modelSelection: thread.modelSelection,
-    runtimeMode: thread.runtimeMode,
-    interactionMode: thread.interactionMode,
-    branch: thread.branch,
-    worktreePath: thread.worktreePath,
-    latestTurn: thread.latestTurn,
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
-    archivedAt: thread.archivedAt,
-    settledOverride: thread.settledOverride,
-    settledAt: thread.settledAt,
-    snoozedUntil: thread.snoozedUntil,
-    snoozedAt: thread.snoozedAt,
-    pullRequests: thread.pullRequests,
-    session: thread.session,
-    latestUserMessageAt:
-      thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    backing: thread.backing,
-    pendingComposerIntentCount:
-      (thread.pendingComposerIntents?.length ?? 0) +
-      (thread.pendingComposerIntentOmittedCount ?? 0),
   };
 }
 
@@ -973,7 +939,7 @@ export function projectPiLiveEvent(input: {
   readonly item: SupervisorStreamEvent;
   readonly activeTurnId: TurnId | null;
   readonly occurredAt: string;
-}): OrchestrationEvent | null {
+}): PiEvent | null {
   const payload = livePayload(input.item.event);
   if (!payload?.type) return null;
   const occurredAt = input.occurredAt;

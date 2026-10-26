@@ -1,25 +1,26 @@
 import type {
   EnvironmentId,
-  OrchestrationShellSnapshot,
+  OrchestrationV2ShellSnapshot,
   PiExternalCatalogSnapshot,
   ProjectId,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { EnvironmentShellState } from "./shell.ts";
 import type { PiExternalCatalogState } from "./piNative.ts";
 
 export function mergeExternalCatalogShells(
-  internal: OrchestrationShellSnapshot | null,
+  internal: OrchestrationV2ShellSnapshot | null,
   external: PiExternalCatalogSnapshot | null,
-): OrchestrationShellSnapshot | null {
+): OrchestrationV2ShellSnapshot | null {
   if (external === null) return internal;
-  const base: OrchestrationShellSnapshot = internal ?? {
+  const base: OrchestrationV2ShellSnapshot = internal ?? {
+    schemaVersion: 1,
+    archivedThreads: [],
     snapshotSequence: 0,
     projects: [],
     threads: [],
-    updatedAt: external.updatedAt,
   };
   const internalProjectByRoot = new Map(
     base.projects.map((project) => [project.workspaceRoot, project] as const),
@@ -47,10 +48,6 @@ export function mergeExternalCatalogShells(
     ...base,
     projects: [...base.projects, ...externalProjects],
     threads: [...base.threads, ...externalThreads],
-    externalOmittedProjectCount: external.omittedProjectCount,
-    externalOmittedThreadCount: external.omittedThreadCount,
-    updatedAt:
-      base.updatedAt.localeCompare(external.updatedAt) >= 0 ? base.updatedAt : external.updatedAt,
   };
 }
 
@@ -63,7 +60,7 @@ export function createEnvironmentSnapshotAtom<E>(
   ) => Atom.Atom<AsyncResult.AsyncResult<PiExternalCatalogState, E>>,
 ) {
   return Atom.family((environmentId: EnvironmentId) =>
-    Atom.make((get): OrchestrationShellSnapshot | null => {
+    Atom.make((get): OrchestrationV2ShellSnapshot | null => {
       const internal = Option.match(AsyncResult.value(get(shellStateAtom(environmentId))), {
         onNone: () => null,
         onSome: (state) => Option.getOrNull(state.snapshot),

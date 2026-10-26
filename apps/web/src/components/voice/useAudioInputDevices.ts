@@ -13,6 +13,7 @@ export interface AudioInputDevice {
 export function useAudioInputDevices(): ReadonlyArray<AudioInputDevice> {
   const [devices, setDevices] = useState<ReadonlyArray<AudioInputDevice>>([]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Track microphone availability and browser devicechange events.
   useEffect(() => {
     const media = navigator.mediaDevices;
     if (!media?.enumerateDevices) return;

@@ -17,8 +17,7 @@ interface SchemaDiagnosticIssue {
   readonly path: ReadonlyArray<PropertyKey>;
 }
 
-// Schema's default formatter includes actual values. These diagnostics cross
-// process and UI boundaries, so retain only issue kinds and bounded paths.
+// Default Schema diagnostics include values; expose only issue kinds and bounded paths across process/UI boundaries.
 
 function truncateDiagnostic(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
@@ -155,64 +154,33 @@ export const formatSchemaError = (cause: Cause.Cause<Schema.SchemaError>) => {
   return truncateDiagnostic(formatted, MAX_SCHEMA_DIAGNOSTIC_LENGTH - suffix.length) + suffix;
 };
 
-/**
- * A `Getter` that parses a lenient JSON string (tolerating trailing commas
- * and JS-style comments) into an unknown value.
- *
- * Mirrors `SchemaGetter.parseJson()` but strips JSONC syntax before parsing.
- */
 const decodeJsonString = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-const parseLenientJsonGetter = SchemaGetter.onSome((input: string) => {
-  // Strip single-line comments - alternation preserves quoted strings.
+const parseLenientJsonGetter = SchemaGetter.transformEffect((input: string) => {
+  // Match comments together so URLs stay inside blocks; whitespace keeps adjacent tokens apart.
   let stripped = input.replace(
-    /("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g,
-    (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
+    /("(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    (match, stringLiteral: string | undefined) => (stringLiteral ? match : " "),
   );
 
-  // Strip multi-line comments.
-  stripped = stripped.replace(
-    /("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g,
-    (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
-  );
-
-  // Strip trailing commas before `}` or `]`. The alternation preserves quoted
-  // strings so a comma inside a string value (e.g. `{"note":"a,]"}`) is not
-  // mistaken for a trailing comma and removed.
   stripped = stripped.replace(
     /("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g,
     (match, stringLiteral: string | undefined, bracket: string | undefined) =>
       stringLiteral ? match : (bracket ?? ""),
   );
 
-  return decodeJsonString(stripped).pipe(
-    Effect.asSome,
-    Effect.mapError((error) => error.issue),
-  );
+  return decodeJsonString(stripped).pipe(Effect.mapError((error) => error.issue));
 });
 
-/**
- * Schema transformation: lenient JSONC string ↔ unknown.
- *
- * Same API as `SchemaTransformation.fromJsonString`, but the decode side
- * strips trailing commas and JS-style comments before parsing.
- * Encoding produces strict JSON via `JSON.stringify`.
- */
 const fromLenientJsonString = new SchemaTransformation.Transformation(
   parseLenientJsonGetter,
   SchemaGetter.stringifyJson(),
 );
 
-const prettyJsonString = SchemaGetter.parseJson<string>().compose(
-  SchemaGetter.stringifyJson({ space: 2 }),
+const prettyJsonString = SchemaGetter.parseJson<string>().pipe(
+  SchemaGetter.compose(SchemaGetter.stringifyJson({ space: 2 })),
 );
 
-/**
- * Build a schema that decodes a lenient JSON string into `A`.
- *
- * Drop-in replacement for `Schema.fromJsonString(schema)` that tolerates
- * trailing commas and comments in the input.
- */
 export const fromLenientJson = <S extends Schema.Top>(schema: S) =>
   Schema.String.pipe(Schema.decodeTo(schema, fromLenientJsonString));
 
@@ -274,19 +242,7 @@ function scanJsonObject(text: string, start: number) {
   return { end: null, stack: lastCompleteStack, lastComplete };
 }
 
-/**
- * The JSON object inside an agent's reply.
- *
- * Agents do not always answer with only the object asked for: some wrap it in prose or a fenced
- * block, and a long answer — a ranking over a whole backlog, say — can simply stop partway. The
- * first brace in the text is therefore not reliably the start of the answer, and the text after
- * it is not reliably a complete object.
- *
- * So every brace is tried until one yields something that parses, and a reply that was cut off is
- * closed back to its last complete entry rather than thrown away — the entries that did arrive
- * are still worth having. Falls back to the original span when nothing parses, which leaves the
- * caller's own error to describe the failure.
- */
+// Agent output can be fenced, prefixed by prose, or cut off after a complete entry.
 export function extractJsonObject(raw: string): string {
   const trimmed = raw
     .trim()
@@ -307,7 +263,7 @@ export function extractJsonObject(raw: string): string {
     if (scan.lastComplete !== null) {
       const repaired =
         trimmed.slice(start, scan.lastComplete).replace(/,\s*$/u, "") +
-        scan.stack.toReversed().join("");
+        [...scan.stack].reverse().join("");
       if (parsesAsJson(repaired)) return repaired;
     }
   }
@@ -315,12 +271,6 @@ export function extractJsonObject(raw: string): string {
   return trimmed.slice(firstBrace);
 }
 
-/**
- * Build a JSON string schema that encodes with stable 2-space formatting.
- *
- * Decode behavior matches `Schema.fromJsonString(schema)`. Encode behavior
- * keeps the transformation schema-based while preserving human-readable JSON.
- */
 export const fromJsonStringPretty = <S extends Schema.Top>(schema: S) =>
   Schema.fromJsonString(schema).pipe(
     Schema.encode({

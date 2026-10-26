@@ -1,3 +1,7 @@
+const copyContextMenuImageMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("./ContextMenuImage.ts", () => ({ copyContextMenuImage: copyContextMenuImageMock }));
+import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
+import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -15,7 +19,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as Electron from "electron";
 import * as NodeEvents from "node:events";
-import { vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
   ...(await importOriginal<typeof import("electron")>()),
@@ -406,6 +410,21 @@ function makeTestLayer(input: {
   return DesktopWindow.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        DesktopState.layer,
+        Layer.mock(DesktopRendererHistory.DesktopRendererHistory)({
+          register: () => Effect.void,
+          recordMetrics: () => Effect.void,
+          shutdown: Effect.void,
+        }),
+        Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+          bridgeEnabled: false,
+          installSessionHandlers: () => {},
+          attachGuest: () => () => {},
+        }),
+      ),
+    ),
+    Layer.provide(
+      Layer.mergeAll(
         desktopAssetsLayer,
         desktopEnvironmentLayer,
         desktopAppSettingsLayer,
@@ -435,6 +454,7 @@ function makeTestLayer(input: {
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
+          prepareWebview: () => Effect.void,
           isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
           getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
           reapplyZoom: () =>
@@ -537,6 +557,21 @@ const makeSplashScenario = (
     const layer = DesktopWindow.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          DesktopState.layer,
+          Layer.mock(DesktopRendererHistory.DesktopRendererHistory)({
+            register: () => Effect.void,
+            recordMetrics: () => Effect.void,
+            shutdown: Effect.void,
+          }),
+          Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+            bridgeEnabled: false,
+            installSessionHandlers: () => {},
+            attachGuest: () => () => {},
+          }),
+        ),
+      ),
+      Layer.provide(
+        Layer.mergeAll(
           desktopAssetsLayer,
           desktopEnvironmentLayer,
           DesktopAppSettings.layerTest(),
@@ -554,6 +589,7 @@ const makeSplashScenario = (
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
             setMainWindow: () => Effect.void,
+            prepareWebview: () => Effect.void,
             isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
             getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
           }),
@@ -668,14 +704,16 @@ describe("DesktopWindow", () => {
           assert.isDefined(copyLink?.click);
           copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           copyLink.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
-          assert.deepEqual(contents.copyImageAt.mock.calls, [[12, 34]]);
+          expect(copyContextMenuImageMock.mock.calls.at(-1)).toEqual([
+            contents,
+            expect.objectContaining({ x: 12, y: 34 }),
+          ]);
           assert.equal(copiedTexts.at(-1), "https://example.com/image.png");
 
           contents.isDestroyed.mockReturnValue(true);
           correction.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           assert.equal(contents.replaceMisspelling.mock.calls.length, 1);
-          assert.equal(contents.copyImageAt.mock.calls.length, 1);
           assert.equal(yield* Queue.size(menus), 0);
         }
       }).pipe(Effect.provide(layer));

@@ -1,3 +1,4 @@
+import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { useAtomValue } from "@effect/atom-react";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import {
@@ -6,17 +7,15 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ServerProvider } from "@t3tools/contracts";
 import { ExternalLinkIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { primaryServerProvidersAtom, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { Button } from "../ui/button";
-import { Card } from "../ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
@@ -43,12 +42,12 @@ function StatusEmptyState({
   readonly description: string;
 }) {
   return (
-    <Empty className="min-h-64 rounded-xl border border-dashed border-border/70 bg-card/20 p-8">
+    <Empty className="min-h-64">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <ShieldCheckIcon />
         </EmptyMedia>
-        <EmptyTitle className="text-base">{title}</EmptyTitle>
+        <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
     </Empty>
@@ -92,7 +91,7 @@ function RateLimitRow({
         />
       </div>
       {resetTimestamp ? (
-        <p className="mt-2 text-[11px] text-muted-foreground">Resets {resetTimestamp}</p>
+        <p className="mt-2 text-2xs text-muted-foreground">Resets {resetTimestamp}</p>
       ) : null}
     </div>
   );
@@ -108,7 +107,7 @@ function CodexRateLimitsCard({
   const rateLimits = provider.codexStatus?.rateLimits;
 
   return (
-    <Card className="gap-0 rounded-xl border-border/70 bg-card/35 p-4 shadow-none before:rounded-[calc(var(--radius-xl)-1px)]">
+    <div className="gap-0 rounded-xl border-border/70 bg-card/35 p-4 shadow-none before:rounded-xl">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           {showProviderLabel ? (
@@ -125,7 +124,7 @@ function CodexRateLimitsCard({
       {rateLimits?.primary || rateLimits?.secondary ? (
         <div className="mt-4 flex flex-col gap-2">
           {rateLimits.limitName ? (
-            <span className="text-[11px] text-muted-foreground">{rateLimits.limitName}</span>
+            <span className="text-2xs text-muted-foreground">{rateLimits.limitName}</span>
           ) : null}
           {rateLimits.primary ? (
             <RateLimitRow
@@ -157,7 +156,7 @@ function CodexRateLimitsCard({
           Rate limit data is not available yet. Click Update to try again.
         </p>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -171,7 +170,7 @@ function ClaudeRateLimitsCard({
   const rateLimits = provider.claudeStatus?.rateLimits;
 
   return (
-    <Card className="gap-0 rounded-xl border-border/70 bg-card/35 p-4 shadow-none before:rounded-[calc(var(--radius-xl)-1px)]">
+    <div className="gap-0 rounded-xl border-border/70 bg-card/35 p-4 shadow-none before:rounded-xl">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           {showProviderLabel ? (
@@ -220,7 +219,7 @@ function ClaudeRateLimitsCard({
           Claude rate limit data is not available yet. Click Update to try again.
         </p>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -232,22 +231,12 @@ export function StatusPage() {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const codexProviders = useMemo(
-    () => providers.filter((provider) => provider.driver === "codex"),
-    [providers],
+  const codexProviders = providers.filter((provider) => provider.driver === "codex");
+  const claudeProviders = providers.filter((provider) => provider.driver === "claudeAgent");
+  const statusProviders = providers.filter(
+    (provider) => provider.driver === "codex" || provider.driver === "claudeAgent",
   );
-  const claudeProviders = useMemo(
-    () => providers.filter((provider) => provider.driver === "claudeAgent"),
-    [providers],
-  );
-  const statusProviders = useMemo(
-    () =>
-      providers.filter(
-        (provider) => provider.driver === "codex" || provider.driver === "claudeAgent",
-      ),
-    [providers],
-  );
-  const refresh = useCallback(async () => {
+  const refresh = async () => {
     if (!primaryEnvironmentId || isRefreshing) return;
     setIsRefreshing(true);
     try {
@@ -276,34 +265,16 @@ export function StatusPage() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, primaryEnvironmentId, refreshProviders, statusProviders]);
+  };
 
   return (
-    <SidebarInset className="isolate h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="isolate h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        {!isElectron ? (
-          <header
-            className={cn(
-              "workspace-topbar px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
-              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            )}
-          >
-            <WorkspaceBreadcrumb ariaLabel="Status breadcrumb">
-              <WorkspaceBreadcrumbItem current>Status</WorkspaceBreadcrumbItem>
-            </WorkspaceBreadcrumb>
-          </header>
-        ) : (
-          <div
-            className={cn(
-              "drag-region flex h-[52px] shrink-0 items-center px-5 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
-              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            )}
-          >
-            <WorkspaceBreadcrumb ariaLabel="Status breadcrumb">
-              <WorkspaceBreadcrumbItem current>Status</WorkspaceBreadcrumbItem>
-            </WorkspaceBreadcrumb>
-          </div>
-        )}
+        <WorkspacePageHeader electron={isElectron}>
+          <WorkspaceBreadcrumb ariaLabel="Status breadcrumb">
+            <WorkspaceBreadcrumbItem current>Status</WorkspaceBreadcrumbItem>
+          </WorkspaceBreadcrumb>
+        </WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-6">

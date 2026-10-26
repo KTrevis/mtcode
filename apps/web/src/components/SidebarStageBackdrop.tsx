@@ -27,8 +27,8 @@ export type SidebarStageBackdropVariant =
   | { readonly kind: "sky"; readonly conditions: SkyConditions; readonly name: string };
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
-export const NIGHTLY_BACKDROP: SidebarStageBackdropVariant = { kind: "nightly" };
-export const DEV_BACKDROP: SidebarStageBackdropVariant = { kind: "dev" };
+const NIGHTLY_BACKDROP: SidebarStageBackdropVariant = { kind: "nightly" };
+const DEV_BACKDROP: SidebarStageBackdropVariant = { kind: "dev" };
 
 /** A preset sky. Night · Cloudy is the Night sky scene itself, so it draws that. */
 function presetBackdrop(
@@ -40,14 +40,8 @@ function presetBackdrop(
   return { kind: "sky", conditions: presetConditions(phase, weather), name };
 }
 
-/**
- * Resolve the artwork to draw from the account's choice.
- *
- * "auto" defers to the build channel the way upstream does; every other value
- * is a deliberate pick and ignores the channel entirely, which is the point on
- * a single-release build like MT Code.
- */
-export function resolveSidebarArtwork(input: {
+// Resolve the artwork to draw from the account's choice.
+function resolveSidebarArtwork(input: {
   readonly selection: string;
   readonly stageLabel: string;
   readonly custom: ReadonlyArray<{
@@ -146,7 +140,6 @@ export function useSidebarStageBackdropVariant(
   });
 }
 
-/** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
 export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant }) {
   return (
     <div
@@ -183,11 +176,7 @@ function skyMarkup(conditions: SkyConditions): string {
   return markup;
 }
 
-/**
- * A drawn sky, framed like the Night sky scene: 96 units tall at the header's
- * height and extended sideways, so a wider sidebar shows more sky rather than
- * a bigger one.
- */
+// A drawn sky, framed like the Night sky scene: 96 units tall at the header's height and extended sideways, so a wider sidebar shows more sky rather than a bigger one.
 function SkyArt({
   variant,
   compact = false,
@@ -226,7 +215,7 @@ function CustomArt({
     <div
       role="img"
       aria-label={variant.name}
-      className="stage-art h-full w-full bg-cover bg-center bg-no-repeat"
+      className="h-full w-full bg-cover bg-center bg-no-repeat"
       style={{ backgroundImage: `url(${JSON.stringify(variant.image)})` }}
     />
   );

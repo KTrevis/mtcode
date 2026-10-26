@@ -13,9 +13,7 @@ import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import { getLocalEnvironmentEnabled, setLocalEnvironmentEnabled } from "./localEnvironment.ts";
 
-// `relaunch` declares the lifecycle runtime services as requirements even
-// though the mocked relaunch never touches them.
-const unusedLifecycleRuntimeLayer = Layer.mergeAll(
+const layerUnusedLifecycleRuntime = Layer.mergeAll(
   DesktopShutdown.layer,
   DesktopState.layer,
   Layer.succeed(
@@ -44,7 +42,7 @@ describe("local environment IPC", () => {
             relaunchReasons.push(reason);
           }),
       }),
-      unusedLifecycleRuntimeLayer,
+      layerUnusedLifecycleRuntime,
     );
     return Effect.gen(function* () {
       yield* setLocalEnvironmentEnabled.handler(false);

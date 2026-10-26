@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Stream from "effect/Stream";
 
-import { EnvironmentRpcUnavailableError, request } from "../rpc/client.ts";
+import { EnvironmentRpcUnavailableError, requestGuarded } from "../rpc/client.ts";
 
 export type SshPasswordPromptHandler = (
   request: SourceControlSshPasswordPromptRequest,
@@ -30,44 +30,47 @@ export const resolveSshPasswordPrompt = (
   }).pipe(
     Effect.orElseSucceed(() => null),
     Effect.flatMap((password) =>
-      request(WS_METHODS.sourceControlResolveSshPasswordPrompt, {
+      requestGuarded(WS_METHODS.sourceControlResolveSshPasswordPrompt, {
         requestId: promptRequest.requestId,
         password,
       }),
     ),
   );
 
-export const consumeSshPromptedOperation = <Result, Error, Requirements>(
+export const consumeSshPromptedOperation = Effect.fn("consumeSshPromptedOperation")(function* <
+  Result,
+  Error,
+  Requirements,
+>(
   environmentId: EnvironmentId,
   operation: string,
   stream: Stream.Stream<SshPromptedOperationEvent<Result>, Error, Requirements>,
   onSshPasswordPrompt: SshPasswordPromptHandler,
-) =>
-  Effect.gen(function* () {
-    type ResolutionError = Effect.Error<ReturnType<typeof resolveSshPasswordPrompt>>;
-    const resolutionFailed = yield* Deferred.make<never, ResolutionError>();
-    const consume = stream.pipe(
-      Stream.mapEffect((event) => {
-        if (event._tag === "complete") {
-          return Effect.succeed(event.result);
-        }
-        return resolveSshPasswordPrompt(event.request, onSshPasswordPrompt).pipe(
-          Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
-          Effect.forkChild({ startImmediately: true }),
-          Effect.as(null),
-        );
-      }),
-      Stream.runFold(
-        () => null as Result | null,
-        (current, next) => next ?? current,
-      ),
-    );
-    const result = yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
-    if (result === null) {
-      return yield* new EnvironmentRpcUnavailableError({
-        environmentId,
-        message: `${operation} ended before the server returned a result.`,
-      });
-    }
-    return result;
-  });
+) {
+  type ResolutionError = Effect.Error<ReturnType<typeof resolveSshPasswordPrompt>>;
+  const resolutionFailed = yield* Deferred.make<never, ResolutionError>();
+  const consume = stream.pipe(
+    Stream.mapEffect((event) => {
+      if (event._tag === "complete") {
+        return Effect.succeed(event.result);
+      }
+      return resolveSshPasswordPrompt(event.request, onSshPasswordPrompt).pipe(
+        Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
+        Effect.forkChild({ startImmediately: true }),
+        Effect.as(null),
+      );
+    }),
+    Stream.runFold(
+      () => null as Result | null,
+      (current, next) => next ?? current,
+    ),
+  );
+  const result = yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
+  if (result === null) {
+    return yield* new EnvironmentRpcUnavailableError({
+      environmentId,
+      message: `${operation} ended before the server returned a result.`,
+    });
+  }
+  return result;
+});

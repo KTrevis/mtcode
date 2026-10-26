@@ -54,7 +54,7 @@ export function VoiceTranscriptionPanel({
           type="button"
           size="icon-sm"
           variant="ghost-muted"
-          className="shrink-0 rounded-full"
+          className="shrink-0"
           {...pointerFocusProps}
           onClick={onCancel}
           aria-label="Cancel transcription"
@@ -77,7 +77,7 @@ export function VoiceTranscriptionPanel({
         type="button"
         size="icon-sm"
         variant="ghost-muted"
-        className="shrink-0 rounded-full"
+        className="shrink-0"
         {...pointerFocusProps}
         onClick={onCancel}
         aria-label="Cancel dictation"
@@ -117,7 +117,7 @@ export function VoiceTranscriptionPanel({
         type="button"
         size="icon-sm"
         variant="secondary"
-        className="shrink-0 rounded-full"
+        className="shrink-0"
         {...pointerFocusProps}
         onClick={onStop}
         aria-label="Stop dictation"
@@ -128,7 +128,7 @@ export function VoiceTranscriptionPanel({
         type="button"
         size="icon-sm"
         disabled={sendDisabled}
-        className="shrink-0 rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover"
+        className="shrink-0"
         {...pointerFocusProps}
         onClick={onSend}
         aria-label="Transcribe and send"

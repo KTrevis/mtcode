@@ -1,21 +1,7 @@
 // Used by second-instance argv and macOS open-url to find the custom-scheme
 // URL the already-running desktop window should load.
-export function isDesktopProtocolUrl(value: string, scheme: string): boolean {
+function isDesktopProtocolUrl(value: string, scheme: string): boolean {
   return value.startsWith(`${scheme}://`);
-}
-
-export function isDesktopClerkOAuthCallback(value: string, scheme: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === `${scheme}:` &&
-      url.host === "app" &&
-      url.pathname === "/" &&
-      (url.searchParams.has("__clerk_status") || url.searchParams.has("rotating_token_nonce"))
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function extractDesktopProtocolUrl(argv: readonly string[], scheme: string): string | null {

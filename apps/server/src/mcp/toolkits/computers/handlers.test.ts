@@ -1,212 +1,109 @@
-import { expect, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
-  type OrchestrationCommand,
-  type OrchestrationShellSnapshot,
-  type OrchestrationThreadShell,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type OrchestrationV2ThreadShell,
+  type OrchestrationProjectShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
-import { McpSchema, McpServer } from "effect/unstable/ai";
-
-import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as Projects from "../../../project/ProjectService.ts";
+import * as DocumentText from "../../../provider/DocumentText.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as McpContext from "../../McpInvocationContext.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ComputerToolkitHandlersLive } from "./handlers.ts";
-import { ComputerToolkit } from "./tools.ts";
+import { __testing } from "./handlers.ts";
 
-const now = "2026-01-01T00:00:00.000Z";
-const environmentId = EnvironmentId.make("environment-mac");
-const projectId = ProjectId.make("project-t3");
-const sourceThreadId = ThreadId.make("thread-source");
-
-function makeThread(
-  id: ThreadId,
-  input: Partial<OrchestrationThreadShell> = {},
-): OrchestrationThreadShell {
-  return {
-    id,
-    projectId,
-    title: "Source Agent",
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5-codex",
-    },
-    runtimeMode: "approval-required",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    ...input,
-  };
-}
-
-const source = makeThread(sourceThreadId);
-const snapshot = {
-  snapshotSequence: 10,
-  projects: [
-    {
-      id: projectId,
-      title: "t3code",
-      workspaceRoot: "/Users/me/dev/t3code",
-      defaultModelSelection: null,
-      scripts: [],
-      createdAt: now,
-      updatedAt: now,
-    },
-  ],
-  threads: [source],
-  updatedAt: now,
-} satisfies OrchestrationShellSnapshot;
-
-const invocation = {
-  environmentId,
-  threadId: sourceThreadId,
-  providerSessionId: "provider-session-computers",
-  providerInstanceId: ProviderInstanceId.make("codex"),
-  capabilities: new Set<never>(),
-  issuedAt: 1,
-};
-
-const client = McpSchema.McpServerClient.of({
-  clientId: 1,
-  clientCapabilities: {},
-  clientInfo: { name: "computer-task-test", version: "1.0.0" },
-  protocolVersion: "2025-06-18",
-  initializePayload: {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "computer-task-test", version: "1.0.0" },
-  },
-  getClient: Effect.die("unused"),
-});
-
-const descriptor = {
-  environmentId,
-  label: "Sheehan's Mac",
-  platform: { os: "darwin" as const, arch: "arm64" as const },
-  serverVersion: "0.0.1",
-  capabilities: { repositoryIdentity: false },
-};
-
-function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
-  const query = {
-    getShellSnapshot: () => Effect.succeed(snapshot),
-    getThreadShellById: (threadId: ThreadId) => {
-      const thread = snapshot.threads.find(({ id }) => id === threadId);
-      return Effect.succeed(thread === undefined ? Option.none() : Option.some(thread));
-    },
-  } as unknown as ProjectionSnapshotQuery["Service"];
-
-  const engine = {
-    readEvents: () => Stream.empty,
-    dispatch: (command) => {
-      dispatched.push(command);
-      return Effect.succeed({ sequence: 11 });
-    },
-    readThreadEvents: () => Stream.empty,
-    getThreadReplayStats: () => Effect.die("unused thread replay stats"),
-    streamDomainEvents: Stream.empty,
-    subscribeDomainEvents: Effect.succeed(Stream.empty),
-    latestSequence: Effect.succeed(10),
-  } satisfies OrchestrationEngineService["Service"];
-
-  const environment = {
-    getEnvironmentId: Effect.succeed(environmentId),
-    getDescriptor: Effect.succeed(descriptor),
-    // Nothing in these handlers renames the environment; the stub exists so
-    // the service shape is complete.
-    setEnvironmentLabel: () => Effect.void,
-  } satisfies ServerEnvironment.ServerEnvironment["Service"];
-
-  return McpServer.toolkit(ComputerToolkit).pipe(
-    Layer.provide(ComputerToolkitHandlersLive),
-    Layer.provideMerge(McpServer.McpServer.layer),
-    Layer.provideMerge(ComputerTaskBroker.layer),
-    Layer.provideMerge(Layer.succeed(ProjectionSnapshotQuery, query)),
-    Layer.provideMerge(Layer.succeed(OrchestrationEngineService, engine)),
-    Layer.provideMerge(Layer.succeed(ServerEnvironment.ServerEnvironment, environment)),
-    Layer.provideMerge(NodeServices.layer),
-  );
-}
-
-it.effect("lists this machine and starts a local thread for computer_send this", () => {
-  const dispatched: Array<OrchestrationCommand> = [];
-  return Effect.scoped(
+it.effect(
+  "starts local computer work with source attribution and refuses unknown destinations",
+  () =>
     Effect.gen(function* () {
-      const server = yield* McpServer.McpServer;
-      expect(server.tools.some(({ tool }) => tool.name === "computer_list")).toBe(true);
-      expect(server.tools.some(({ tool }) => tool.name === "computer_send")).toBe(true);
-
-      const listed = yield* server
-        .callTool({ name: "computer_list", arguments: {} })
-        .pipe(
-          Effect.provideService(McpSchema.McpServerClient, client),
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-        );
-      expect(listed.isError).toBe(false);
-      expect(listed.structuredContent).toMatchObject({
-        thisEnvironmentId: environmentId,
-        computers: [{ label: "Sheehan's Mac", thisMachine: true }],
-      });
-
-      const sent = yield* server
-        .callTool({
-          name: "computer_send",
-          arguments: { computer: "this", message: "Build the Windows installer." },
-        })
-        .pipe(
-          Effect.provideService(McpSchema.McpServerClient, client),
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-        );
-      expect(sent.isError).toBe(false);
-      expect(dispatched[0]?.type).toBe("thread.turn.start");
-      if (dispatched[0]?.type === "thread.turn.start") {
-        expect(dispatched[0].message.text).toContain("Build the Windows installer.");
-        expect(dispatched[0].bootstrap?.createThread?.projectId).toBe(projectId);
-      }
-    }),
-  ).pipe(Effect.provide(makeTestLayer(dispatched)));
-});
-
-it.effect("refuses an unknown computer", () => {
-  const dispatched: Array<OrchestrationCommand> = [];
-  return Effect.scoped(
-    Effect.gen(function* () {
-      const server = yield* McpServer.McpServer;
-      const sent = yield* server
-        .callTool({
-          name: "computer_send",
-          arguments: { computer: "toaster", message: "hello" },
-        })
-        .pipe(
-          Effect.provideService(McpSchema.McpServerClient, client),
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-        );
-      expect(sent.isError).toBe(true);
-      const text = sent.content.find((part) => part.type === "text");
-      expect(text?.type === "text" && text.text.includes("No computer matches 'toaster'")).toBe(
-        true,
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const environmentId = EnvironmentId.make("environment");
+      const projectId = ProjectId.make("project");
+      const sourceId = ThreadId.make("source");
+      const instanceId = ProviderInstanceId.make("codex");
+      const dependencies = Layer.mergeAll(
+        NodeCrypto.layer,
+        NodeServices.layer,
+        ComputerTaskBroker.layer.pipe(Layer.provide(NodeCrypto.layer)),
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-computer-launch-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+        DocumentText.layer.pipe(Layer.provide(NodeServices.layer)),
+        Layer.succeed(McpContext.McpInvocationContext, {
+          environmentId,
+          capabilities: new Set(["orchestration" as const]),
+          requestNamespace: "session",
+          issuedAt: 0,
+          thread: {
+            threadId: sourceId,
+            providerSessionId: "session",
+            providerInstanceId: instanceId,
+          },
+          client: undefined,
+        }),
+        Layer.succeed(ServerEnvironment.ServerEnvironment, {
+          getEnvironmentId: Effect.succeed(environmentId),
+          getDescriptor: Effect.succeed({
+            environmentId,
+            label: "Mac",
+            platform: { os: "darwin" as const, arch: "arm64" as const },
+            serverVersion: "1",
+            capabilities: { repositoryIdentity: false },
+          }),
+        }),
+        Layer.mock(Projects.ProjectService)({
+          listShells: () =>
+            Effect.succeed([
+              {
+                id: projectId,
+                title: "Project",
+                workspaceRoot: "/project",
+              } as unknown as OrchestrationProjectShell,
+            ]),
+        }),
+        Layer.mock(ThreadManagement.ThreadManagementService)({
+          getThreadShell: () =>
+            Effect.succeed({
+              id: sourceId,
+              projectId,
+              archivedAt: null,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              modelSelection: { instanceId, model: "gpt-5" },
+            } as unknown as OrchestrationV2ThreadShell),
+        }),
+        Layer.mock(ThreadLaunch.ThreadLaunchService)({
+          launch: (input) => {
+            launched.push(input);
+            return Effect.succeed({
+              threadId: input.threadId!,
+              resumed: false,
+              projection: {} as ThreadLaunch.ThreadLaunchResult["projection"],
+            });
+          },
+        }),
       );
+      const rejected = yield* __testing
+        .computerSend({ computer: "toaster", message: "Build" })
+        .pipe(Effect.flip, Effect.provide(dependencies));
+      expect(rejected.code).toBe("computer_not_found");
+      expect(launched).toHaveLength(0);
+      const result = yield* __testing
+        .computerSend({ computer: "this", message: "Build the installer." })
+        .pipe(Effect.provide(dependencies));
+      expect(launched).toHaveLength(1);
+      expect(result.threadId).toBe(launched[0]?.threadId);
+      expect(launched[0]?.workspaceStrategy).toEqual({ type: "root" });
+      expect(launched[0]?.initialMessage?.text).toContain("Source thread: source");
+      expect(launched[0]?.initialMessage?.text).toContain("Build the installer.");
     }),
-  ).pipe(Effect.provide(makeTestLayer(dispatched)));
-});
+);

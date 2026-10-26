@@ -1,7 +1,14 @@
 import * as Schema from "effect/Schema";
 
-import { CommandId, IsoDateTime, NonNegativeInt, ThreadId } from "./baseSchemas.ts";
-import { OrchestrationProjectShell, OrchestrationThreadShell } from "./orchestration.ts";
+import {
+  CommandId,
+  IsoDateTime,
+  NonNegativeInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
+import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { OrchestrationV2ThreadShell as OrchestrationThreadShell } from "./orchestrationV2.ts";
 
 export const PiNativeSessionKey = Schema.String.pipe(Schema.brand("PiNativeSessionKey"));
 export type PiNativeSessionKey = typeof PiNativeSessionKey.Type;
@@ -183,3 +190,38 @@ export class PiNativeError extends Schema.TaggedError<PiNativeError>()("PiNative
   code: Schema.String,
   message: Schema.String,
 }) {}
+
+export const ExternalThreadCapabilities = Schema.Struct({
+  send: Schema.Boolean,
+  attachments: Schema.Boolean,
+  streamingBehaviors: Schema.Array(Schema.Literals(["steer", "followUp"])),
+  interrupt: Schema.Boolean,
+  stop: Schema.Boolean,
+  rename: Schema.Boolean,
+  archive: Schema.Boolean,
+  settle: Schema.optionalKey(Schema.Boolean),
+  unsettle: Schema.optionalKey(Schema.Boolean),
+  delete: Schema.Boolean,
+  changeModel: Schema.Boolean,
+  changeRuntimeMode: Schema.Boolean,
+  changeInteractionMode: Schema.Boolean,
+  checkpoints: Schema.Boolean,
+});
+export type ExternalThreadCapabilities = typeof ExternalThreadCapabilities.Type;
+
+export const ExternalThreadBacking = Schema.Struct({
+  kind: Schema.Literal("external"),
+  source: Schema.Literal("pi"),
+  sourceKey: TrimmedNonEmptyString,
+  control: Schema.Literals(["live", "resumable", "readOnly"]),
+  runtimePresence: Schema.optionalKey(Schema.Literals(["connected", "unknown"])),
+  capabilities: ExternalThreadCapabilities,
+});
+export type ExternalThreadBacking = typeof ExternalThreadBacking.Type;
+
+export const ExternalThreadHistoryTruncation = Schema.Struct({
+  truncated: Schema.Boolean,
+  omittedEntryCount: Schema.optionalKey(NonNegativeInt),
+  missingParentId: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type ExternalThreadHistoryTruncation = typeof ExternalThreadHistoryTruncation.Type;

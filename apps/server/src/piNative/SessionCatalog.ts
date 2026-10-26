@@ -665,10 +665,11 @@ export function makeSessionCatalog(options: SessionCatalogOptions = {}): Session
     }
   };
   return SessionCatalog.of({
-    list: (priorityFiles) =>
+    list: Effect.fn("SessionCatalog.list")((priorityFiles) =>
       Effect.tryPromise({ try: () => refresh(priorityFiles), catch: failure }),
-    omittedCount: () => Effect.succeed(omittedFileCount),
-    read: (threadId) =>
+    ),
+    omittedCount: Effect.fn("SessionCatalog.omittedCount")(() => Effect.succeed(omittedFileCount)),
+    read: Effect.fn("SessionCatalog.read")((threadId) =>
       Effect.tryPromise({
         try: async () => {
           const catalogRecord =
@@ -720,29 +721,32 @@ export function makeSessionCatalog(options: SessionCatalogOptions = {}): Session
         },
         catch: failure,
       }),
-    findLifecycleOperation: (threadId, operationId) =>
-      Effect.tryPromise({
-        try: async () => {
-          const catalogRecord =
-            recordsByThreadId.get(threadId) ??
-            (await refresh()).find((candidate) => candidate.threadId === threadId);
-          if (!catalogRecord) throw new Error("unknown external thread");
-          const root = await NodeFS.promises.realpath(configuredRoot);
-          const sessionFile = await NodeFS.promises.realpath(catalogRecord.canonicalFile);
-          if (!sessionFile.startsWith(`${root}${NodePath.sep}`)) {
-            throw new Error("session escaped catalog root");
-          }
-          const stat = await NodeFS.promises.stat(sessionFile);
-          return (
-            await readLatestSessionMetadata(
-              sessionFile,
-              stat.size,
-              catalogRecord.sessionId,
-              operationId,
-            )
-          ).lifecycleOperation;
-        },
-        catch: failure,
-      }),
+    ),
+    findLifecycleOperation: Effect.fn("SessionCatalog.findLifecycleOperation")(
+      (threadId, operationId) =>
+        Effect.tryPromise({
+          try: async () => {
+            const catalogRecord =
+              recordsByThreadId.get(threadId) ??
+              (await refresh()).find((candidate) => candidate.threadId === threadId);
+            if (!catalogRecord) throw new Error("unknown external thread");
+            const root = await NodeFS.promises.realpath(configuredRoot);
+            const sessionFile = await NodeFS.promises.realpath(catalogRecord.canonicalFile);
+            if (!sessionFile.startsWith(`${root}${NodePath.sep}`)) {
+              throw new Error("session escaped catalog root");
+            }
+            const stat = await NodeFS.promises.stat(sessionFile);
+            return (
+              await readLatestSessionMetadata(
+                sessionFile,
+                stat.size,
+                catalogRecord.sessionId,
+                operationId,
+              )
+            ).lifecycleOperation;
+          },
+          catch: failure,
+        }),
+    ),
   });
 }

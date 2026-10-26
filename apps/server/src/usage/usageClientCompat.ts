@@ -1,15 +1,4 @@
-/**
- * Project a full personal usage summary down to what an older hosted client
- * (https://app.t3.codes) can decode.
- *
- * Personal builds are often many commits ahead of main. Their summaries include
- * providers (`cursor` / `grok` / `opencode`) and contractVersion 6 that the
- * hosted web Schema.Literals reject — every connected environment then shows
- * "could not report usage." When the client does not advertise a matching
- * contract version, strip unknown providers and report the hosted version.
- *
- * @module usageClientCompat
- */
+// Older hosted clients reject unknown providers and versions; omit those fields unless the client advertises compatibility.
 import {
   HOSTED_USAGE_CONTRACT_VERSION,
   HOSTED_USAGE_PROVIDER_KINDS,

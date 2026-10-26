@@ -1,8 +1,13 @@
+import * as DateTime from "effect/DateTime";
 import { expect, it } from "vite-plus/test";
-import { EventId, type OrchestrationThreadActivity } from "@t3tools/contracts";
-import { deriveMonitoringTasks, formatMonitoringDuration } from "./monitoring.ts";
+import { EventId } from "@t3tools/contracts";
+import {
+  deriveMonitoringTasks,
+  deriveProjectionMonitoringTasks,
+  formatMonitoringDuration,
+} from "./monitoring.ts";
 
-const row = (kind: string, payload: unknown, minute: number): OrchestrationThreadActivity => ({
+const row = (kind: string, payload: unknown, minute: number) => ({
   id: EventId.make(`${kind}:${minute}`),
   kind,
   payload,
@@ -85,4 +90,44 @@ it("preserves elapsed time on duplicate start notifications", () => {
   const duplicate = row("task.started", { taskId: "watch", taskType: "monitor" }, 12);
   const task = deriveMonitoringTasks([duplicate, started])[0]!;
   expect(formatMonitoringDuration(task, Date.parse(row("", {}, 15).createdAt))).toBe("5m");
+});
+
+it("presents V2 waits with their timestamps and excludes subagent-owned work", () => {
+  const startedAt = DateTime.makeUnsafe("2026-10-01T14:30:00.000Z");
+  const tasks = deriveProjectionMonitoringTasks([
+    {
+      kind: "monitor",
+      taskId: "watch",
+      label: "CI",
+      command: "watch-ci",
+      category: "scheduled",
+      startedAt,
+      nextWakeAt: DateTime.makeUnsafe("2026-10-01T14:35:00.000Z"),
+      stoppable: true,
+    },
+    { kind: "command", taskId: "server", description: "vp run dev" },
+    { kind: "command", taskId: "nested", parentTaskId: "agent" },
+    { kind: "subagent", taskId: "agent" },
+  ]);
+  expect(tasks).toEqual([
+    {
+      id: "watch",
+      label: "CI",
+      command: "watch-ci",
+      category: "scheduled",
+      startedAt: "2026-10-01T14:30:00.000Z",
+      nextWakeAt: "2026-10-01T14:35:00.000Z",
+      stoppable: true,
+    },
+    {
+      id: "server",
+      label: "vp run dev",
+      command: "vp run dev",
+      category: "process",
+      startedAt: null,
+      stoppable: true,
+    },
+  ]);
+  expect(formatMonitoringDuration(tasks[0]!, Date.parse("2026-10-01T14:31:00.000Z"))).toBe("1m");
+  expect(formatMonitoringDuration(tasks[1]!, 0)).toBe("Unknown");
 });

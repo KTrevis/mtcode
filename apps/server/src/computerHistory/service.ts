@@ -17,7 +17,7 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
-export const loadComputerHistoryContext = Effect.fn("computerHistory.loadContext")(function* () {
+const loadComputerHistoryContext = Effect.fn("computerHistory.loadContext")(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const settings = yield* ServerSettings.ServerSettingsService;
   const snapshot = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => undefined));
@@ -47,7 +47,7 @@ export const loadComputerHistoryContextProvided = (
     Effect.orElseSucceed((): string | undefined => undefined),
   );
 
-export const runComputerHistorySummarization = Effect.fn("computerHistory.summarize")(function* () {
+const runComputerHistorySummarization = Effect.fn("computerHistory.summarize")(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const settings = yield* ServerSettings.ServerSettingsService;
   const snapshot = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => undefined));
@@ -64,18 +64,7 @@ export const runComputerHistorySummarization = Effect.fn("computerHistory.summar
   ).pipe(Effect.orElseSucceed(() => ({ created: 0 })));
 });
 
-/**
- * Fork a lightweight loop that summarizes segments.
- * Safe to install in any runtime; no-ops when Computer History is disabled.
- *
- * Desktop IPC owns `control.json` (enable/disable/filters). The server must not
- * rewrite that file from ServerSettings — Settings can patch the daemon before
- * `updateSettings` lands, and a stale sync would undo enable/disable.
- *
- * Canonical export is `layer` (same convention as BackgroundPolicy / UsageService).
- * Callers acquire state via `ServerConfig` / `ServerSettingsService` — never via
- * process.env globals.
- */
+// Desktop IPC owns control.json; syncing stale server settings here could undo its enablement changes.
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* runComputerHistorySummarization().pipe(Effect.ignore);

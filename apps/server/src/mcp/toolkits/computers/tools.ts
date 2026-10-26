@@ -2,27 +2,36 @@ import {
   COMPUTER_SEND_MESSAGE_MAX_CHARS,
   ComputerListResult,
   ComputerTaskError,
+  OrchestratorMcpFailure,
   ComputerTaskSendResult,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { EmptyToolInput } from "../emptyToolInput.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Projects from "../../../project/ProjectService.ts";
+import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as FileSystem from "effect/FileSystem";
+import * as DocumentText from "../../../provider/DocumentText.ts";
+import * as ServerConfig from "../../../config.ts";
 import { resolveAppDisplayName } from "../../../appDisplayName.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   ComputerTaskBroker.ComputerTaskBroker,
   ServerEnvironment.ServerEnvironment,
-  ProjectionSnapshotQuery,
-  OrchestrationEngineService,
+  Projects.ProjectService,
+  ThreadManagement.ThreadManagementService,
+  ThreadLaunch.ThreadLaunchService,
+  DocumentText.DocumentText,
+  FileSystem.FileSystem,
+  ServerConfig.ServerConfig,
   Crypto.Crypto,
 ];
 
@@ -50,11 +59,12 @@ const ComputerSendInput = Schema.Struct({
   ),
 });
 
-export const ComputerListTool = Tool.make("computer_list", {
+const ComputerListTool = Tool.make("computer_list", {
   description: `List computers this ${resolveAppDisplayName()} client can run work on: this machine, SSH hosts, T3 Connect machines, and other paired environments. Call this before computer_send when the task belongs on another OS, desktop, GPU, or filesystem. Returns ids, labels, OS, connection kind, and whether each computer is reachable.`,
   parameters: EmptyToolInput,
   success: ComputerListResult,
-  failure: ComputerTaskError,
+  failure: Schema.Union([ComputerTaskError, OrchestratorMcpFailure]),
+  failureMode: "return" as const,
   dependencies,
 })
   .annotate(Tool.Title, "List computers")
@@ -62,12 +72,13 @@ export const ComputerListTool = Tool.make("computer_list", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const ComputerSendTool = Tool.make("computer_send", {
+const ComputerSendTool = Tool.make("computer_send", {
   description:
     "Start a new T3 thread on another connected computer (or this one) with the given task. The receiving agent runs on that machine, so it has that computer's files, terminal, and Computer Use desktop. Use computer_list to discover ids and labels. This does not move this chat or share its transcript; include everything the recipient needs.",
   parameters: ComputerSendInput,
   success: ComputerTaskSendResult,
-  failure: ComputerTaskError,
+  failure: Schema.Union([ComputerTaskError, OrchestratorMcpFailure]),
+  failureMode: "return" as const,
   dependencies,
 })
   .annotate(Tool.Title, "Send task to computer")

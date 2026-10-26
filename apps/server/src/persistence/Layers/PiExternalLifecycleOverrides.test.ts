@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 
 import { PiExternalLifecycleOverrideRepository } from "../Services/PiExternalLifecycleOverrides.ts";
 import { PiExternalLifecycleOverrideRepositoryLive } from "./PiExternalLifecycleOverrides.ts";
-import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../Sqlite.ts";
 
 const layer = it.layer(
   PiExternalLifecycleOverrideRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),

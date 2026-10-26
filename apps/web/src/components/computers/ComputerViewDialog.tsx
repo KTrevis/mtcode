@@ -1,4 +1,4 @@
-"use client";
+import { observeResize } from "~/lib/observeResize";
 
 import {
   COMPUTER_VIEW_MAX_WIDTH_LIMIT,
@@ -19,9 +19,7 @@ import {
 } from "lucide-react";
 import {
   memo,
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -121,7 +119,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   // derived rather than stored: a frame of the selected display at the size
   // the viewer draws it (scale to fit) or at the screen's own size.
   const [screenWidthHint, setScreenWidthHint] = useState<number | null>(null);
-  const captureWidth = useMemo(() => {
+  const captureWidth = (() => {
     const ratio = settings.highDpi ? devicePixelRatio : 1;
     if (!settings.scaleToFit && screenWidthHint !== null) {
       return Math.min(
@@ -133,29 +131,24 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
       renderedWidth: containerWidth,
       devicePixelRatio: ratio,
     });
-  }, [containerWidth, devicePixelRatio, screenWidthHint, settings.highDpi, settings.scaleToFit]);
+  })();
 
-  const viewAtom = useMemo(
-    () =>
-      computerViewEnvironment.view({
-        environmentId,
-        input: {
-          ...(display === undefined ? {} : { display }),
-          maxWidth: captureWidth,
-          frameRate: settings.frameRate,
-          quality: settings.quality,
-          cursor: true,
-        },
-      }),
-    [captureWidth, display, environmentId, settings.frameRate, settings.quality],
-  );
+  const viewAtom = computerViewEnvironment.view({
+    environmentId,
+    input: {
+      ...(display === undefined ? {} : { display }),
+      maxWidth: captureWidth,
+      frameRate: settings.frameRate,
+      quality: settings.quality,
+      cursor: true,
+    },
+  });
   const { data: view, error: streamError } = useEnvironmentQuery(viewAtom);
   const sendInputCommand = useAtomCommand(computerViewEnvironment.sendInput, {
     reportFailure: false,
   });
   const frame = view?.frame ?? null;
   const frameRef = useRef(frame);
-  frameRef.current = frame;
   // Remembered across stream restarts: changing the capture width restarts the
   // stream, and forgetting the screen size while the next frame is on its way
   // would flip actual-size mode back to a fitted width and restart it again.
@@ -174,36 +167,33 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   const frameSamplesRef = useRef<ComputerViewFrameSample[]>([]);
   const inputLatenciesRef = useRef<Array<{ at: number; ms: number }>>([]);
 
-  const sendInput = useCallback(
-    (rawInput: ComputerViewInput): Promise<void> => {
-      const input = settings.mapShortcuts
-        ? mapShortcutModifiersForRemote(rawInput, { localIsMac, remoteOs })
-        : rawInput;
-      const startedAt = performance.now();
-      return sendInputCommand({ environmentId, input }).then((result) => {
-        const finishedAt = performance.now();
-        inputLatenciesRef.current = [
-          ...inputLatenciesRef.current.filter((entry) => finishedAt - entry.at <= STATS_WINDOW_MS),
-          { at: finishedAt, ms: finishedAt - startedAt },
-        ];
-        if (result._tag === "Failure") {
-          const failure = result.cause.reasons.find((reason) => reason._tag === "Fail");
-          const error = failure?._tag === "Fail" ? failure.error : null;
-          setInputError(
-            error instanceof Error && error.message.trim().length > 0
-              ? error.message
-              : "The remote machine rejected the input.",
-          );
-          return;
-        }
-        setInputError(null);
-      });
-    },
-    [environmentId, localIsMac, remoteOs, sendInputCommand, settings.mapShortcuts],
-  );
+  const sendInput = (rawInput: ComputerViewInput): Promise<void> => {
+    const input = settings.mapShortcuts
+      ? mapShortcutModifiersForRemote(rawInput, { localIsMac, remoteOs })
+      : rawInput;
+    const startedAt = performance.now();
+    return sendInputCommand({ environmentId, input }).then((result) => {
+      const finishedAt = performance.now();
+      inputLatenciesRef.current = [
+        ...inputLatenciesRef.current.filter((entry) => finishedAt - entry.at <= STATS_WINDOW_MS),
+        { at: finishedAt, ms: finishedAt - startedAt },
+      ];
+      if (result._tag === "Failure") {
+        const failure = result.cause.reasons.find((reason) => reason._tag === "Fail");
+        const error = failure?._tag === "Fail" ? failure.error : null;
+        setInputError(
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "The remote machine rejected the input.",
+        );
+        return;
+      }
+      setInputError(null);
+    });
+  };
 
   /** Client coordinates to remote screen coordinates, or null outside the frame. */
-  const toScreenPoint = useCallback((clientX: number, clientY: number) => {
+  const toScreenPoint = (clientX: number, clientY: number) => {
     const currentFrame = frameRef.current;
     const surface = surfaceRef.current;
     if (currentFrame === null || surface === null) return null;
@@ -222,9 +212,9 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
       screenWidth: currentFrame.screenWidth,
       screenHeight: currentFrame.screenHeight,
     });
-  }, []);
+  };
 
-  const flushMove = useCallback(() => {
+  const flushMove = () => {
     // Sends the latest position, then whatever arrived while it was in flight.
     const sendLatest = () => {
       if (moveInFlightRef.current) return;
@@ -238,85 +228,74 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
       });
     };
     sendLatest();
-  }, [sendInput]);
+  };
 
-  const handlePointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLImageElement>) => {
-      if (!controlEnabled || (event.button !== 0 && event.button !== 2)) return;
-      const point = toScreenPoint(event.clientX, event.clientY);
-      if (point === null) return;
-      // The press lands where the pointer is now; a move still waiting to go
-      // out would only arrive after it.
-      moveRef.current = null;
-      pointerDownRef.current = {
-        ...point,
-        button: event.button === 2 ? "right" : "left",
-      };
-    },
-    [controlEnabled, toScreenPoint],
-  );
+  const handlePointerDown = (event: ReactPointerEvent<HTMLImageElement>) => {
+    if (!controlEnabled || (event.button !== 0 && event.button !== 2)) return;
+    const point = toScreenPoint(event.clientX, event.clientY);
+    if (point === null) return;
+    // The press lands where the pointer is now; a move still waiting to go
+    // out would only arrive after it.
+    moveRef.current = null;
+    pointerDownRef.current = {
+      ...point,
+      button: event.button === 2 ? "right" : "left",
+    };
+  };
 
-  const handlePointerUp = useCallback(
-    (event: ReactPointerEvent<HTMLImageElement>) => {
-      const down = pointerDownRef.current;
-      pointerDownRef.current = null;
-      if (!controlEnabled || down === null) return;
-      const point = toScreenPoint(event.clientX, event.clientY);
-      if (point === null) return;
-      void sendInput(
-        classifyPointerGesture({
-          from: { x: down.x, y: down.y },
-          to: point,
-          button: down.button,
-          clickCount: Math.max(1, event.detail),
-        }),
-      );
-    },
-    [controlEnabled, sendInput, toScreenPoint],
-  );
+  const handlePointerUp = (event: ReactPointerEvent<HTMLImageElement>) => {
+    const down = pointerDownRef.current;
+    pointerDownRef.current = null;
+    if (!controlEnabled || down === null) return;
+    const point = toScreenPoint(event.clientX, event.clientY);
+    if (point === null) return;
+    void sendInput(
+      classifyPointerGesture({
+        from: { x: down.x, y: down.y },
+        to: point,
+        button: down.button,
+        clickCount: Math.max(1, event.detail),
+      }),
+    );
+  };
 
   /**
    * The remote pointer follows this one, so hover states, tooltips and menus
    * behave the way they do when sitting at the machine. Skipped while a button
    * is held: that gesture is resolved as a click or drag on release.
    */
-  const handlePointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLImageElement>) => {
-      if (!controlEnabled || pointerDownRef.current !== null) return;
-      const point = toScreenPoint(event.clientX, event.clientY);
-      if (point === null) return;
-      moveRef.current = point;
-      moveTimerRef.current ??= setTimeout(() => {
-        moveTimerRef.current = null;
-        flushMove();
-      }, POINTER_MOVE_FLUSH_MS);
-    },
-    [controlEnabled, flushMove, toScreenPoint],
-  );
+  const handlePointerMove = (event: ReactPointerEvent<HTMLImageElement>) => {
+    if (!controlEnabled || pointerDownRef.current !== null) return;
+    const point = toScreenPoint(event.clientX, event.clientY);
+    if (point === null) return;
+    moveRef.current = point;
+    moveTimerRef.current ??= setTimeout(() => {
+      moveTimerRef.current = null;
+      flushMove();
+    }, POINTER_MOVE_FLUSH_MS);
+  };
 
-  const handleWheel = useCallback(
-    (event: ReactWheelEvent<HTMLImageElement>) => {
-      if (!controlEnabled) return;
-      const point = toScreenPoint(event.clientX, event.clientY);
-      if (point === null) return;
-      const pending = wheelRef.current;
-      wheelRef.current = {
-        deltaX: (pending?.deltaX ?? 0) + event.deltaX,
-        deltaY: (pending?.deltaY ?? 0) + event.deltaY,
-        ...point,
-      };
-      wheelTimerRef.current ??= setTimeout(() => {
-        wheelTimerRef.current = null;
-        const accumulated = wheelRef.current;
-        wheelRef.current = null;
-        if (accumulated === null) return;
-        const input = mapWheelToComputerViewInput(accumulated);
-        if (input !== null) void sendInput(input);
-      }, WHEEL_FLUSH_MS);
-    },
-    [controlEnabled, sendInput, toScreenPoint],
-  );
+  const handleWheel = (event: ReactWheelEvent<HTMLImageElement>) => {
+    if (!controlEnabled) return;
+    const point = toScreenPoint(event.clientX, event.clientY);
+    if (point === null) return;
+    const pending = wheelRef.current;
+    wheelRef.current = {
+      deltaX: (pending?.deltaX ?? 0) + event.deltaX,
+      deltaY: (pending?.deltaY ?? 0) + event.deltaY,
+      ...point,
+    };
+    wheelTimerRef.current ??= setTimeout(() => {
+      wheelTimerRef.current = null;
+      const accumulated = wheelRef.current;
+      wheelRef.current = null;
+      if (accumulated === null) return;
+      const input = mapWheelToComputerViewInput(accumulated);
+      if (input !== null) void sendInput(input);
+    }, WHEEL_FLUSH_MS);
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Release coalesced remote input timers when the viewer unmounts.
   useEffect(
     () => () => {
       if (wheelTimerRef.current !== null) clearTimeout(wheelTimerRef.current);
@@ -327,11 +306,12 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
 
   // Resize follows the window, debounced and stepped by the width helper, so a
   // drag-resize does not restart the capture stream on every frame.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Observe the viewer container to negotiate capture resolution with the remote stream.
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const observer = new ResizeObserver((entries) => {
+    const stopObserving = observeResize(container, (entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       if (width <= 0) return;
       if (timer !== null) clearTimeout(timer);
@@ -340,17 +320,16 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         setContainerWidth(width);
       }, 400);
     });
-    observer.observe(container);
     return () => {
       if (timer !== null) clearTimeout(timer);
-      observer.disconnect();
+      stopObserving();
     };
   }, []);
 
   // Fullscreen plus Keyboard Lock is what lets Cmd-Tab, Escape, and Cmd-Space
   // reach the remote machine instead of this one. Both are best-effort:
   // Safari has neither, and the viewer stays usable without them.
-  const toggleFullscreen = useCallback(() => {
+  const toggleFullscreen = () => {
     const root = rootRef.current;
     if (root === null) return;
     if (document.fullscreenElement === null) {
@@ -367,8 +346,9 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     const keyboard = (navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard;
     keyboard?.unlock?.();
     void document.exitFullscreen?.().catch(() => undefined);
-  }, []);
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Track browser fullscreen changes and release keyboard locks on unmount.
   useEffect(() => {
     const onFullscreenChange = () => {
       setIsFullscreen(document.fullscreenElement !== null);
@@ -385,18 +365,19 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     };
   }, []);
 
-  const sendClipboard = useCallback(() => {
+  const sendClipboard = () => {
     void navigator.clipboard?.readText?.().then(
       (text) => {
         if (text.length > 0) void sendInput({ type: "type", text: text.slice(0, 4_000) });
       },
       () => setInputError("This window was not allowed to read the clipboard."),
     );
-  }, [sendInput]);
+  };
 
   // Pasting types the local clipboard on the remote machine: sending Cmd-V
   // instead would paste whatever is on the REMOTE clipboard, which is not what
   // the person pressing paste in this window means.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Route system paste events to the remote computer while clipboard sync is enabled.
   useEffect(() => {
     if (!controlEnabled || !settings.syncClipboard) return;
     const onPaste = (event: globalThis.ClipboardEvent) => {
@@ -416,6 +397,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     return () => window.removeEventListener("paste", onPaste, true);
   }, [controlEnabled, sendInput, settings.syncClipboard]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Route native keyboard events to the remote computer and release the listener on close.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (resolveShortcutCommand(event, keybindings) === "computerView.toggle") {
@@ -466,7 +448,9 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
 
   // Frame bookkeeping for the stats overlay, kept in refs so an idle overlay
   // costs nothing and an open one re-renders once a second, not per frame.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Record streamed frame sizes for the external capture and input statistics.
   useEffect(() => {
+    frameRef.current = frame;
     if (frame === null) return;
     const now = performance.now();
     frameSamplesRef.current = [
@@ -485,6 +469,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   const hasFrame = frame !== null;
   // Where the picture sits in its container, for drawing the remote pointer
   // over it while only watching.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Observe the rendered image geometry so the remote cursor follows its screen coordinates.
   useEffect(() => {
     const surface = surfaceRef.current;
     const container = containerRef.current;
@@ -497,10 +482,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         height: surface.offsetHeight,
       });
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(surface);
-    observer.observe(container);
-    return () => observer.disconnect();
+    return observeResize([surface, container], update);
   }, [hasFrame]);
   const remoteCursor = view?.cursor ?? null;
   // Like any remote desktop, the pointer over the picture is the remote
@@ -603,9 +585,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         <div className="ml-auto flex items-center gap-1">
           <ToolbarButton
             label={
-              controlEnabled
-                ? "Controlling — clicks and keys go to the remote machine"
-                : "View only"
+              controlEnabled ? "Controlling. clicks and keys go to the remote machine" : "View only"
             }
             pressed={controlEnabled}
             onClick={() => updateSettings({ remoteControl: !controlEnabled })}
@@ -620,7 +600,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
             label={
               isFullscreen
                 ? "Leave fullscreen"
-                : "Fullscreen — sends system shortcuts to the remote machine"
+                : "Fullscreen. sends system shortcuts to the remote machine"
             }
             pressed={isFullscreen}
             onClick={toggleFullscreen}
@@ -647,7 +627,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         <div
           ref={containerRef}
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1 bg-black",
+            "relative flex min-h-0 min-w-0 flex-1 bg-black scrollbar-gutter-both",
             settings.scaleToFit ? "items-center justify-center p-3 pt-0" : "overflow-auto",
           )}
         >
@@ -738,6 +718,7 @@ function useMacWindowControlsInset(isElementFullscreen: boolean): boolean {
       ? getWindowFullscreenState()
       : false;
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- Track fullscreen changes emitted by the native Electron window.
   useEffect(() => {
     const onWindowFullscreenStateChange = window.desktopBridge?.onWindowFullscreenStateChange;
     if (!isMacosDesktop || typeof onWindowFullscreenStateChange !== "function") return;
@@ -1106,6 +1087,7 @@ function ComputerViewStats({
     kilobytesPerSecond: number;
     latency: number | null;
   }>({ framesPerSecond: 0, kilobytesPerSecond: 0, latency: null });
+  // oxlint-disable-next-line t3code/react-effect-budget -- Sample accumulated transport measurements only while the statistics overlay is mounted.
   useEffect(() => {
     const sample = () => {
       const now = performance.now();
@@ -1129,11 +1111,14 @@ function ComputerViewStats({
   const rows: Array<[string, string]> = [
     ["Frame rate", `${framesPerSecond} fps`],
     ["Bandwidth", `${kilobytesPerSecond} KB/s`],
-    ["Input latency", latency === null ? "—" : `${latency} ms`],
-    ["Picture", frame === null ? "—" : `${frame.width}×${frame.height}`],
-    ["Remote screen", frame === null ? "—" : `${frame.screenWidth}×${frame.screenHeight}`],
+    ["Input latency", latency === null ? "Unavailable" : `${latency} ms`],
+    ["Picture", frame === null ? "Unavailable" : `${frame.width}×${frame.height}`],
+    [
+      "Remote screen",
+      frame === null ? "Unavailable" : `${frame.screenWidth}×${frame.screenHeight}`,
+    ],
     ["Requested width", `${captureWidth}px`],
-    ["Encoding", frame === null ? "—" : frame.mimeType === "image/png" ? "PNG" : "JPEG"],
+    ["Encoding", frame === null ? "Unavailable" : frame.mimeType === "image/png" ? "PNG" : "JPEG"],
   ];
   return (
     <div className="pointer-events-none absolute top-2 left-2 z-10 rounded-md bg-black/75 px-3 py-2 font-mono text-2xs leading-5 text-white/85">

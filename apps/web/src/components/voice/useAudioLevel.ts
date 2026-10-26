@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 /**
  * Loudness of a live call, 0..1, sampled from whichever side is talking.
@@ -10,13 +10,12 @@ import { useEffect, useRef, useState } from "react";
 export function useAudioLevel(streams: ReadonlyArray<MediaStream | null>): number {
   const [level, setLevel] = useState(0);
   const key = streams.map((stream) => stream?.id ?? "").join("|");
-  const streamsRef = useRef(streams);
-  streamsRef.current = streams;
+  const readStreams = useEffectEvent(() => streams);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Sample live MediaStreams through Web Audio and release the analyser when stream identities change.
   useEffect(() => {
-    const live = streamsRef.current.filter((stream): stream is MediaStream => stream !== null);
-    if (live.length === 0) {
-      setLevel(0);
+    const live = readStreams().filter((stream): stream is MediaStream => stream !== null);
+    if (key.replaceAll("|", "").length === 0 || live.length === 0) {
       return;
     }
     const context = new AudioContext();
@@ -53,9 +52,8 @@ export function useAudioLevel(streams: ReadonlyArray<MediaStream | null>): numbe
       stopped = true;
       window.cancelAnimationFrame(frame);
       void context.close().catch(() => undefined);
-      setLevel(0);
     };
   }, [key]);
 
-  return level;
+  return key.replaceAll("|", "").length === 0 ? 0 : level;
 }

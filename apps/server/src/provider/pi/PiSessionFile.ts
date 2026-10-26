@@ -4,6 +4,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+const decodeSessionHeader = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 export const PiSessionCursor = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   sessionFile: Schema.String,
@@ -77,9 +79,7 @@ export const validatePiResumeSessionFile = Effect.fn("PiSessionFile.validateResu
       });
     yield* fs.access(sessionFile, { readable: true });
     const firstLine = (yield* fs.readFileString(sessionFile)).split(/\r?\n/, 1)[0] ?? "";
-    const header = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
-      firstLine,
-    ).pipe(
+    const header = yield* decodeSessionHeader(firstLine).pipe(
       Effect.mapError(
         (cause) => new PiSessionFileError({ operation: "header", sessionFile, cause }),
       ),

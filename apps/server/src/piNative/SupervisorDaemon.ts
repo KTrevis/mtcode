@@ -7,7 +7,7 @@ import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NodePerformance from "node:perf_hooks";
+import * as NodePerfHooks from "node:perf_hooks";
 import type {
   ManagedClaimRequest,
   ManagedClaimResponse,
@@ -37,7 +37,7 @@ const { spawn } = NodeChildProcess;
 const fs = NodeFS.promises;
 const { createConnection, createServer } = NodeNet;
 const { homedir, uptime } = NodeOS;
-const { performance } = NodePerformance;
+const { performance } = NodePerfHooks;
 const path = NodePath;
 type ChildProcessWithoutNullStreams = NodeChildProcess.ChildProcessWithoutNullStreams;
 type Socket = NodeNet.Socket;

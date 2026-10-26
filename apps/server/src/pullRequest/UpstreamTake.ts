@@ -12,15 +12,8 @@ import * as Layer from "effect/Layer";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
-/**
- * The ref a host publishes a change request's head under, which is what makes taking somebody
- * else's commits possible without write access to the repository they live in.
- *
- * Written as a full `Record` so a new provider fails to compile here rather than silently
- * inheriting GitHub's ref layout: the two hosts that publish one spell it differently, and the
- * two that do not have to say so.
- */
-const HEAD_REF_TEMPLATE: Record<SourceControlProviderKind, ((n: number) => string) | null> = {
+// Hosts publish PR heads differently; keep this mapping exhaustive when adding a provider.
+const HEAD_REF_TEMPLATE: Readonly<Record<string, ((n: number) => string) | null>> = {
   github: (n) => `refs/pull/${n}/head`,
   gitlab: (n) => `refs/merge-requests/${n}/head`,
   bitbucket: null,
@@ -160,7 +153,7 @@ export const make = Effect.gen(function* () {
     input: CherryPickRequest,
   ) {
     const template = HEAD_REF_TEMPLATE[input.provider];
-    if (template === null) {
+    if (template == null) {
       return yield* fail(
         "This host does not publish a change request's commits to fetch, so they cannot be cherry-picked. Implement the change instead.",
       );
@@ -196,11 +189,7 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-    // `git cherry`, not `rev-list`: the range says which commits are the change request's own,
-    // and this says which of those this checkout has not already got. It compares by patch rather
-    // than by identity, so a change taken any other way — merged upstream, picked here before,
-    // written by hand — counts as had, and pressing the button twice picks nothing the second
-    // time. Merge commits are left out with it: one only carries the base branch's own work.
+    // git cherry compares patches, so previously integrated changes are omitted even when commit IDs differ.
     const commits = yield* run("cherry", input.cwd, ["cherry", "HEAD", headRef, mergeBase]).pipe(
       Effect.map((result) =>
         stdoutLines(result.stdout).flatMap((line) => {
@@ -240,16 +229,7 @@ export const make = Effect.gen(function* () {
     return yield* fail(`There are already 100 branches named after picking #${desired}.`);
   });
 
-  /**
-   * A branch of its own and a worktree standing on it, cut from where the project stands — which
-   * is the tree the upstream work is being taken into. Never checked out in the project itself:
-   * the developer is working in that tree, and work that stops on a conflict would leave it
-   * stopped.
-   *
-   * The setup script runs before the take rather than after it, best effort: a conflicted
-   * worktree is one somebody is about to build in, and it should be installing while they read
-   * the conflict.
-   */
+  // Use a separate worktree so conflicts never stop the developer’s checkout; start best-effort setup before taking commits.
   const openWorktree = Effect.fn("UpstreamTake.openWorktree")(function* (
     cwd: string,
     desiredBranch: string,
@@ -364,15 +344,7 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  /**
-   * Take a whole release rather than one change request: fetch its tag and merge it onto a
-   * branch of its own, in a worktree of its own.
-   *
-   * A merge rather than a pick because a release is not a change to port — it is everything the
-   * upstream has done since, and replaying that commit by commit would be a hundred conflicts
-   * where the merge is one. What the fork has of its own survives it, which is the whole point of
-   * merging into a branch cut from the fork's own HEAD rather than resetting onto the tag.
-   */
+  // Merge the release in a separate worktree to retain fork changes and resolve divergence once.
   const mergeRelease: UpstreamTakeService["Service"]["mergeRelease"] = Effect.fn(
     "UpstreamTake.mergeRelease",
   )(function* (input) {

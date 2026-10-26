@@ -38,6 +38,7 @@ const makeRanking = (options: {
           generateCommitMessage: () => Effect.die("not used"),
           generatePrContent: () => Effect.die("not used"),
           generateBranchName: () => Effect.die("not used"),
+          generateReviewGuide: () => Effect.die("not used"),
           generateThreadTitle: () => Effect.die("not used"),
           rankPullRequests: (input) =>
             Ref.updateAndGet(options.batches, (seen) => [
@@ -106,6 +107,7 @@ it.effect("ignores a score for a pull request nobody asked about", () =>
             generateCommitMessage: () => Effect.die("not used"),
             generatePrContent: () => Effect.die("not used"),
             generateBranchName: () => Effect.die("not used"),
+            generateReviewGuide: () => Effect.die("not used"),
             generateThreadTitle: () => Effect.die("not used"),
             rankPullRequests: () =>
               Effect.succeed({

@@ -1,4 +1,4 @@
-import type { OrchestrationThreadGoal } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderGoal } from "@t3tools/contracts";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { ComposerGoalBadge } from "../components/chat/ComposerGoalBadge";
@@ -12,7 +12,7 @@ const MOCK_TIMESTAMPS = {
 const PREVIEW_STATES: ReadonlyArray<{
   readonly id: string;
   readonly label: string;
-  readonly goal: OrchestrationThreadGoal;
+  readonly goal: OrchestrationV2ProviderGoal;
   readonly isWorking?: boolean;
 }> = [
   {
@@ -39,7 +39,7 @@ const PREVIEW_STATES: ReadonlyArray<{
   {
     id: "goal-usage-limited",
     label: "Usage-limited",
-    goal: { objective: MOCK_OBJECTIVE, status: "usageLimited", ...MOCK_TIMESTAMPS },
+    goal: { objective: MOCK_OBJECTIVE, status: "usage_limited", ...MOCK_TIMESTAMPS },
   },
   {
     id: "goal-complete",
@@ -72,8 +72,8 @@ function DevGoalChipsPage() {
             <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {state.label}
             </h2>
-            <div className="chat-composer-glass-shell relative mx-auto w-full max-w-3xl">
-              <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+            <div className=" relative mx-auto w-full max-w-3xl">
+              <div className=" relative z-10 w-full rounded-3xl">
                 <div className="relative px-3 pb-2 pt-3.5 sm:px-4">
                   <ComposerGoalBadge
                     goal={state.goal}
@@ -82,7 +82,7 @@ function DevGoalChipsPage() {
                     onEdit={() => undefined}
                   />
                   <div
-                    className="mt-8 min-h-[72px] rounded-[16px] border border-border/50 bg-muted/20 px-3 py-3 text-sm text-placeholder"
+                    className="mt-8 min-h-[72px] rounded-2xl border border-border/50 bg-muted/20 px-3 py-3 text-sm text-placeholder"
                     aria-hidden="true"
                   >
                     Ask anything…
