@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   startNewThreadFromContext: vi.fn(),
   undoLatestThreadAction: vi.fn(() => true),
   navigate: vi.fn(),
+  startScratchThread: vi.fn(),
+  scratchEnvironmentId: vi.fn((id: string) => id),
   currentProjectRef: { environmentId: "remote", projectId: "project" } as {
     environmentId: string;
     projectId: string;
@@ -21,6 +23,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }));
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => DEFAULT_RESOLVED_KEYBINDINGS }));
+vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "primary" }));
+vi.mock("../hooks/useScratchProject", () => ({
+  useScratchProject: () => ({
+    scratchEnvironmentId: mocks.scratchEnvironmentId,
+    startScratchThread: mocks.startScratchThread,
+  }),
+}));
 vi.mock("../state/server", () => ({ primaryServerKeybindingsAtom: {} }));
 vi.mock("../commandPaletteBus", () => ({
   isCommandPaletteOpen: () => mocks.paletteOpen,
@@ -143,4 +152,10 @@ it("does not choose an unrelated project when no project is open", async () => {
   await act(async () => root.render(<WorkspaceGlobalShortcuts />));
   press("k", { shiftKey: true });
   expect(mocks.navigate).not.toHaveBeenCalled();
+});
+
+it("starts a thread without a project in the primary environment outside chat", () => {
+  expect(press("n", { altKey: true }).defaultPrevented).toBe(true);
+  expect(mocks.startScratchThread).toHaveBeenCalledWith("primary");
+  expect(mocks.openCommandPalette).not.toHaveBeenCalled();
 });
