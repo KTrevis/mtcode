@@ -331,6 +331,7 @@ const makeTestPreviewWebContents = (
   id = 42,
   hostWebContents: TestHostWebContents = makeTestHostWebContents(),
 ) => {
+  let debuggerAttached = false;
   const setBackgroundThrottling = vi.fn<(enabled: boolean) => void>();
   return {
     id,
@@ -355,8 +356,13 @@ const makeTestPreviewWebContents = (
     setIgnoreMenuShortcuts: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     debugger: {
-      isAttached: () => false,
-      attach: vi.fn(),
+      isAttached: () => debuggerAttached,
+      attach: vi.fn(() => {
+        debuggerAttached = true;
+      }),
+      detach: vi.fn(() => {
+        debuggerAttached = false;
+      }),
       sendCommand: vi.fn(async () => undefined),
       on: vi.fn(),
       off: vi.fn(),
@@ -1601,7 +1607,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("emulates prefers-color-scheme and re-applies it across webview swaps", () =>
+  effectIt.effect("re-applies opaque base and color scheme across webview swaps", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const makeWebContents = (id: number) => {
@@ -1650,6 +1656,16 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_scheme", 42);
         yield* Effect.yieldNow;
 
+        // Guests start with a transparent base; dark-scheme pages need an opaque
+        // one or Chromium skips their dark canvas.
+        const opaqueBase = {
+          color: { r: 255, g: 255, b: 255, a: 1 },
+        };
+        expect(first.sendCommand).toHaveBeenCalledWith(
+          "Emulation.setDefaultBackgroundColorOverride",
+          opaqueBase,
+        );
+
         yield* manager.setColorScheme("tab_scheme", "dark");
 
         expect(first.sendCommand).toHaveBeenCalledWith("Emulation.setEmulatedMedia", {
@@ -1662,6 +1678,10 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_scheme", 43);
         yield* Effect.yieldNow;
 
+        expect(replacement.sendCommand).toHaveBeenCalledWith(
+          "Emulation.setDefaultBackgroundColorOverride",
+          opaqueBase,
+        );
         expect(replacement.sendCommand).toHaveBeenCalledWith("Emulation.setEmulatedMedia", {
           features: [{ name: "prefers-color-scheme", value: "dark" }],
         });
@@ -1705,6 +1725,7 @@ describe("PreviewManager", () => {
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setWindowOpenHandler: vi.fn(),
+          setIgnoreMenuShortcuts: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),
@@ -2675,7 +2696,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("releases snapshot control when every capture attempt stalls", () =>
+  effectIt.effect("releases snapshot control when capture stalls", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const capturePage = vi.fn(() => new Promise<TestCapturedPreviewImage>(() => {}));
@@ -2716,15 +2737,14 @@ describe("PreviewManager", () => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         expect(evaluate.pollUnsafe()).toBeUndefined();
 
-        yield* TestClock.adjust(4_000);
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS * 2);
         const exit = yield* Fiber.join(snapshot);
         expect(Exit.isFailure(exit)).toBe(true);
-        expect(capturePage).toHaveBeenCalledTimes(3);
+        expect(capturePage).toHaveBeenCalledTimes(2);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
         expect(error).toMatchObject({
-          _tag: "PreviewOperationError",
-          operation: "automationSnapshot.capturePage",
+          _tag: "PreviewCaptureUnavailableError",
           tabId: "tab_1",
           webContentsId: 42,
           cause: { _tag: "TimeoutError" },

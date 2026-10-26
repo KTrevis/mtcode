@@ -1453,6 +1453,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                   ),
                   { concurrency: "unbounded", discard: true },
                 );
+                // Opaque backing lets Chromium paint dark canvases for markdown and plain text.
+                yield* attemptPromise(
+                  { operation: "initializeDebugger.defaultBackground", webContentsId: wc.id },
+                  () =>
+                    wcDebugger.sendCommand("Emulation.setDefaultBackgroundColorOverride", {
+                      color: { r: 255, g: 255, b: 255, a: 1 },
+                    }),
+                );
                 return [
                   control,
                   replaceMap(publishedSessions, (copy) => {

@@ -456,8 +456,8 @@ function ThreadRouteContent(
   const supportsVisitedTracking =
     serverConfig?.environment.capabilities.threadVisitedTracking === true;
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const [appState, setAppState] = useState<AppStateStatus>(
-    () => AppState.currentState ?? "unknown",
+  const [appState, setAppState] = useState<AppStateStatus>(() =>
+    AppState.currentState === "active" ? "active" : "unknown",
   );
   useEffect(() => {
     const subscription = AppState.addEventListener("change", setAppState);
