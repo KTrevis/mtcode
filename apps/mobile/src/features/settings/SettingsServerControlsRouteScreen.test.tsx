@@ -16,6 +16,8 @@ const { Children, mocks } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("../../components/ui/ListRowLayout", () => ({ ListRowLayout: Children }));
+vi.mock("../pull-requests/pullRequestGlyphs", () => ({ PullRequestGlyph: () => null }));
 vi.mock("react-native", () => ({
   View: Children,
   Alert: { alert: mocks.alert },

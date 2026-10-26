@@ -46,6 +46,7 @@ import {
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
+  TargetIcon,
   Undo2Icon,
   UserRoundIcon,
   XIcon,
@@ -1096,6 +1097,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     )
   ) : null;
 
+  const goalMarker =
+    thread.goal?.status === "active" ? (
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex shrink-0 text-info-foreground" />}>
+          <TargetIcon aria-label="Active Objective" role="img" className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup>{thread.goal.objective}</TooltipPopup>
+      </Tooltip>
+    ) : null;
+
   const kanbanButton = props.kanbanCardId ? (
     <Tooltip>
       <TooltipTrigger
@@ -1160,6 +1171,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </span>
             {draftIndicator}
             {title}
+            {goalMarker}
             {kanbanButton}
             {pinIndicator}
             {terminalStatusIcon}
@@ -1334,6 +1346,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
+              {goalMarker}
               {kanbanButton}
               {pinIndicator}
               {props.projectDisplayName ? (

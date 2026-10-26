@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("expo-constants", () => ({ default: { expoConfig: { name: "KT Code" } } }));
 import {
   BUILT_IN_THEME_IDS,
   BUILT_IN_THEMES,

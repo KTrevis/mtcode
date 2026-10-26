@@ -1058,8 +1058,11 @@ export const make = Effect.gen(function* () {
     disabledReason: resolveDisabledReason,
     configure: Effect.gen(function* () {
       const context = yield* Effect.context<never>();
+      const scope = yield* Effect.scope;
       const runEffect = (effect: Effect.Effect<void>) => {
-        void Effect.runPromiseWith(context)(effect);
+        void Effect.runPromiseWith(context)(
+          effect.pipe(Effect.forkIn(scope, { startImmediately: true })),
+        );
       };
 
       const appUpdateYmlConfig = yield* readAppUpdateYml;

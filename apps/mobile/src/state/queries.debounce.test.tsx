@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   searchEntries: vi.fn(() => null),
 }));
 
+vi.mock("./server", () => ({ serverEnvironment: {} }));
 vi.mock("./session", () => ({
   environmentSession: { sessionStateAtom: () => mocks.sessionAtom },
 }));

@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   searchAtom: {},
 }));
 
+vi.mock("./server", () => ({ serverEnvironment: {} }));
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
   useCallback: <A>(callback: A) => callback,

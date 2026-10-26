@@ -450,26 +450,41 @@ it.layer(layerTest)("ProjectService", (it) => {
     }),
   );
 
-  it.effect("returns the deleted project when a completed delete is retried", () =>
-    Effect.gen(function* () {
-      const service = yield* ProjectService.ProjectService;
-      const sql = yield* SqlClient.SqlClient;
-      const projectId = ProjectId.make("project:delete-retry");
-      yield* service.create({
-        commandId: CommandId.make("command:delete-retry:create"),
-        projectId,
-        title: "Delete retry",
-        workspaceRoot: "/work/delete-retry",
-      });
-      const input = { commandId: CommandId.make("command:delete-retry:delete"), projectId };
-      const deleted = yield* service.delete(input);
-      assert.deepEqual(yield* service.delete(input), deleted);
-      const events = yield* sql<{ readonly command_id: string }>`
+  it.effect.each([{ faviconPath: null }, { faviconPath: "/work/delete-retry/custom.svg" }])(
+    "returns the deleted project with favicon $faviconPath when a completed delete is retried",
+    ({ faviconPath }) =>
+      Effect.gen(function* () {
+        const service = yield* ProjectService.ProjectService;
+        const sql = yield* SqlClient.SqlClient;
+        const caseId = faviconPath === null ? "default" : "custom";
+        const projectId = ProjectId.make(`project:delete-retry:${caseId}`);
+        yield* service.create({
+          commandId: CommandId.make(`command:delete-retry:${caseId}:create`),
+          projectId,
+          title: "Delete retry",
+          workspaceRoot: "/work/delete-retry",
+        });
+        if (faviconPath !== null) {
+          yield* service.update({
+            commandId: CommandId.make(`command:delete-retry:${caseId}:update`),
+            projectId,
+            faviconPath,
+          });
+        }
+        const input = {
+          commandId: CommandId.make(`command:delete-retry:${caseId}:delete`),
+          projectId,
+        };
+        const deleted = yield* service.delete(input);
+        assert.equal(deleted.faviconPath, faviconPath);
+        assert.isNull(deleted.repositoryIdentity);
+        assert.deepEqual(yield* service.delete(input), deleted);
+        const events = yield* sql<{ readonly command_id: string }>`
         SELECT command_id FROM orchestration_events
         WHERE stream_id = ${projectId} AND event_type = 'project.deleted'
       `;
-      assert.deepEqual(events, [{ command_id: input.commandId }]);
-    }),
+        assert.deepEqual(events, [{ command_id: input.commandId }]);
+      }),
   );
 
   it.effect("treats a deleted project as missing for updates and new deletes", () =>

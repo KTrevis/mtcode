@@ -3236,6 +3236,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             archivedAt: now,
+            ...(thread.limitRecovery == null
+              ? {}
+              : {
+                  limitRecovery: {
+                    ...thread.limitRecovery,
+                    autoResume: false,
+                    snooze: false,
+                    requestId: command.commandId,
+                  },
+                }),
             titleRegeneration: null,
             guestShare: null,
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
@@ -3250,6 +3260,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             settledOverride: "settled",
+            ...(thread.limitRecovery == null
+              ? {}
+              : {
+                  limitRecovery: {
+                    ...thread.limitRecovery,
+                    autoResume: false,
+                    snooze: false,
+                    requestId: command.commandId,
+                  },
+                }),
             settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             unsettledAt: null,
@@ -5005,6 +5025,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: "This thread can no longer be resumed from that run.",
         });
       }
+      command = {
+        ...command,
+        text: "Continue where you left off.",
+        attachments: [],
+        notification: {
+          source: { kind: "system" },
+          outcome: "updated",
+          summary: "Continued this turn",
+        },
+      };
     }
     if (command.usageLimitContinuationOfRunId !== undefined) {
       const run = usageLimitBlockedRun(projection.runs, projection.turnItems, null);
@@ -5134,7 +5164,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Background wakes and delegated completions continue work the user already snoozed, so
     // only a message someone actually sent ends the snooze.
     const automaticWake =
-      command.notification !== undefined || command.delegatedCompletion !== undefined;
+      command.manualContinuationOfRunId === undefined &&
+      (command.notification !== undefined || command.delegatedCompletion !== undefined);
     if (projection.thread.snoozedUntil != null && !automaticWake) {
       const now = yield* DateTime.now;
       const thread: OrchestrationV2AppThread = {
@@ -5269,6 +5300,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     if (
       command.notification !== undefined &&
+      command.manualContinuationOfRunId === undefined &&
       (command.createdBy !== "agent" ||
         (command.creationSource !== "server" && command.creationSource !== "provider") ||
         (dispatchMode.type !== "queue_after_active" &&
@@ -5673,7 +5705,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         threadId: command.threadId,
         runId,
         nodeId: rootNodeId,
-        role: "user",
+        role: command.manualContinuationOfRunId === undefined ? "user" : "system",
         text: dispatchText,
         ...(command.context ? { context: command.context } : {}),
         attachments: command.attachments,
@@ -6025,7 +6057,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         threadId: command.threadId,
         runId,
         nodeId: rootNodeId,
-        role: "user",
+        role: command.manualContinuationOfRunId === undefined ? "user" : "system",
         text: dispatchText,
         ...(command.context ? { context: command.context } : {}),
         attachments: command.attachments,
@@ -6714,7 +6746,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: command.threadId,
       runId,
       nodeId: rootNodeId,
-      role: "user",
+      role: command.manualContinuationOfRunId === undefined ? "user" : "system",
       text: dispatchText,
       ...(command.context ? { context: command.context } : {}),
       attachments: command.attachments,

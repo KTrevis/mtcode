@@ -34,6 +34,8 @@ import {
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
+import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
+import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSummaries } from "../state/presentation";
@@ -131,6 +133,19 @@ export function useNewThreadHandler() {
     );
     const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
+    const resolveDraftRuntimeMode = (draftId: DraftId) => {
+      const draft = getComposerDraft(draftId);
+      return resolveNewThreadRuntimeMode(
+        projectSettings.settings,
+        draft?.activeProvider ??
+          projectDefaultModelSelection?.instanceId ??
+          resolveDefaultProviderModelSelection(
+            environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+            null,
+          )?.instanceId,
+        draft?.runtimeMode,
+      );
+    };
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
       resolveNewThreadModelSelectionOverride({
         projectDefaultSelection: projectDefaultModelSelection ?? null,
@@ -235,7 +250,10 @@ export function useNewThreadHandler() {
             return null;
           }
           workspaceContext = {
-            branch: null,
+            branch:
+              defaultEnvMode === "worktree"
+                ? projectSettings.settings.defaultThreadBranch || null
+                : null,
             worktreePath: null,
             envMode: defaultEnvMode,
             startFromOrigin: resolveNewDraftStartFromOrigin({
@@ -243,13 +261,6 @@ export function useNewThreadHandler() {
               newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
           };
-        }
-        if (workspaceContext) {
-          setDraftThreadContext(emptyStoredDraftThread.draftId, {
-            ...workspaceContext,
-            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
-            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-          });
         }
         const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
         const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
@@ -264,6 +275,15 @@ export function useNewThreadHandler() {
             });
           }
         }
+        if (workspaceContext) {
+          setDraftThreadContext(emptyStoredDraftThread.draftId, {
+            ...workspaceContext,
+            ...(!isDraftAlreadyOpen
+              ? { runtimeMode: resolveDraftRuntimeMode(emptyStoredDraftThread.draftId) }
+              : {}),
+            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          });
+        }
         // Remapping physical projects clears workspace context; preserve the branch and worktree.
         setLogicalProjectDraftThreadId(
           logicalProjectKey,
@@ -272,7 +292,9 @@ export function useNewThreadHandler() {
           {
             threadId: emptyStoredDraftThread.threadId,
             ...workspaceContext,
-            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
+            ...(!isDraftAlreadyOpen
+              ? { runtimeMode: resolveDraftRuntimeMode(emptyStoredDraftThread.draftId) }
+              : {}),
             ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
           },
         );
@@ -356,7 +378,12 @@ export function useNewThreadHandler() {
       setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
         threadId,
         createdAt,
-        branch: options?.branch ?? null,
+        branch:
+          options?.branch !== undefined
+            ? options.branch
+            : initialEnvMode === "worktree"
+              ? projectSettings.settings.defaultThreadBranch || null
+              : null,
         worktreePath: options?.worktreePath ?? null,
         envMode: initialEnvMode,
         startFromOrigin:
@@ -373,6 +400,7 @@ export function useNewThreadHandler() {
       if (modelSelectionOverride) {
         setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
       }
+      setDraftThreadContext(draftId, { runtimeMode: resolveDraftRuntimeMode(draftId) });
       await router.navigate({
         to: "/draft/$draftId",
         params: { draftId },

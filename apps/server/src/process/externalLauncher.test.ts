@@ -87,7 +87,7 @@ const layerTest = (input: {
       SpawnExecutableResolution,
       (command) => input.resolveExecutable?.(command) ?? command,
     ),
-    ConfigProvider.layer(ConfigProvider.fromEnv({ env: input.env ?? {} })),
+    Layer.succeed(HostProcess.Environment, input.env ?? {}),
   );
 };
 
@@ -111,15 +111,10 @@ it.effect.skipIf(windowsHost)(
         Effect.provide(
           layerTest({
             platform: "linux",
-            env: { PATH: binDir, DISPLAY: ":0" },
+            env: { PATH: binDir, DISPLAY: ":0", ELECTRON_RUN_AS_NODE: "1" },
             onSpawn: (command) => spawned.push(command),
           }),
         ),
-        Effect.provideService(HostProcess.Environment, {
-          PATH: binDir,
-          DISPLAY: ":0",
-          ELECTRON_RUN_AS_NODE: "1",
-        }),
       );
 
       assert.deepEqual(
@@ -133,6 +128,33 @@ it.effect.skipIf(windowsHost)(
           env: { PATH: binDir, DISPLAY: ":0" },
           extendEnv: false,
         })),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(windowsHost)(
+  "discovers editors from the hydrated host PATH after config was read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-hydrated-editor-" });
+      const executable = path.join(root, "code");
+      yield* fs.writeFileString(executable, "#!/bin/sh\n");
+      yield* fs.chmod(executable, 0o755);
+      const env = { PATH: root };
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        assert.include(yield* launcher.resolveAvailableEditors(), "vscode");
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            layerTest({ platform: "linux", env }),
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { PATH: "/missing-before-hydration" } }),
+            ),
+          ),
+        ),
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
@@ -583,14 +605,10 @@ it.effect("keeps scanning after the caller is interrupted and shares that scan",
       Layer.mergeAll(
         layerLauncher,
         Layer.succeed(HostProcess.Platform, "win32"),
-        ConfigProvider.layer(
-          ConfigProvider.fromEnv({
-            env: {
-              PATH: "C:\\t3-editor-discovery-interrupt-test",
-              PATHEXT: ".COM;.EXE;.BAT;.CMD",
-            },
-          }),
-        ),
+        Layer.succeed(HostProcess.Environment, {
+          PATH: "C:\\t3-editor-discovery-interrupt-test",
+          PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        }),
       ),
     ),
   );

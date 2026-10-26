@@ -6157,7 +6157,7 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
           threadId,
           messageId: MessageId.make(`manual-resume:${suffix}:${reason}`),
           manualContinuationOfRunId: source.id,
-          text: "Continue where you left off.",
+          text: "Client continuation placeholder",
           attachments: [],
           dispatchMode: { type: "start_immediately" as const },
           createdBy: "user" as const,
@@ -6168,6 +6168,28 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         assert.lengthOf(after.runs, 3);
         assert.equal(after.runs[1]?.status, "queued");
         assert.equal(after.runs[2]?.status, "starting");
+        const continuedRun = after.runs[2]!;
+        assert.isFalse(
+          after.turnItems.some(
+            (item) => item.runId === continuedRun.id && item.type === "user_message",
+          ),
+        );
+        assert.equal(
+          after.messages.find((message) => message.id === continuedRun.userMessageId)?.role,
+          "system",
+        );
+        assert.equal(
+          after.messages.find((message) => message.id === continuedRun.userMessageId)?.text,
+          "Continue where you left off.",
+        );
+        assert.isTrue(
+          after.turnItems.some(
+            (item) =>
+              item.runId === continuedRun.id &&
+              item.type === "notification" &&
+              item.summary === "Continued this turn",
+          ),
+        );
         assert.equal(
           (yield* orchestrator.dispatch(resume("second")).pipe(Effect.exit))._tag,
           "Failure",
@@ -6186,6 +6208,7 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
     "rearm",
     "snooze-race",
     "archive",
+    "settle",
     "replacement",
     "manual-snooze",
     "invalid-snooze",
@@ -6589,12 +6612,23 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
           threadId,
           limitRecovery: { runId: run.id, resetAt, autoResume: false },
         });
-      if (scenario === "archive")
+      if (scenario === "archive" || scenario === "settle") {
         yield* orchestrator.dispatch({
-          type: "thread.archive",
-          commandId: CommandId.make(`recovery:archive:${scenario}`),
+          type: scenario === "archive" ? "thread.archive" : "thread.settle",
+          commandId: CommandId.make(`recovery:close:${scenario}`),
           threadId,
         });
+        yield* orchestrator.dispatch({
+          ...(scenario === "archive"
+            ? { type: "thread.unarchive" as const }
+            : { type: "thread.unsettle" as const, reason: "user" as const }),
+          commandId: CommandId.make(`recovery:reopen:${scenario}`),
+          threadId,
+        });
+        assert.isFalse(
+          (yield* orchestrator.getThreadProjection(threadId)).thread.limitRecovery!.autoResume,
+        );
+      }
       if (scenario === "stop") {
         yield* orchestrator.dispatch({
           type: "thread.stop",

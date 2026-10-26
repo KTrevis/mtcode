@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DESKTOP_UPDATE_RESTART_MARKER_FILE } from "@t3tools/contracts";
+import { DESKTOP_UPDATE_RESTART_MARKER_FILE, type DesktopUpdateState } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -24,6 +24,15 @@ import { makeHarness } from "./updatesTestHarness.ts";
 // auto-install, which chain extra promise callbacks, so a bare yieldNow is not
 // enough to observe the settled state.
 const flushCallbacks = Effect.promise(() => Promise.resolve()).pipe(Effect.asVoid);
+
+const waitForUpdateState = Effect.fn("test.waitForUpdateState")(function* (
+  updates: DesktopUpdates.DesktopUpdates["Service"],
+  predicate: (state: DesktopUpdateState) => boolean,
+) {
+  const { latest, changes } = yield* updates.subscribe;
+  if (predicate(latest)) return;
+  yield* changes.pipe(Stream.filter(predicate), Stream.runHead);
+});
 
 describe("DesktopUpdates", () => {
   it.effect("updates Linux .deb installs and leaves other non-AppImage installs off", () =>
@@ -450,11 +459,12 @@ describe("DesktopUpdates", () => {
   });
 
   it.effect("records the version an install hands to the installer", () => {
+    const stopped = Deferred.makeUnsafe<void>();
     let recordsAtStop: ReadonlyArray<string> = [];
     const harness = makeHarness({
       stopBackend: Effect.sync(() => {
         recordsAtStop = [...harness.installRecords.values()];
-      }),
+      }).pipe(Effect.andThen(Deferred.succeed(stopped, undefined))),
     });
 
     return Effect.scoped(
@@ -462,9 +472,7 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
         harness.emit("update-downloaded", { version: "1.2.4" });
-        yield* flushCallbacks;
-
-        assert.isTrue((yield* updates.install).accepted);
+        yield* Deferred.await(stopped);
         assert.deepEqual(
           recordsAtStop.map((record) => JSON.parse(record)),
           [{ fromVersion: "1.2.3", targetVersion: "1.2.4" }],
@@ -485,10 +493,14 @@ describe("DesktopUpdates", () => {
         assert.equal((yield* updates.getState).notAppliedVersion, "1.2.4");
         assert.isDefined(harness.previousInstallRecord());
 
+        const downloading = yield* waitForUpdateState(
+          updates,
+          (state) => state.status === "downloading",
+        ).pipe(Effect.forkChild({ startImmediately: true }));
         harness.emit("update-available", { version: "1.2.4" });
-        yield* flushCallbacks;
+        yield* Fiber.join(downloading);
         const state = yield* updates.getState;
-        assert.equal(state.status, "available");
+        assert.equal(state.status, "downloading");
         assert.equal(state.notAppliedVersion, "1.2.4");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
@@ -520,11 +532,13 @@ describe("DesktopUpdates", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const updates = yield* DesktopUpdates.DesktopUpdates;
-          yield* updates.configure;
-          harness.emit("update-downloaded", { version: "1.2.4" });
-          yield* flushCallbacks;
-
-          const installFiber = yield* updates.install.pipe(Effect.forkScoped);
+          const installFiber = yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* updates.configure;
+              harness.emit("update-downloaded", { version: "1.2.4" });
+              return yield* Effect.never;
+            }),
+          ).pipe(Effect.forkScoped);
           yield* Deferred.await(stopping);
           assert.equal(harness.updateRestartMarkers.size, 1);
 
@@ -552,8 +566,12 @@ describe("DesktopUpdates", () => {
         const desktopState = yield* DesktopState.DesktopState;
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
+        const recovered = yield* waitForUpdateState(
+          updates,
+          (state) => state.errorContext === "install",
+        ).pipe(Effect.forkChild({ startImmediately: true }));
         harness.emit("update-downloaded", { version: "1.2.4" });
-        yield* flushCallbacks;
+        yield* Fiber.join(recovered);
 
         // Personal fork: auto-install already ran on update-downloaded, failed, and
         // recovered the backend without quitting.
@@ -563,7 +581,12 @@ describe("DesktopUpdates", () => {
         const result = yield* updates.install;
         assert.isTrue(result.accepted);
         assert.isFalse(yield* Ref.get(desktopState.quitting));
-        assert.deepEqual(harness.installSteps, ["quitAndInstall", "startBackend"]);
+        assert.deepEqual(harness.installSteps, [
+          "quitAndInstall",
+          "startBackend",
+          "quitAndInstall",
+          "startBackend",
+        ]);
         assert.equal(harness.updateRestartMarkers.size, 0);
         assert.equal(harness.installRecords.size, 0);
       }),
@@ -588,12 +611,16 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         const pool = yield* DesktopBackendPool.DesktopBackendPool;
         yield* updates.configure;
+        const recovered = yield* waitForUpdateState(
+          updates,
+          (state) => state.errorContext === "install",
+        ).pipe(Effect.forkChild({ startImmediately: true }));
         harness.emit("update-downloaded", { version: "1.2.4" });
-        yield* flushCallbacks;
+        yield* Fiber.join(recovered);
 
         const result = yield* updates.install;
         assert.equal(result.state.errorContext, "install");
-        assert.deepEqual(harness.installSteps, ["quitAndInstall"]);
+        assert.deepEqual(harness.installSteps, ["quitAndInstall", "quitAndInstall"]);
         assert.isFalse((yield* (yield* pool.primary).snapshot).desiredRunning);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));

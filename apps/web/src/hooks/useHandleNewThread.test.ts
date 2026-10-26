@@ -9,8 +9,10 @@ const testState = vi.hoisted(() => {
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
+    defaultThreadBranch: "",
     defaultModelSelection: null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
+    providerRuntimeModeDefaults: {} as Record<string, RuntimeMode>,
   };
   let storedDraft: {
     readonly draftId: string;
@@ -28,7 +30,7 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
-    getComposerDraft: vi.fn(() => ({})),
+    getComposerDraft: vi.fn((): { activeProvider?: string; runtimeMode?: RuntimeMode } => ({})),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() => null),
     getDraftThread: vi.fn(() => null),
@@ -53,6 +55,22 @@ const testState = vi.hoisted(() => {
     disconnect(environmentId: string) {
       connectedEnvironmentIds = connectedEnvironmentIds.filter((id) => id !== environmentId);
     },
+    setExplicitRuntimeMode(runtimeMode: RuntimeMode) {
+      draftStore.getComposerDraft.mockReturnValue({
+        activeProvider: "remote-provider",
+        runtimeMode,
+      });
+    },
+    setProviderRuntimeMode(mode: RuntimeMode) {
+      targetSettings = {
+        ...targetSettings,
+        providerRuntimeModeDefaults: { "remote-provider": mode },
+      };
+      draftStore.getComposerDraft.mockReturnValue({ activeProvider: "remote-provider" });
+    },
+    setDefaultBranch(branch: string) {
+      targetSettings = { ...targetSettings, defaultThreadBranch: branch };
+    },
     removeProject() {
       projectRemoved = true;
     },
@@ -72,11 +90,14 @@ const testState = vi.hoisted(() => {
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
+        defaultThreadBranch: "",
         defaultModelSelection: null,
         defaultRuntimeMode: "full-access",
+        providerRuntimeModeDefaults: {},
       };
       router.state.location.href = "/";
       router.navigate.mockClear();
+      draftStore.getComposerDraft.mockReset().mockReturnValue({});
       draftStore.setDraftThreadContext.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
       projectFileRead = new Promise<null>((resolve) => {
@@ -94,6 +115,7 @@ const testServerConfigs = () =>
       {
         settings: {
           ...testState.targetSettings,
+          defaultThreadBranch: "primary-only-branch",
           newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
         },
       },
@@ -121,7 +143,8 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
+vi.mock("@t3tools/contracts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/contracts")>()),
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
@@ -229,6 +252,66 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
+  it("applies the selected destination provider runtime default", async () => {
+    testState.reset(draft);
+    testState.setProviderRuntimeMode("approval-required");
+    await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    const context = testState.draftStore.setDraftThreadContext.mock.calls.at(-1)?.[1];
+    expect(context).toEqual(expect.objectContaining({ runtimeMode: "approval-required" }));
+  });
+
+  it("preserves an explicit runtime mode over the provider default", async () => {
+    testState.reset(draft);
+    testState.setProviderRuntimeMode("approval-required");
+    testState.setExplicitRuntimeMode("auto-accept-edits");
+    await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    const context = testState.draftStore.setDraftThreadContext.mock.calls.at(-1)?.[1];
+    expect(context).toEqual(expect.objectContaining({ runtimeMode: "auto-accept-edits" }));
+  });
+
+  it.each(["local", "worktree"] as const)(
+    "applies the destination branch default only in %s mode",
+    async (envMode) => {
+      testState.reset(draft, { envMode, startFromOrigin: false });
+      testState.setDefaultBranch("release/remote");
+      await useNewThreadHandler()({
+        environmentId: "environment-ssh",
+        projectId: "project-remote",
+      } as never);
+      const context = draft
+        ? testState.draftStore.setDraftThreadContext.mock.calls.at(-1)?.[1]
+        : testState.draftStore.setLogicalProjectDraftThreadId.mock.calls.at(-1)?.[3];
+      expect(context).toEqual(
+        expect.objectContaining({
+          branch: envMode === "worktree" ? "release/remote" : null,
+          envMode,
+        }),
+      );
+    },
+  );
+
+  it.each([null, "explicit/topic"])(
+    "preserves explicit branch %s over the project default",
+    async (branch) => {
+      testState.reset(draft, { envMode: "worktree", startFromOrigin: false });
+      testState.setDefaultBranch("release/remote");
+      await useNewThreadHandler()(
+        { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+        { branch, envMode: "worktree" },
+      );
+      const context = draft
+        ? testState.draftStore.setDraftThreadContext.mock.calls.at(-1)?.[1]
+        : testState.draftStore.setLogicalProjectDraftThreadId.mock.calls.at(-1)?.[3];
+      expect(context).toEqual(expect.objectContaining({ branch, envMode: "worktree" }));
+    },
+  );
+
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {
     testState.reset(draft);
     const openThread = useNewThreadHandler();

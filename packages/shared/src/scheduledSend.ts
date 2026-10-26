@@ -119,19 +119,6 @@ export function nextScheduledSendOccurrence(
   return null;
 }
 
-export function formatScheduledSendRepeatLabel(repeat: ScheduledSendRepeat): string {
-  switch (repeat) {
-    case "daily":
-      return "Repeats daily";
-    case "weekdays":
-      return "Repeats on weekdays";
-    case "weekly":
-      return "Repeats weekly";
-    case "monthly":
-      return "Repeats monthly";
-  }
-}
-
 /** Local-time label for a scheduled instant, e.g. "Sep 17, 2026, 9:00 AM". */
 export function formatScheduledSendLabel(scheduledFor: string): string {
   const date = new Date(scheduledFor);

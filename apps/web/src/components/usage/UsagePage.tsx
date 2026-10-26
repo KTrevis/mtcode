@@ -45,6 +45,7 @@ import { shortcutLabelForCommand } from "../../keybindings";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
+  ALL_USAGE_WINDOW_DAYS,
   enumerateDays,
   enumerateHourStarts,
   formatCount,
@@ -95,7 +96,7 @@ import {
 } from "./usageBreakdown";
 import {
   METRIC_OPTIONS,
-  WINDOW_OPTIONS,
+  WINDOW_OPTIONS as SHORTCUT_WINDOW_OPTIONS,
   resolveUsageShortcut,
   type UsageMetric,
 } from "./usageShortcuts";
@@ -109,6 +110,11 @@ import {
 function isUsageMetric(value: string | null | undefined): value is UsageMetric {
   return METRIC_OPTIONS.some((option) => option.value === value);
 }
+
+const WINDOW_OPTIONS = [
+  ...SHORTCUT_WINDOW_OPTIONS,
+  { days: ALL_USAGE_WINDOW_DAYS, label: "All" },
+] as const;
 
 function isUsageWindowDays(value: number): value is UsagePagePreferences["windowDays"] {
   return WINDOW_OPTIONS.some((option) => option.days === value);
@@ -179,6 +185,7 @@ export function UsagePage() {
   const shortcutTitle = (
     option: (typeof METRIC_OPTIONS)[number] | (typeof WINDOW_OPTIONS)[number],
   ) => {
+    if (!("command" in option)) return option.label;
     const shortcut = shortcutLabelForCommand(keybindings, option.command, {
       context: { usagePageOpen: true },
     });
@@ -280,7 +287,7 @@ export function UsagePage() {
 
     const command = resolveUsageShortcut(event, keybindings);
     const metricOption = METRIC_OPTIONS.find((option) => option.command === command);
-    const periodOption = WINDOW_OPTIONS.find((option) => option.command === command);
+    const periodOption = SHORTCUT_WINDOW_OPTIONS.find((option) => option.command === command);
     if (!metricOption && !periodOption) return;
 
     event.preventDefault();

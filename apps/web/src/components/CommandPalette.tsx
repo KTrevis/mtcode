@@ -1,3 +1,4 @@
+import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
 import { Columns3Icon } from "lucide-react";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -584,6 +585,7 @@ function OpenCommandPaletteDialog(props: {
       );
     }
   };
+  const { runGoalAction, showGoalStatus } = useThreadGoalActions();
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providersByEnvironment = useEnvironmentProviders();
@@ -1385,6 +1387,45 @@ function OpenCommandPaletteDialog(props: {
         openGuestShareDialog(threadRef);
       },
     });
+  }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:browse-plugins",
+    searchTerms: ["plugins", "apps", "skills", "mcp", "marketplace"],
+    title: "Browse plugins",
+    icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/plugins" });
+    },
+  });
+  if (activeThread?.goal) {
+    const thread = activeThread;
+    actionItems.push({
+      kind: "action",
+      value: "action:goal-status",
+      searchTerms: ["goal", "objective", "status"],
+      title: "Show Objective status",
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        showGoalStatus(thread.goal);
+      },
+    });
+    for (const action of ["pause", "resume", "clear"] as const) {
+      if (action === "pause" && thread.goal?.status !== "active") continue;
+      if (action === "resume" && thread.goal?.status !== "paused") continue;
+      actionItems.push({
+        kind: "action",
+        value: `action:goal-${action}`,
+        searchTerms: ["goal", "objective", action],
+        title: `${action === "clear" ? "Delete" : action === "pause" ? "Pause" : "Resume"} Objective`,
+        disabled: !readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope),
+        icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await runGoalAction({ environmentId: thread.environmentId, threadId: thread.id, action });
+        },
+      });
+    }
   }
 
   if (activeThread !== null) {

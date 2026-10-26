@@ -24,6 +24,11 @@ afterEach(() => {
 });
 
 describe("Usage page preferences", () => {
+  it("preserves the saved All usage window", () => {
+    values.set(key, '{"metric":"cost","windowDays":0}');
+    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 0 });
+  });
+
   it("round-trips hidden providers and reads older saves without them", () => {
     saveUsagePagePreferences({ metric: "cost", windowDays: 7, hiddenProviders: ["codex"] });
     expect(readUsagePagePreferences().hiddenProviders).toEqual(["codex"]);

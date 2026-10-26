@@ -3016,6 +3016,7 @@ export const make = Effect.gen(function* () {
         ,
         state,
         involvement,
+        upstream,
         filters,
         projectId,
         projectIds,
@@ -3027,6 +3028,7 @@ export const make = Effect.gen(function* () {
         number,
         string,
         string | null,
+        PullRequestListInput["upstream"] | null,
         ReadonlyArray<string | ReadonlyArray<string> | null> | null,
         string | null,
         ReadonlyArray<string> | null,
@@ -3038,6 +3040,7 @@ export const make = Effect.gen(function* () {
       return listUncached({
         state,
         ...(involvement === null ? {} : { involvement }),
+        ...(upstream === null ? {} : { upstream }),
         ...(filters === null ? {} : { filters: filtersOfKey(filters) }),
         ...(projectId === null ? {} : { projectId }),
         ...(projectIds === null ? {} : { projectIds }),

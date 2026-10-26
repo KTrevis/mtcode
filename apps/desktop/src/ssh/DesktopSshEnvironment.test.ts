@@ -85,7 +85,7 @@ describe("sshEnvironment", () => {
       assert.deepEqual(hosts, [
         {
           alias: "devbox",
-          hostname: "devbox",
+          hostname: "devbox.example.com",
           username: null,
           port: null,
           source: "ssh-config",
