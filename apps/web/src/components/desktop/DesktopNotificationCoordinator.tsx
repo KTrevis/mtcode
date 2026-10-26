@@ -35,7 +35,6 @@ import {
 } from "../../hooks/useSettings.ts";
 import { isElectron } from "../../env.ts";
 import {
-  setActiveEnvironmentId,
   useAuthoritativeShellEnvironmentIds,
   useConnectedShellEnvironmentIds,
   useProjects,
@@ -156,7 +155,6 @@ export function DesktopNotificationCoordinator() {
 
   const activateTarget = useStableCallback(
     (target: { readonly environmentId: EnvironmentId; readonly threadId: string }) => {
-      setActiveEnvironmentId(target.environmentId);
       void navigate({
         to: "/$environmentId/$threadId",
         params: target,

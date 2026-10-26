@@ -506,6 +506,7 @@ const sendGoalControl = Effect.fn("EnvironmentCommands.sendGoalControl")(functio
     messageId: input.messageId ?? MessageId.make(commandId),
     text,
     attachments: [],
+    deliveryIntent: "auto",
     dispatchMode: { type: "start_immediately" },
     createdBy: "user",
     creationSource: input.creationSource ?? "web",

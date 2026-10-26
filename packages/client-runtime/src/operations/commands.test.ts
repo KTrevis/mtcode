@@ -749,6 +749,11 @@ describe("V2 environment commands", () => {
           command.type === "message.dispatch" ? command.text : command.type,
         ),
       ).toEqual(["/goal Finish the port", "/goal pause", "/goal resume", "/goal clear"]);
+      expect(
+        commands.map((command) =>
+          command.type === "message.dispatch" ? command.deliveryIntent : undefined,
+        ),
+      ).toEqual(["auto", "auto", "auto", "auto"]);
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 
