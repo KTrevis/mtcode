@@ -94,7 +94,7 @@ const wakeupsLayer = Wakeups.layer({
         Effect.sync(() => {
           let backgroundedAtMs = mobileSuspensionStartedAtMs(
             null,
-            AppState.currentState,
+            AppState.currentState ?? "unknown",
             Date.now(),
           );
           return AppState.addEventListener("change", (state) => {

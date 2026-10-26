@@ -38,7 +38,7 @@ import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from "@t3tools/shared/projectScripts";
-import { Alert, AppState, Platform, ScrollView, View } from "react-native";
+import { Alert, AppState, type AppStateStatus, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
 import { useEnvironmentShellState } from "../../state/shell";
@@ -456,7 +456,9 @@ function ThreadRouteContent(
   const supportsVisitedTracking =
     serverConfig?.environment.capabilities.threadVisitedTracking === true;
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const [appState, setAppState] = useState(() => AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(
+    () => AppState.currentState ?? "unknown",
+  );
   useEffect(() => {
     const subscription = AppState.addEventListener("change", setAppState);
     return () => subscription.remove();
