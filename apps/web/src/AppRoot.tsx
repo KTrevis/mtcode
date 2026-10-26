@@ -5,7 +5,6 @@ import { subscribeComposerDraftModelReconciliation } from "./composerDraftStore"
 import { environmentThreadShells } from "./state/threads";
 import { environmentShell } from "./state/shell";
 
-import { BrowserProfileReporter } from "./browser/BrowserProfileReporter";
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
 import { ComputerTaskHosts } from "./components/computers/ComputerTaskHosts";
@@ -35,7 +34,6 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
         <ComputerTaskHosts />
         <PreviewAutomationHosts />
         <ElectronBrowserHost />
-        <BrowserProfileReporter />
         <QuitHoldOverlay />
       </VoiceSessionProvider>
     </AppAtomRegistryProvider>
